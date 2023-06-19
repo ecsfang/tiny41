@@ -6,7 +6,7 @@
 
 // Vertical bitmaps, A-Z, 0-9. Each is 8 pixels high and wide
 // Theses are defined vertically to make them quick to copy to FB
-
+#if 0
 static uint8_t font[] = {
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // Nothing
 0x1e, 0x28, 0x48, 0x88, 0x48, 0x28, 0x1e, 0x00,  //A
@@ -72,6 +72,9 @@ static uint16_t segment41[] = {
 static uint16_t font41col[] = {
 0x0001, 0x6006, 0x0000
 };
+#endif
+
+#include "font41.h"
 
 // standard ASCII 5x7 font
 
