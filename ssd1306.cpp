@@ -7,6 +7,11 @@
 #include "ssd1306.h"
 #include "ssd1306_font.h"
 
+// HP41 font bitmaps, char(0) - char(255).
+// Each character is 13 pixels high and 7 pixels wide
+// Theses are defined vertically to make them quick to copy to FB
+#include "font41.h"
+
 void calc_render_area_buflen(struct render_area *area) {
     // calculate how long the flattened buffer will be for a render area
     area->buflen = (area->end_col - area->start_col + 1) * (area->end_page - area->start_page + 1);
@@ -231,6 +236,11 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     }
 }
 
+// 7 columns of bitmap
+// 1 column spare
+// 1 column for colon and decimal point
+// 1 column for character space
+// --> 10 columns for 12 characters
 void Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
         return;
@@ -243,6 +253,7 @@ void Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
 
     int fb_idx = y * 128 + x;
 
+    // Character 0x2C, 0x2E and 0x3A should be treated differently ...
     for (int i=0;i<7;i++) {
         buf[fb_idx] = (reversed41[ch*7+i]) & 0xFF;
         buf[fb_idx+128] = (reversed41[ch*7+i]>>8) & 0xFF;
