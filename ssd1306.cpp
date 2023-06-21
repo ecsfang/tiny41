@@ -17,7 +17,7 @@ void calc_render_area_buflen(struct render_area *area) {
     area->buflen = (area->end_col - area->start_col + 1) * (area->end_page - area->start_page + 1);
 }
 
-#define i2c_default
+//#define i2c_default
 #ifdef i2c_default
 
 void SSD1306_send_cmd(uint8_t cmd) {
@@ -194,7 +194,7 @@ static inline int GetFontIndex(uint8_t ch) {
 }
 
 static uint8_t reversed[sizeof(font)] = {0};
-static uint16_t reversed41[sizeof(segment41)/sizeof(uint16_t)] = {0};
+static uint16_t reversed41[sizeof(font41)/sizeof(uint16_t)] = {0};
 
 static uint8_t reverse(uint8_t b) {
    b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
@@ -214,8 +214,8 @@ static void FillReversedCache() {
     // calculate and cache a reversed version of fhe font, because I defined it upside down...doh!
     for (int i=0;i<sizeof(font);i++)
         reversed[i] = reverse(font[i]);
-    for (int i=0;i<sizeof(segment41)/sizeof(uint16_t);i++)
-        reversed41[i] = reverse41(segment41[i]);
+    for (int i=0;i<sizeof(font41)/sizeof(uint16_t);i++)
+        reversed41[i] = reverse41(font41[i]);
 }
 
 static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
@@ -229,11 +229,12 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     y = y/8;
 
     ch = toupper(ch);
-    int idx = GetFontIndex(ch);
+    int idx = ch; //GetFontIndex(ch);
     int fb_idx = y * 128 + x;
 
-    for (int i=0;i<8;i++) {
-        buf[fb_idx++] = reversed[idx * 8 + i];
+    for (int i=0;i<5;i++) {
+        //buf[fb_idx++] = reversed[idx * 5 + i];
+        buf[fb_idx++] = font[idx * 5 + i];
     }
 }
 
@@ -242,7 +243,7 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
 // 1 column for colon and decimal point
 // 1 column for character space
 // --> 10 columns for 12 characters
-inline _write41char(uint8_t *buf, int p, uint16_t c) {
+inline void _write41char(uint8_t *buf, int p, uint16_t c) {
     buf[p]               = c & 0xFF;
     buf[p+SSD1306_WIDTH] = (c>>8) & 0xFF;
 }
@@ -277,7 +278,7 @@ void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str) {
 
     while (*str) {
         WriteChar(buf, x, y, *str++);
-        x+=8;
+        x+=6;
     }
 }
 
