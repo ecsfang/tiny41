@@ -23,6 +23,7 @@ void bus_init(void)
   gpio_set_dir(P_SYNC, GPIO_IN);
   gpio_init(P_ISA);
   gpio_set_dir(P_ISA, GPIO_IN);
+  gpio_pull_up(P_ISA);
   gpio_init(P_DATA);
   gpio_set_dir(P_DATA, GPIO_IN);
   gpio_init(P_VBAT);
