@@ -17,6 +17,7 @@ void calc_render_area_buflen(struct render_area *area) {
     area->buflen = (area->end_col - area->start_col + 1) * (area->end_page - area->start_page + 1);
 }
 
+#define i2c_default
 #ifdef i2c_default
 
 void SSD1306_send_cmd(uint8_t cmd) {
@@ -241,6 +242,11 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
 // 1 column for colon and decimal point
 // 1 column for character space
 // --> 10 columns for 12 characters
+inline _write41char(uint8_t *buf, int p, uint16_t c) {
+    buf[p]               = c & 0xFF;
+    buf[p+SSD1306_WIDTH] = (c>>8) & 0xFF;
+}
+
 void Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
         return;
@@ -251,13 +257,16 @@ void Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     // For the moment, only write on Y row boundaries (every 8 vertical pixels)
     y = y/8;
 
-    int fb_idx = y * 128 + x;
-
+    int fb_idx = y * SSD1306_WIDTH + x;
+    int cp = ch*FONT41_WIDTH;
+    int i=0;
     // Character 0x2C, 0x2E and 0x3A should be treated differently ...
-    for (int i=0;i<7;i++) {
-        buf[fb_idx] = (reversed41[ch*7+i]) & 0xFF;
-        buf[fb_idx+128] = (reversed41[ch*7+i]>>8) & 0xFF;
-        fb_idx++;
+    for (;i<FONT41_WIDTH;i++) {
+        _write41char(buf, fb_idx++, reversed41[cp++]);
+    }
+    // Clear last columns (should be used for punctation (.,:;))
+    for (;i<CHAR41_WIDTH;i++) {
+        _write41char(buf, fb_idx++, 0);
     }
 }
 
@@ -274,12 +283,12 @@ void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str) {
 
 void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str) {
     // Cull out any string off the screen
-    if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
+    if (x > SSD1306_WIDTH - CHAR41_WIDTH || y > SSD1306_HEIGHT - 2*8)
         return;
 
     while (*str) {
         Write41Char(buf, x, y, *str++);
-        x+=10;
+        x+=CHAR41_WIDTH;
     }
 }
 

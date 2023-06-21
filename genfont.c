@@ -327,11 +327,11 @@ uint16_t char41[256][BYTES_PER_CHAR];
 //  -----
 void printChar(int ch)
 {
-    printf("Char %d [%02X]\n", ch, ch);
+    //printf("Char %d [%02X]\n", ch, ch);
     switch( ch ) {
-    case 0x2C: printf("SPECIAL [.]\n"); break;
-    case 0x2E: printf("SPECIAL [,]\n"); break;
-    case 0x3A: printf("SPECIAL [:]\n"); break;
+    case 0x2C: printf("  // SPECIAL [.]\n"); break;
+    case 0x2E: printf("  // SPECIAL [,]\n"); break;
+    case 0x3A: printf("  // SPECIAL [:]\n"); break;
     }
     {
         char cc[7][7];
@@ -356,9 +356,11 @@ void printChar(int ch)
             case s13: cc[4][2] = cc[5][1] = '/'; break;
             }
         }
+        printf("  /********\n");
         for(int r=0; r<7; r++) {
-            printf("%-7.7s\n", cc[r]);
+            printf("  %-7.7s\n", cc[r]);
         }
+        printf("  ********/\n");
     }
 }
 
@@ -372,11 +374,17 @@ int main(int argv, char *argc[])
         printChar(c);
     }
 #else
+    printf("#define FONT41_WIDTH %d\n", 7);     // 7 pixels width
+    printf("#define CHAR41_WIDTH %d\n", 10);    // 10 pixels including :;
+    printf("#define FIRST_CHAR41 %d\n", 0);     // char(0) -->
+    printf("#define LAST_CHAR41  %d\n", (int)(NR_CHARS/7));    // char(x-1)
     printf("static uint16_t font41[%d] = {\n", (int)NR_CHARS);
     for(int c=0; c<NR_CHARS; c++) {
         if( (c & 0x0F) == 0 )
             printf("  // 0x%02X-0x%02X\n", c, c+0xF);
         int segs = seg41[c];
+        printChar(c);
+        printf("  ");
         for(int i=0; i<BYTES_PER_CHAR;i++) {
             uint16_t b = 0;
             for(int s=0; s<14; s++) {
@@ -384,8 +392,6 @@ int main(int argv, char *argc[])
                     b |= segment41[s][i];
             }
             char41[c][i] = b;
-            if( i == 0 )
-                printf("  ");
             printf("0x%04X%c ", b, c<(NR_CHARS-1) && i<(BYTES_PER_CHAR)?',':' ');
         }
         printf("// %d\n", c);
