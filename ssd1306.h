@@ -89,5 +89,5 @@ void SSD1306_scroll(bool on);
 void render(uint8_t *buf, struct render_area *area);
 #endif
 void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str);
-void Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch);
-void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str);
+int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp);
+void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp);

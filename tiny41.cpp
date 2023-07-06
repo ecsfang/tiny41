@@ -9,9 +9,14 @@ const uint LED_PIN = TINY2040_LED_B_PIN;
 
 
 extern void core1_main_3(void);
+extern void process_bus(void);
+extern void capture_bus_transactions(void);
+
 extern volatile int sync_count;
 extern volatile int embed_seen;
 
+extern volatile int data_in;
+extern volatile int data_out;
 
 void bus_init(void)
 {
@@ -23,21 +28,49 @@ void bus_init(void)
   gpio_set_dir(P_SYNC, GPIO_IN);
   gpio_init(P_ISA);
   gpio_set_dir(P_ISA, GPIO_IN);
-  gpio_pull_up(P_ISA);
+  gpio_pull_down(P_ISA);
   gpio_init(P_DATA);
   gpio_set_dir(P_DATA, GPIO_IN);
   gpio_init(P_VBAT);
   gpio_set_dir(P_VBAT, GPIO_IN);
 }
 
+uint8_t buf[SSD1306_BUF_LEN];
 
 int main()
 {
-    stdio_init_all();
+#if 1
+  ////////////////////////////////////////////////////////////////////////////////
+  //
+  // Overclock as needed
+  //
+  ////////////////////////////////////////////////////////////////////////////////
+  
+  //#define OVERCLOCK 135000
+  //#define OVERCLOCK 200000
+#define OVERCLOCK 270000
+  //#define OVERCLOCK 360000
+  
+#if OVERCLOCK > 270000
+  /* Above this speed needs increased voltage */
+  vreg_set_voltage(VREG_VOLTAGE_1_20);
+  sleep_ms(1000);
+#endif
+  
+  /* Overclock */
+  set_sys_clock_khz( OVERCLOCK, 1 );
+#endif
 
+  stdio_init_all();
+
+  sleep_ms(2000);
+
+  printf("\n*************");
+  printf("\n*  Tiny 41  *");
+  printf("\n*************");
+  printf("\n");
+  
     bus_init();
-
-    printf("Hello, SSD1306 OLED display! Look at my raspberries..\n");
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
@@ -66,7 +99,6 @@ int main()
     calc_render_area_buflen(&frame_area);
 
     // zero the entire display
-    uint8_t buf[SSD1306_BUF_LEN];
     memset(buf, 0, SSD1306_BUF_LEN);
     render(buf, &frame_area);
 /*
@@ -78,23 +110,35 @@ int main()
         sleep_ms(500);
     }
 */
-    const char *text[] = {
-        "HELLO WORLD\x01",
-        "3.1415926539"
+    char *text[] = {
+        (char*)" \x2c Tiny41 \x2e",
+        (char*)"\x5e 3.1416"
     };
-    for( int x=0; x<12; x++) {
+    bool bp[12];
+    memset(bp, 0, 12);
+
+    Write41String(buf, 5, 0, text[0], bp);
+    bp[1] = true;
+    Write41String(buf, 5, 16, text[1], bp);
+/*    for( int x=0; x<12; x++) {
         Write41Char(buf, 5+x*10, 0, (char)text[0][x]);
         //Write41Char(buf, 5+x*10, 16, (char)x+48);
-    }
+    }*/
+
     render(buf, &frame_area);
 
     int z=0;
     char sBuf[16];
     while (1) {
-        gpio_put(LED_PIN, 0);
+        //capture_bus_transactions();
+        process_bus();
+        // Update the USB CLI
+        //serial_loop();
+        
+/*        gpio_put(LED_PIN, 0);
         sleep_ms(250);
         gpio_put(LED_PIN, 1);
-        //printf("Hello HP41!\n");
+//        printf("Hello HP41!\n");
         sleep_ms(250);
         for( int x=0; x<12; x++) {
             //Write41Char(buf, 5+x*10, 0, (char)x+z);
@@ -105,11 +149,20 @@ int main()
             else
                 Write41Char(buf, 5+x*10, 16, (char)49);
         }
+        */
         sprintf(sBuf, "S:%d E:%d", sync_count, embed_seen);
-        WriteString(buf, 5, 32, sBuf);
+        //printf("%s\n", sBuf);
+        WriteString(buf, 5, 40, sBuf);
+        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
+        WriteString(buf, 5, 48, sBuf);
         render(buf, &frame_area);
         z++;
         if( z > 127 )
             z = 0;
     }
+}
+
+void UpdateLCD(char *txt, bool *bp)
+{
+    Write41String(buf, 5, 16, txt, bp);
 }

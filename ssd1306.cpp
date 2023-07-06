@@ -18,7 +18,7 @@ void calc_render_area_buflen(struct render_area *area) {
 }
 
 //#define i2c_default
-#ifdef i2c_default
+//#ifdef i2c_default
 
 void SSD1306_send_cmd(uint8_t cmd) {
     // I2C write process expects a control byte followed by data
@@ -248,26 +248,39 @@ inline void _write41char(uint8_t *buf, int p, uint16_t c) {
     buf[p+SSD1306_WIDTH] = (c>>8) & 0xFF;
 }
 
-void Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
+int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp) {
     if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
-        return;
-
-    if (reversed41[0] == 0) 
-        FillReversedCache();
+        return 0;
 
     // For the moment, only write on Y row boundaries (every 8 vertical pixels)
     y = y/8;
 
-    int fb_idx = y * SSD1306_WIDTH + x;
-    int cp = ch*FONT41_WIDTH;
-    int i=0;
-    // Character 0x2C, 0x2E and 0x3A should be treated differently ...
-    for (;i<FONT41_WIDTH;i++) {
-        _write41char(buf, fb_idx++, reversed41[cp++]);
-    }
-    // Clear last columns (should be used for punctation (.,:;))
-    for (;i<CHAR41_WIDTH;i++) {
-        _write41char(buf, fb_idx++, 0);
+    if( bp && (ch == 0x2c || ch == 0x2e || ch == 0x3A) ) {
+        int fb_idx = y * SSD1306_WIDTH + x - 3;
+        int cp = 0;
+        if( ch == 0x2e )
+            cp = 3;
+        else if( ch == 0x3a )
+            cp = 6;
+        int i=0;
+        for (;i<3;i++) {
+            _write41char(buf, fb_idx++, punct41[cp++]);
+        }
+        return 0;
+    } else {
+        int fb_idx = y * SSD1306_WIDTH + x;
+        int cp = ch*FONT41_WIDTH;
+        int i=0;
+        // Character 0x2C, 0x2E and 0x3A should be treated differently ...
+        for (;i<FONT41_WIDTH;i++) {
+            _write41char(buf, fb_idx++, font41[cp++]);
+        }
+
+        // Clear last columns (should be used for punctation (.,:;))
+        for (;i<CHAR41_WIDTH;i++) {
+            _write41char(buf, fb_idx++, 0);
+        }
+        return CHAR41_WIDTH;
     }
 }
 
@@ -282,16 +295,15 @@ void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str) {
     }
 }
 
-void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str) {
+void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
     // Cull out any string off the screen
     if (x > SSD1306_WIDTH - CHAR41_WIDTH || y > SSD1306_HEIGHT - 2*8)
         return;
 
     while (*str) {
-        Write41Char(buf, x, y, *str++);
-        x+=CHAR41_WIDTH;
+        x += Write41Char(buf, x, y, *str++, *pbp++);
     }
 }
 
 
-#endif
+//#endif
