@@ -5,6 +5,20 @@
 
 typedef unsigned short uint16_t;
 
+// Pixel information about each segment in the character
+// Note that generated bitmap is upside down to easier be written to the OLED
+/********
+   ---0---
+  |\  8  /|
+  5 10|11 1
+  |  \|/  |
+  |-6- -7-|
+  |  /|\  |
+  4 13|12 2
+  |/  9  \|
+   ---3--- 
+  ********/
+  
 static uint16_t segment41[14][BYTES_PER_CHAR] = {
 0x0000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x0000,     // 0
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x7e00,     // 1
@@ -19,10 +33,16 @@ static uint16_t segment41[14][BYTES_PER_CHAR] = {
 0x0000, 0x6000, 0x1800, 0x0400, 0x0000, 0x0000, 0x0000,     // 10
 0x0000, 0x0000, 0x0000, 0x0400, 0x1800, 0x6000, 0x0000,     // 11
 0x0000, 0x0000, 0x0000, 0x0100, 0x00C0, 0x0030, 0x0000,     // 12
-0x0000, 0x0030, 0x00C0, 0x0100, 0x0000, 0x0000, 0x0000,     // 13
-//0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000      // 14
+0x0000, 0x0030, 0x00C0, 0x0100, 0x0000, 0x0000, 0x0000      // 13
 };
 
+// Bitmap information about the punctation characters
+// Already upside down
+static uint16_t punct41[3*3] = {
+  0x6000, 0x3000, 0x0000, // ,
+  0x0000, 0x3000, 0x0000, // .
+  0x0000, 0x3018, 0x0000  // :
+};
 
 #define s0  (1 << 0)
 #define s1  (1 << 1)
@@ -42,20 +62,20 @@ static uint16_t segment41[14][BYTES_PER_CHAR] = {
 
 uint16_t seg41[] = {
     // 0x00-0x0F
-    s0,
-    s0|s8|s6|s7|s13|s12,
+    s0,                         // Upper bar
+    s0|s8|s6|s7|s13|s12,        // Full man
     star,
     star,
-    s0|s8|s13|s12,
-    s0|s8|s6|s13|s12,
-    s0|s8|s13,
+    s0|s8|s13|s12,              // No arms
+    s0|s8|s6|s13|s12,           // One arm
+    s0|s8|s13,                  // One leg
     star,
     star,
     star,
     star,
     star,
-    s1|s8|s7|s13,
-    s11|s13|s9|s3,
+    s1|s8|s7|s13,               // Mu
+    s11|s13|s9|s3,              // Angle
     star,
     star,
     // 0x10-0x1F
@@ -72,26 +92,26 @@ uint16_t seg41[] = {
     star,
     star,
     star,
-    s11|s13|s6|s7|s3,
+    s11|s13|s6|s7|s3,           // Not equal
     star,
     star,
     // 0x20-0x2F
-    0,
-    s8|s9,
-    s5|s8,
-    s8|s9|s1|s2|s6|s7|s3,
-    s0|s5|s6|s7|s2|s3|s8|s9,
-    s10|s13|s5|s6|s11|s7|s2|s12, // %
-    s0|s10|s11|s13|s12|s3|s2,
-    s8,
-    s11|s12,
-    s10|s13,
-    s10|s11|s12|s13|s6|s7|s8|s9,
-    s6|s7|s8|s9,
+    0,                          // Space
+    s8|s9,                      // |
+    s5|s8,                      // "
+    s8|s9|s1|s2|s6|s7|s3,       // #
+    s0|s5|s6|s7|s2|s3|s8|s9,    // $
+    s10|s13|s5|s6|s11|s7|s2|s12,// %
+    s0|s10|s11|s13|s12|s3|s2,   // &
+    s8,                         // '
+    s11|s12,                    // (
+    s10|s13,                    // )
+    s10|s11|s12|s13|s6|s7|s8|s9,// *
+    s6|s7|s8|s9,                // +
     s6|s7|s11|s12,              // SPECIAL: .
-    s6|s7,
+    s6|s7,                      // -
     s6|s7|s10|s13,              // SPECIAL: ,
-    s11|s13,
+    s11|s13,                    // /
     // 0x30-0x3F
     s0|s1|s2|s3|s4|s5|s11|s13,  // 0
     s1|s2,                      // 1
@@ -161,22 +181,22 @@ uint16_t seg41[] = {
     s2|s4|s6|s7,                // n
     s2|s3|s4|s6|s7,             // o
     // 0x70-0x7F
-    s4|s5|s6|s10,
-    s5|s6|s10|s12,
-    s4|s6|s7,
-    s3|s7|s12,
-    s6|s7|s8|s12,
-    s2|s3|s4,
-    s4|s13,
-    s2|s4|s12|s13,
-    s6|s7|s9|s13,
-    s2|s3|s12,
-    s3|s6|s13,
+    s4|s5|s6|s10,               // p
+    s5|s6|s10|s12,              // q
+    s4|s6|s7,                   // r
+    s3|s7|s12,                  // s
+    s6|s7|s8|s12,               // t
+    s2|s3|s4,                   // u
+    s4|s13,                     // v
+    s2|s4|s12|s13,              // w
+    s6|s7|s9|s13,               // x
+    s2|s3|s12,                  // y
+    s3|s6|s13,                  // z
     star,
     star,
     star,
-    s0|s3|s10|s13,          // Sigma
-    s4|s5|s6|s7,            // Append
+    s0|s3|s10|s13,              // Sigma
+    s4|s5|s6|s7,                // Append
     // 0x80-0x8F
     s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
     s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
@@ -364,13 +384,21 @@ void printChar(int ch)
     }
 }
 
+uint16_t reverse(uint16_t b) {
+    uint16_t r = 0;
+    for(int i=0; i<16; i++) {
+        if( b & (1<<(15-i)))
+            r |= 1<<i;
+    }
+   return r;
+}
+
 //#define TEST
 int main(int argv, char *argc[])
 {
 #ifdef TEST
     int row = 3;
-    //for(int c=0x10*row; c<0x10*(row+1); c++) {
-    for(int c=0; c<0x100; c++) {
+    for(int c=0; c<NR_CHARS; c++) {
         printChar(c);
     }
 #else
@@ -391,6 +419,8 @@ int main(int argv, char *argc[])
                 if( segs & (1<<s) )
                     b |= segment41[s][i];
             }
+            // Turn bimap upside down
+            b = reverse(b);
             char41[c][i] = b;
             printf("0x%04X%c ", b, c==(NR_CHARS-1) && i==(BYTES_PER_CHAR-1)?' ':',');
         }
@@ -398,5 +428,14 @@ int main(int argv, char *argc[])
     }
     printf("};\n");
 #endif
+    printf("static uint16_t punct41[%d] = {\n", 3*3);
+    for(int c=0; c<3; c++) {
+        printf("  ");
+        for(int i=0; i<3;i++) {
+            printf("0x%04X%c ", punct41[c*3+i], c==2 && i==2?' ':',');
+        }
+        printf(" // %c\n", ",.:"[c]);
+    }
+    printf("};\n");
     return 0;
 }
