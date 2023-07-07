@@ -198,141 +198,141 @@ uint16_t seg41[] = {
     s0|s3|s10|s13,              // Sigma
     s4|s5|s6|s7,                // Append
     // 0x80-0x8F
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s4|s5|s6|s7,                // Append
+    s2|s3|s4|s6|s12,            // a
+    s2|s3|s4|s5|s6|s7,          // b
+    s3|s4|s6|s7,                // c
+    s1|s2|s3|s4|s6|s7,          // d
+    s3|s4|s6|s13,               // e
+    s0,                         // Head
+    s0|s8,                      // Head and neck
+    s0|s8|s13,                  // One leg
+    s0|s8|s12|s13,              // Two legs
+    s0|s6|s8|s12|s13,           // One arm
+    s0|s6|s7|s8|s12|s13,        // Full body
+    s1|s8|s7|s13,               // Mu
+    s11|s13|s6|s7|s3,           // Not equal
+    s0|s3|s10|s13,              // Sigma
+    s11|s13|s9|s3,              // Angle
     // 0x90-0x9F
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s6|s7|s12|s13,              // Pi?
+    s3|s12|s13,                 // delta
+    s0|s3|s7|s11|s12|s13,       // ?
+    s6|s7|s9,                   // small T
+    s5|s6|s7|s9|s12,            // l/x?
+    s4|s6|s7|s13,               // small sigma
+    s0,                         // Head
+    s0|s1|s4|s5,                // "Galge"
+    s0|s8|s13,                  // One leg
+    s0|s8|s12|s13,              // Two legs
+    s0|s6|s8|s12|s13,           // One arm
+    s0|s6|s7|s8|s12|s13,        // Full body
+    s1|s8|s7|s13,               // Mu
+    s11|s13|s6|s7|s3,           // Not equal
+    s0|s3|s10|s13,              // Sigma
+    s11|s13|s9|s3,              // Angle
     // 0xA0-0xAF
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s0|s8,                      // Little T
+    s2|s3|s4|s6|s12,            // a
+    s2|s3|s4|s5|s6|s7,          // b
+    s3|s4|s6|s7,                // c
+    s1|s2|s3|s4|s6|s7,          // d
+    s3|s4|s6|s13,               // e
+    s7|s9|s11,                  // f
+    s7|s2|s3|s12,               // g
+    s2|s4|s5|s6|s7,             // h
+    s9,                         // i
+    s2|s3,                      // j
+    s4|s5|s6|s7|s12,            // k
+    s4|s5,                      // l
+    s2|s4|s6|s7|s9,             // m
+    s2|s4|s6|s7,                // n
+    s2|s3|s4|s6|s7,             // o
     // 0xB0-0xBF
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s4|s5|s6|s10,               // p
+    s5|s6|s10|s12,              // q
+    s4|s6|s7,                   // r
+    s3|s7|s12,                  // s
+    s6|s7|s8|s12,               // t
+    s2|s3|s4,                   // u
+    s4|s13,                     // v
+    s2|s4|s12|s13,              // w
+    s6|s7|s9|s13,               // x
+    s2|s3|s12,                  // y
+    s3|s6|s13,                  // z
+    s7|s11|s12,                 // (-
+    s3|s11|s12|s13,             // delta?
+    s6|s10|s13,                 // -)
+    s0|s3|s10|s13,              // Sigma
+    s4|s5|s6|s7,                // Append
     // 0xC0-0xCF
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s4|s5|s6|s7,                // Append
+    s2|s3|s4|s6|s12,            // a
+    s2|s3|s4|s5|s6|s7,          // b
+    s3|s4|s6|s7,                // c
+    s1|s2|s3|s4|s6|s7,          // d
+    s3|s4|s6|s13,               // e
+    s0,                         // Head
+    s0|s8,                      // Head and neck
+    s0|s8|s13,                  // One leg
+    s0|s8|s12|s13,              // Two legs
+    s0|s6|s8|s12|s13,           // One arm
+    s0|s6|s7|s8|s12|s13,        // Full body
+    s1|s8|s7|s13,               // Mu
+    s11|s13|s6|s7|s3,           // Not equal
+    s0|s3|s10|s13,              // Sigma
+    s11|s13|s9|s3,              // Angle
     // 0xD0-0xDF
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s6|s7|s12|13,               // Pi?
+    s3|s12|s13,                 // delta
+    s0|s3|s7|s11|s12|s13,       // ?
+    s6|s7|s9,                   // small T
+    s5|s6|s7|s9|s12,            // l/x?
+    s4|s6|s7|s13,               // small sigma
+    s0,                         // Head
+    s0|s1|s4|s5,                // "Galge"
+    s0|s8|s13,                  // One leg
+    s0|s8|s12|s13,              // Two legs
+    s0|s6|s8|s12|s13,           // One arm
+    s0|s6|s7|s8|s12|s13,        // Full body
+    s1|s8|s7|s13,               // Mu
+    s11|s13|s6|s7|s3,           // Not equal
+    s0|s3|s10|s13,              // Sigma
+    s11|s13|s9|s3,              // Angle
     // 0xE0-0xEF
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // F
+    s0|s8,                      // Little T
+    s2|s3|s4|s6|s12,            // a
+    s2|s3|s4|s5|s6|s7,          // b
+    s3|s4|s6|s7,                // c
+    s1|s2|s3|s4|s6|s7,          // d
+    s3|s4|s6|s13,               // e
+    s7|s9|s11,                  // f
+    s7|s2|s3|s12,               // g
+    s2|s4|s5|s6|s7,             // h
+    s9,                         // i
+    s2|s3,                      // j
+    s4|s5|s6|s7|s12,            // k
+    s4|s5,                      // l
+    s2|s4|s6|s7|s9,             // m
+    s2|s4|s6|s7,                // n
+    s2|s3|s4|s6|s7,             // o
     // 0xF0-0xFF
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 0
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 1
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 2
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 3
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 4
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 5
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 6
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 7
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 8
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // 9
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // A
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // B
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // C
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // D
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13,    // E
-    s0|s1|s2|s3|s4|s5|s6|s7|s8|s9|s10|s11|s12|s13     // F
+    s4|s5|s6|s10,               // p
+    s5|s6|s10|s12,              // q
+    s4|s6|s7,                   // r
+    s3|s7|s12,                  // s
+    s6|s7|s8|s12,               // t
+    s2|s3|s4,                   // u
+    s4|s13,                     // v
+    s2|s4|s12|s13,              // w
+    s6|s7|s9|s13,               // x
+    s2|s3|s12,                  // y
+    s3|s6|s13,                  // z
+    s7|s11|s12,                 // (-
+    s3|s11|s12|s13,             // delta?
+    s6|s10|s13,                 // -)
+    s0|s3|s10|s13,              // Sigma
+    s4|s5|s6|s7                 // Append
 };
 #define NR_CHARS (sizeof(seg41)/sizeof(uint16_t))
 
@@ -347,7 +347,6 @@ uint16_t char41[256][BYTES_PER_CHAR];
 //  -----
 void printChar(int ch)
 {
-    //printf("Char %d [%02X]\n", ch, ch);
     switch( ch ) {
     case 0x2C: printf("  // SPECIAL [.]\n"); break;
     case 0x2E: printf("  // SPECIAL [,]\n"); break;
@@ -360,12 +359,13 @@ void printChar(int ch)
 
         for(int s=0; s<14;s++) {
             switch(c41&(1<<s)) {
+            // Fill each segment ...
             case s0: sprintf(cc[0], " -----"); break;
-            case s1: cc[1][6] = cc[2][6] = cc[3][6] = '|'; break;
-            case s2: cc[3][6] = cc[4][6] = cc[5][6] = '|'; break;
+            case s1: cc[1][6] = cc[2][6] = '|'; break;
+            case s2: cc[4][6] = cc[5][6] = '|'; break;
             case s3: sprintf(cc[6], " -----"); break;
-            case s4: cc[3][0] = cc[4][0] = cc[5][0] = '|'; break;
-            case s5: cc[1][0] = cc[2][0] = cc[3][0] = '|'; break;
+            case s4: cc[4][0] = cc[5][0] = '|'; break;
+            case s5: cc[1][0] = cc[2][0] = '|'; break;
             case s6: cc[3][1] = cc[3][2] = '-'; break;
             case s7: cc[3][4] = cc[3][5] = '-'; break;
             case s8: cc[1][3] = cc[2][3] = '|'; break;
@@ -376,11 +376,9 @@ void printChar(int ch)
             case s13: cc[4][2] = cc[5][1] = '/'; break;
             }
         }
-        printf("  /********\n");
         for(int r=0; r<7; r++) {
-            printf("  %-7.7s\n", cc[r]);
+            printf("  //  %-7.7s\n", cc[r]);
         }
-        printf("  ********/\n");
     }
 }
 
@@ -406,10 +404,10 @@ int main(int argv, char *argc[])
     printf("#define CHAR41_WIDTH %d\n", 10);    // 10 pixels including :;
     printf("#define FIRST_CHAR41 %d\n", 0);     // char(0) -->
     printf("#define LAST_CHAR41  %d\n", (int)(NR_CHARS/7));    // char(x-1)
-    printf("static uint16_t font41[%d] = {\n", (int)NR_CHARS*7);
+    printf("static uint16_t font41[%d] = {", (int)NR_CHARS*7);
     for(int c=0; c<NR_CHARS; c++) {
         if( (c & 0x0F) == 0 )
-            printf("  // 0x%02X-0x%02X\n", c, c+0xF);
+            printf("\n  // ***** 0x%02X-0x%02X\n\n", c, c+0xF);
         int segs = seg41[c];
         printChar(c);
         printf("  ");
@@ -424,7 +422,7 @@ int main(int argv, char *argc[])
             char41[c][i] = b;
             printf("0x%04X%c ", b, c==(NR_CHARS-1) && i==(BYTES_PER_CHAR-1)?' ':',');
         }
-        printf("// %d\n", c);
+        printf("// 0x%02X (%d)\n", c, c);
     }
     printf("};\n");
 #endif
