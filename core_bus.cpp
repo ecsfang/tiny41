@@ -12,7 +12,7 @@
 #define CF_DUMP_DBG_DREGS  1
 #define CF_DISPLAY_LCD     1
 #define CF_DISPLAY_OLED    0
-#define CF_DBG_DISP_ON     0
+#define CF_DBG_DISP_ON     1
 #define CF_DBG_SLCT        0
 #define CF_DBG_DISP_INST   1
 #define CF_USE_DISP_ON     1
@@ -350,7 +350,7 @@ void dump_dregs(void)
 	// If the display is off, we don't up date anything
 	if (!display_on)
 	{
-		return;
+		//return;
 	}
 
 	dreg_a &= MASK_48_BIT;
@@ -479,7 +479,10 @@ void dump_dregs(void)
 #if CF_DISPLAY_LCD
 	printf("\n[%s]", dtext);
 	extern void UpdateLCD(char *, bool *);
-	UpdateLCD(dtext, bPunct);
+	if (display_on)
+	{
+		UpdateLCD(dtext, bPunct);
+	}
 #endif
 
 	while (strlen(dtext) < 15)
@@ -504,9 +507,9 @@ uint64_t y;
 #define SHIFT_L	0
 void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *inst)
 {
-	uint64_t *ra = (bReg | REG_A) ? &dreg_a : NULL;
-	uint64_t *rb = (bReg | REG_B) ? &dreg_b : NULL;
-	uint64_t *rc = (bReg | REG_C) ? &dreg_c : NULL;
+	uint64_t *ra = (bReg & REG_A) ? &dreg_a : NULL;
+	uint64_t *rb = (bReg & REG_B) ? &dreg_b : NULL;
+	uint64_t *rc = (bReg & REG_C) ? &dreg_c : NULL;
 
 #if CF_DBG_DISP_INST
 	printf("\n%s %016llX", inst, data);
@@ -521,9 +524,9 @@ void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *in
 		for(int i=0; i<n; i++) {
 			uint16_t ch9 = CH9(data);
 			if( bShift ) {
-				if( ra ) *ra = (*ra>>4) | (CH9_B03(ch9) << 44);
-				if( rb ) *rb = (*rb>>4) | (CH9_B47(ch9) << 44);
-				if( rc ) *rc = (*rc>>4) | (CH9_B8(ch9)  << 44);
+				if( ra ) *ra = (*ra>>4) | (((uint64_t)CH9_B03(ch9)) << 44);
+				if( rb ) *rb = (*rb>>4) | (((uint64_t)CH9_B47(ch9)) << 44);
+				if( rc ) *rc = (*rc>>4) | (((uint64_t)CH9_B8(ch9))  << 44);
 			} else {
 				if( ra ) *ra = (*ra<<4) | (CH9_B03(ch9));
 				if( rb ) *rb = (*rb<<4) | (CH9_B47(ch9));
@@ -558,6 +561,57 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 			else
 			{
 				display_ce = 0;
+			}
+			break;
+		case INST_WRITE_ANNUNCIATORS:
+#if CF_DBG_DISP_INST
+			printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
+#endif
+    		{
+				char sBuf[64];
+				extern void UpdateAnnun(char *ann);
+				memset(sBuf,' ', 32);
+				if( data56 & 1<<11 ) {
+					sBuf[0] = 'B';
+				}
+				if( data56 & 1<<10 ) {
+					sBuf[2] = 'U';
+					sBuf[3] = 'S';
+				}
+				if( data56 & 1<<9 ) {
+					sBuf[5] = 'G';
+				}
+				if( data56 & 1<<8 ) {
+					sBuf[6] = 'R';
+				}
+				if( data56 & 1<<7 ) {
+					sBuf[8] = 'S';
+					sBuf[9] = 'H';
+				}
+				if( data56 & 1<<6 ) {
+					sBuf[11] = '0';
+				}
+				if( data56 & 1<<5 ) {
+					sBuf[12] = '1';
+				}
+				if( data56 & 1<<4 ) {
+					sBuf[13] = '2';
+				}
+				if( data56 & 1<<3 ) {
+					sBuf[14] = '3';
+				}
+				if( data56 & 1<<2 ) {
+					sBuf[15] = '4';
+				}
+				if( data56 & 1<<1 ) {
+					sBuf[17] = 'P';
+				}
+				if( data56 & 1<<0 ) {
+					sBuf[19] = 'A';
+					sBuf[20] = 'L';
+				}
+				sBuf[21] = 0;
+    			UpdateAnnun(sBuf);
 			}
 			break;
 
@@ -655,6 +709,14 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 	{
 		switch (inst)
 		{
+		case INST_WRITE_ANNUNCIATORS:
+#if CF_DBG_DISP_INST
+			printf("\nWRTEN (annun)");
+#endif
+			pending_data = 1;
+			pending_data_inst = INST_WRITE_ANNUNCIATORS;
+			break;
+
 		case INST_SRLDAB:
 #if CF_DBG_DISP_INST
 			printf("\nSRLDAB");
@@ -693,9 +755,9 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 			pending_data_inst = INST_SRLDC;
 			break;
 
-		case INST_SLLDABC:
+		case INST_SLLABC:
 #if CF_DBG_DISP_INST
-			printf("\nSLLDABC");
+			printf("\nSLLABC");
 #endif
 			break;
 
@@ -741,20 +803,20 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 #endif
 			break;
 
-		case INST_SRSDABC:
+		case INST_SRSABC:
 #if CF_DBG_DISP_INST
-			printf("\nSRSDABC data56:%08llX", data56);
+			printf("\nSRSABC data56:%08llX", data56);
 #endif
 			pending_data = 1;
-			pending_data_inst = INST_SRSDABC;
+			pending_data_inst = INST_SRSABC;
 			break;
 
-		case INST_SLSDABC:
+		case INST_SLSABC:
 #if CF_DBG_DISP_INST
-			printf("\nSLSDABC");
+			printf("\nSLSABC");
 #endif
 			pending_data = 1;
-			pending_data_inst = INST_SLSDABC;
+			pending_data_inst = INST_SLSABC;
 			break;
 
 		case INST_FLLDA:
@@ -773,6 +835,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 #if CF_DBG_DISP_INST
 			printf("\nFLLDC:");
 #endif
+			dump_dregs();
 			break;
 
 		case INST_FLLDAB:
@@ -838,6 +901,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 #endif
 			ROTATE_RIGHT(dreg_a);
 			ROTATE_RIGHT(dreg_b);
+			ROTATE_RIGHT(dreg_c);
 			dump_dregs();
 			break;
 
@@ -847,6 +911,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 #endif
 			ROTATE_LEFT(dreg_a);
 			ROTATE_LEFT(dreg_b);
+			ROTATE_LEFT(dreg_c);
 			dump_dregs();
 			break;
 		}

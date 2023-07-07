@@ -125,10 +125,13 @@ int main()
         //Write41Char(buf, 5+x*10, 16, (char)x+48);
     }*/
 
+    char sBuf[64];
+    sprintf(sBuf, "B US GR SH 0123 PG AL");
+    WriteString(buf, 0, 32, sBuf);
+
     render(buf, &frame_area);
 
     int z=0;
-    char sBuf[16];
     while (1) {
         //capture_bus_transactions();
         process_bus();
@@ -152,9 +155,9 @@ int main()
         */
         sprintf(sBuf, "S:%d E:%d", sync_count, embed_seen);
         //printf("%s\n", sBuf);
-        WriteString(buf, 5, 40, sBuf);
-        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
         WriteString(buf, 5, 48, sBuf);
+        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
+        WriteString(buf, 5, 56, sBuf);
         render(buf, &frame_area);
         z++;
         if( z > 127 )
@@ -165,4 +168,8 @@ int main()
 void UpdateLCD(char *txt, bool *bp)
 {
     Write41String(buf, 5, 16, txt, bp);
+}
+void UpdateAnnun(char *ann)
+{
+    WriteString(buf, 0, 32, ann);
 }

@@ -15,13 +15,13 @@
 #define INST_C_PFAD                    01760
 #define INST_WRITE_ANNUNCIATORS        01360
 #define INST_READ_ANNUNCIATORS         00570
-#define INST_SRLAD                     00050
+#define INST_SRLDA                     00050
 #define INST_SRLDB                     00150
 #define INST_SRLDC                     00250
 #define INST_SRLDAB                    00350
-#define INST_SRLDABC                   00450
+#define INST_SRLABC                    00450
 #define INST_SLLDAB                    00550
-#define INST_SLLDABC                   00650
+#define INST_SLLABC                    00650
 #define INST_SRSDA                     00750
 #define INST_SRSDB                     01050
 #define INST_SRSDC                     01150
@@ -29,8 +29,8 @@
 #define INST_SLSDB                     01350
 #define INST_SRSDAB                    01450
 #define INST_SLSDAB                    01550
-#define INST_SRSDABC                   01650
-#define INST_SLSDABC                   01750
+#define INST_SRSABC                    01650
+#define INST_SLSABC                    01750
 #define INST_PRPH_SLCT                 01760
 #define INST_RAM_SLCT                  01160
 
