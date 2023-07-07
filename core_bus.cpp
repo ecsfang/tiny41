@@ -18,6 +18,11 @@
 #define CF_USE_DISP_ON     1
 #define CF_DBG_KEY         1
 
+#define	CH9(c) 			(c&0x1FF)
+#define	CH9_B03(c) 	((c&0x00F)>>0)	// Bit 0-3
+#define	CH9_B47(c) 	((c&0x0F0)>>4)	// Bit 4-7
+#define	CH9_B8(c) 	((c&0x100)>>8)	// Bit 9
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // Core 1 sits in a loop grabbing bus cycles
@@ -331,11 +336,6 @@ int every_4th_bit(uint64_t data, int n)
 // various things with that.
 //
 
-
-unsigned char upperChars[64] = {
-	7f 61 62 63 64 65 00 60 06 04 05 01 0c 1d 7e 0d
-	 
-}
 int pending_data = 0;
 int pending_data_inst = 0;
 
@@ -380,7 +380,6 @@ void dump_dregs(void)
 
 		cc |= (((m << b) & dreg_a) >> b) << 0;
 		cc |= (((m << b) & dreg_b) >> b) << 4;
-//		u = ((1 << b1) & dreg_c) >> b1;
 		u = (dreg_c >> b) & 1;
 
 		cl = cc & 0xc0;
@@ -389,31 +388,19 @@ void dump_dregs(void)
 
 		bPunct[j] = false;
 
-		if ( (cc >= 0x00) && (cc <= 0x3F) )
-		{
-			if (u)
-			{
-#if CF_DUMP_DBG_DREGS
-				printf("(UPPER)");
-#endif
+		if ( (cc >= 0x00) && (cc <= 0x3F) ) {
+			if (u) {
 				// Upper ROM character
-				switch (cc)
-				{
-				case 0x0d:
-					cc = '#';
-					break;
-				}
-			}
-			else
-			{
+				cc |= 0x80;
+			} else {
 				// Convert to ASCII character
 				if( cc < 0x20 )
 					cc |= 0x40;
-				dtext[j++] = cc;
-#if CF_DUMP_DBG_DREGS
-				printf("[%02X%c]", cc, cc);
-#endif
 			}
+			dtext[j++] = cc;
+#if CF_DUMP_DBG_DREGS
+			printf("[%02X%c]", cc, cc);
+#endif
 		}
 /*		else
 		{
@@ -510,8 +497,47 @@ uint64_t x;
 uint64_t z;
 uint64_t y;
 
+#define REG_A	0x01
+#define REG_B	0x02
+#define REG_C	0x04
+#define SHIFT_R	1
+#define SHIFT_L	0
+void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *inst)
+{
+	uint64_t *ra = (bReg | REG_A) ? &dreg_a : NULL;
+	uint64_t *rb = (bReg | REG_B) ? &dreg_b : NULL;
+	uint64_t *rc = (bReg | REG_C) ? &dreg_c : NULL;
+
+#if CF_DBG_DISP_INST
+	printf("\n%s %016llX", inst, data);
+#endif
+
+	if( !bits ) {
+		if( ra ) *ra = data & (MASK_48_BIT);
+		if( rb ) *rb = data & (MASK_48_BIT);
+		if( rc ) *rc = data & (MASK_48_BIT);
+	} else {
+		int n = 48/bits;
+		for(int i=0; i<n; i++) {
+			uint16_t ch9 = CH9(data);
+			if( bShift ) {
+				if( ra ) *ra = (*ra>>4) | (CH9_B03(ch9) << 44);
+				if( rb ) *rb = (*rb>>4) | (CH9_B47(ch9) << 44);
+				if( rc ) *rc = (*rc>>4) | (CH9_B8(ch9)  << 44);
+			} else {
+				if( ra ) *ra = (*ra<<4) | (CH9_B03(ch9));
+				if( rb ) *rb = (*rb<<4) | (CH9_B47(ch9));
+				if( rc ) *rc = (*rc<<4) | (CH9_B8(ch9));
+			}
+			data >>= bits;
+		}
+	}
+	dump_dregs();
+}
+
 void handle_bus(int addr, int inst, int pa, uint64_t data56)
 {
+	uint16_t ch9;	// Hold 9 bit character
 	//printf("\nDCE:%d ADDR:%04X (%o) INST=%04X (%o)", display_ce, addr, addr, inst, inst);
 
 	// Check for a pending instruction from the previous cycle
@@ -535,137 +561,53 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 			}
 			break;
 
-		case INST_SRLAD:
-#if CF_DBG_DISP_INST
-			printf("\nSRLAD %016llX", data56);
-#endif
-			// Load 48 bits into A register
-			dreg_a = data56 & (MASK_48_BIT);
-			dump_dregs();
+		case INST_SRLDA:
+			updateDispReg(data56, SHIFT_R, REG_A, 0, "SRLDA");
 			break;
-
 		case INST_SRLDB:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDB %016llX", data56);
-#endif
-			dreg_b = data56 & (MASK_48_BIT);
-			dump_dregs();
-
+			updateDispReg(data56, SHIFT_R, REG_B, 0, "SRLDB");
 			break;
-
 		case INST_SRLDC:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDC %016llX", data56);
-#endif
-			//dreg_c = every_4th_bit(data56 & (MASK_48_BIT), 12);
-			dreg_c = data56 & (MASK_48_BIT);
-			dump_dregs();
+			updateDispReg(data56, SHIFT_R, REG_C, 0, "SRLDC");
 			break;
-
-		case INST_SRSDABC:
-#if CF_DBG_DISP_INST
-			printf("\nSRSDABC %llX", data56);
-#endif
-			dreg_a >>= 4;
-			dreg_b >>= 4;
-			dreg_c >>= 4;
-
-			y = data56;
-#if CF_DBG_DISP_INST
-			printf("  data56:%llX", data56);
-#endif
-
-			y = data56 & 0xF;
-#if CF_DBG_DISP_INST
-			printf("  Y:%016llX", y);
-#endif
-
-			y <<= 44;
-#if CF_DBG_DISP_INST
-			printf("  Y:%016llX", y);
-#endif
-
-			// y = (x & z) << 44;
-			// printf("\nY:%016llX", y);
-
-			// dreg_a |= (data56 & 0xF)  << (11*4);
-			dreg_a |= y;
-			dreg_b |= (data56 & 0xF0) << 40;
-			dreg_c |= (data56 & 0x100) << (4*11-8);
-			dump_dregs();
+		case INST_SRLDAB:
+			updateDispReg(data56, SHIFT_R, REG_A|REG_B, 8, "SRLDAB");
 			break;
-
-		case INST_SRLDABC:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDABC %llX", data56);
-#endif
-
-			for (int i = 0; i < 4; i++)
-			{
-				dreg_a >>= 4;
-				dreg_b >>= 4;
-				dreg_c >>= 4;
-
-				y = data56;
-#if CF_DBG_DISP_INST
-				printf("  data56:%llX", data56);
-#endif
-
-				y = data56 & 0xF;
-#if CF_DBG_DISP_INST
-				printf("  Y:%016llX", y);
-#endif
-
-				y <<= 44;
-#if CF_DBG_DISP_INST
-				printf("  Y:%016llX", y);
-#endif
-
-				// y = (x & z) << 44;
-				// printf("\nY:%016llX", y);
-
-				// dreg_a |= (data56 & 0xF)  << (11*4);
-				dreg_a |= y;
-				dreg_b |= (data56 & 0xF0) << 40;
-				dreg_c |= (data56 & 0x100) << (4*11-8);
-
-				data56 >>= 12;
-			}
-			dump_dregs();
+		case INST_SRLABC:
+			updateDispReg(data56, SHIFT_R, REG_A|REG_B|REG_C, 12, "SRLABC");
 			break;
-
-		case INST_SLSDABC:
-#if CF_DBG_DISP_INST
-			printf("\nSLSDABC %llX", data56);
-#endif
-			dreg_a <<= 4;
-			dreg_b <<= 4;
-			dreg_c <<= 4;
-
-			y = data56;
-#if CF_DBG_DISP_INST
-			printf("  data56:%llX", data56);
-#endif
-
-			y = data56 & 0xF;
-#if CF_DBG_DISP_INST
-//			printf("  Y:%016llX", y);
-#endif
-
-			y <<= 0;
-#if CF_DBG_DISP_INST
-//			printf("  Y:%016llX", y);
-#endif
-
-			dreg_a |= y;
-			dreg_b |= (data56 & 0xF0) >> 4;
-			dreg_c |= (data56 & 0x100) >> 8;
-
-#if CF_DUMP_DBG_DREGS
-	printf("--> A:%016llX B:%016llX C:%016llX", dreg_a, dreg_b, dreg_c);
-#endif
-
-			dump_dregs();
+		case INST_SLLDAB:
+			updateDispReg(data56, SHIFT_L, REG_A|REG_B, 8, "SLLDAB");
+			break;
+		case INST_SLLABC:
+			updateDispReg(data56, SHIFT_L, REG_A|REG_B|REG_C, 12, "SLLABC");
+			break;
+		case INST_SRSDA:
+			updateDispReg(data56, SHIFT_R, REG_A, 48, "SRSDA");
+			break;
+		case INST_SRSDB:
+  		updateDispReg(data56, SHIFT_R, REG_B, 48, "SRSDB");
+			break;
+		case INST_SRSDC:
+			updateDispReg(data56, SHIFT_R, REG_C, 48, "SRSDC");
+			break;
+		case INST_SLSDA:
+			updateDispReg(data56, SHIFT_L, REG_A, 48, "SLSDA");
+			break;
+		case INST_SLSDB:
+			updateDispReg(data56, SHIFT_L, REG_B, 48, "SLSDB");
+			break;
+		case INST_SRSDAB:
+			updateDispReg(data56, SHIFT_R, REG_A|REG_B, 48, "SRSDAB");
+			break;
+		case INST_SLSDAB:
+			updateDispReg(data56, SHIFT_L, REG_A|REG_B, 48, "SLSDAB");
+			break;
+		case INST_SRSABC:
+			updateDispReg(data56, SHIFT_R, REG_A|REG_B|REG_C, 48, "SRSABC");
+			break;
+		case INST_SLSABC:
+			updateDispReg(data56, SHIFT_L, REG_A|REG_B|REG_C, 48, "SLSABC");
 			break;
 		}
 	}
@@ -719,20 +661,20 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 #endif
 			break;
 
-		case INST_SRLDABC:
+		case INST_SRLABC:
 #if CF_DBG_DISP_INST
-			printf("\nSRLDABC");
+			printf("\nSRLABC");
 #endif
 			pending_data = 1;
-			pending_data_inst = INST_SRLDABC;
+			pending_data_inst = INST_SRLABC;
 			break;
 
-		case INST_SRLAD:
+		case INST_SRLDA:
 #if CF_DBG_DISP_INST
-			printf("\nSRLAD");
+			printf("\nSRLDA");
 #endif
 			pending_data = 1;
-			pending_data_inst = INST_SRLAD;
+			pending_data_inst = INST_SRLDA;
 			break;
 
 		case INST_SRLDB:
