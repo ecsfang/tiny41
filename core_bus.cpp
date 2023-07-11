@@ -23,7 +23,15 @@
 #define	CH9_B47(c) 	((c&0x0F0)>>4)	// Bit 4-7
 #define	CH9_B8(c) 	((c&0x100)>>8)	// Bit 9
 
-const char *inst50 = {
+#define REG_A	0x01
+#define REG_B	0x02
+#define REG_C	0x04
+#define SHIFT_R	2
+#define SHIFT_L	0
+#define D_LONG	1
+#define D_SHORT	0
+
+const char *inst50[] = {
 	"SRLDA",	"SRLDB",	"SRLDC",	"SRLDAB",
 	"SRLABC",	"SLLDAB",	"SLLABC",	"SRSDA",
 	"SRSDB",	"SRSDC",	"SLSDA",	"SLSDB",
@@ -53,7 +61,7 @@ Inst_t inst50cmd[16] = {
 	{ SHIFT_L|D_SHORT, REG_A|REG_B|REG_C,  1 }
 };
 
-const char *inst70 = {
+const char *inst70[] = {
 	"FLLDA",	"FLLDB",	"FLLDC",	"FLLDAB",
 	"FLLDABC","00570",	"FLSDC",	"FRSDA",
 	"FRSDB",	"FRSDC",	"FLSDA",	"FLSDB",
@@ -425,7 +433,7 @@ void dump_dregs(void)
 		int u = 0;
 
 		uint64_t m = 0xf;
-		int b1 = ((NR_CHARS-1)) - i);
+		int b1 = ((NR_CHARS-1) - i);
 		int b = 4 * b1;
 
 		cc |= (((m << b) & dreg_a) >> b) << 0;
@@ -473,16 +481,8 @@ uint64_t x;
 uint64_t z;
 uint64_t y;
 
-#define REG_A	0x01
-#define REG_B	0x02
-#define REG_C	0x04
-#define SHIFT_R	2
-#define SHIFT_L	0
-#define D_LONG	1
-#define D_SHORT	0
-
 //void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *inst)
-void updateDispReg(uint64_t data, uin8_t r)
+void updateDispReg(uint64_t data, uint8_t r)
 {
 	int bShift = inst50cmd[r].shft;
 	int bReg = inst50cmd[r].reg;
@@ -526,7 +526,7 @@ void rotateDispReg(uint8_t r)
 {
 	int bShift = inst70cmd[r].shft;
 	int bReg = inst70cmd[r].reg;
-	int ch = inst70[r].len;
+	int ch = inst70cmd[r].len;
 
 	uint64_t *ra = (bReg & REG_A) ? &dreg_a : NULL;
 	uint64_t *rb = (bReg & REG_B) ? &dreg_b : NULL;
@@ -552,7 +552,7 @@ void rotateDispReg(uint8_t r)
 
 void handle_bus(int addr, int inst, int pa, uint64_t data56)
 {
-	//printf("\nDCE:%d ADDR:%04X (%o) INST=%04X (%o)", display_ce, addr, addr, inst, inst);
+	printf("\nDCE:%d ADDR:%04X (%o) INST=%04X (%o)", display_ce, addr, addr, inst, inst);
 
 	// Check for a pending instruction from the previous cycle
 	if (pending_data_inst)
@@ -597,12 +597,12 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 				for(int a=0; a<NR_ANNUN; a++) {
 					if( data56 & 1<<((NR_ANNUN-1)-a) ) {
 						for(int i=0; i<annu[a].len; i++)
-							sBuf[p+i] = annu[a].ann[i];
+							sBuf[pa+i] = annu[a].ann[i];
 					}
 					// Add space is needed ...
-					p += annu[a].len+annu[a].sp ? 1 : 0;
+					pa += annu[a].len+annu[a].sp ? 1 : 0;
 				}
-				sBuf[p] = 0;
+				sBuf[pa] = 0;
 				UpdateAnnun(sBuf);
 			}
 			break;
@@ -623,7 +623,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 		case INST_SLSDAB:
 		case INST_SRSABC:
 		case INST_SLSABC:
-			updateDispReg(inst>>6);
+			updateDispReg(data56,pending_data_inst>>6);
 			break;
 		}
 		// Clear pending flag ...
