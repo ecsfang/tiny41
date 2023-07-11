@@ -61,13 +61,18 @@
 #define INST_ENROM3                    0x1D40
 #define INST_ENROM4                    0x1C0
 
+#define DISP_ADDR                      0xFD
 
 
 #define MASK_48_BIT    (0xFFFFFFFFFFFFL)
+#define REG_C_48_MASK  (0x111111111111L)
+
+#define NR_CHARS  12
+#define NR_ANNUN  12
 
 int display_ce = 0;
-char dtext[40];
-bool bPunct[40];
+char dtext[2*NR_CHARS+1];
+bool bPunct[2*NR_CHARS+1];
 
 #define ROTATE_RIGHT(V) {uint64_t t = (V & 0xF); V >>= 4; V |= t<<44;}
 #define  ROTATE_LEFT(V) {uint64_t t = (V & (0xFLL << 44)); V <<= 4; V |= t>>44;}

@@ -23,6 +23,61 @@
 #define	CH9_B47(c) 	((c&0x0F0)>>4)	// Bit 4-7
 #define	CH9_B8(c) 	((c&0x100)>>8)	// Bit 9
 
+const char *inst50 = {
+	"SRLDA",	"SRLDB",	"SRLDC",	"SRLDAB",
+	"SRLABC",	"SLLDAB",	"SLLABC",	"SRSDA",
+	"SRSDB",	"SRSDC",	"SLSDA",	"SLSDB",
+	"SRSDAB",	"SLSDAB",	"SRSABC",	"SLSABC"
+};
+typedef struct {
+	uint8_t shft;
+	uint8_t reg;
+	uint8_t len;
+} Inst_t;
+Inst_t inst50cmd[16] = {
+	{ SHIFT_R|D_LONG,  REG_A, 						48 },
+	{ SHIFT_R|D_LONG,  REG_B, 						48 },
+	{ SHIFT_R|D_LONG,  REG_C, 						48 },
+	{ SHIFT_R|D_LONG,  REG_A|REG_B, 			 8 },
+	{ SHIFT_R|D_LONG,  REG_A|REG_B|REG_C, 12 },
+	{ SHIFT_L|D_LONG,  REG_A|REG_B, 			 8 },
+	{ SHIFT_L|D_LONG,  REG_A|REG_B|REG_C, 12 },
+	{ SHIFT_R|D_SHORT, REG_A, 						 1 },
+	{ SHIFT_R|D_SHORT, REG_B, 						 1 },
+	{ SHIFT_R|D_SHORT, REG_C, 						 1 },
+	{ SHIFT_L|D_SHORT, REG_A, 						 1 },
+	{ SHIFT_L|D_SHORT, REG_B, 						 1 },
+	{ SHIFT_R|D_SHORT, REG_A|REG_B, 			 1 },
+	{ SHIFT_L|D_SHORT, REG_A|REG_B, 			 1 },
+	{ SHIFT_R|D_SHORT, REG_A|REG_B|REG_C,  1 },
+	{ SHIFT_L|D_SHORT, REG_A|REG_B|REG_C,  1 }
+};
+
+const char *inst70 = {
+	"FLLDA",	"FLLDB",	"FLLDC",	"FLLDAB",
+	"FLLDABC","00570",	"FLSDC",	"FRSDA",
+	"FRSDB",	"FRSDC",	"FLSDA",	"FLSDB",
+	"FRSDAB",	"FLSDAB",	"FRSDABC","FLSDABC",
+};
+Inst_t inst70cmd[16] = {
+	{ SHIFT_L, REG_A, 						 0 },
+	{ SHIFT_L, REG_B, 						 0 },
+	{ SHIFT_L, REG_C, 						 0 },
+	{ SHIFT_L, REG_A|REG_B, 			 6 },
+	{ SHIFT_L, REG_A|REG_B|REG_C,  4 },
+	{ 0, 			 0, 			  				 0 },
+	{ SHIFT_L, REG_C, 						 1 },
+	{ SHIFT_R, REG_A, 						 1 },
+	{ SHIFT_R, REG_B, 						 1 },
+	{ SHIFT_R, REG_C, 						 1 },
+	{ SHIFT_L, REG_A, 						 1 },
+	{ SHIFT_L, REG_B, 						 1 },
+	{ SHIFT_R, REG_A|REG_B, 			 1 },
+	{ SHIFT_L, REG_A|REG_B, 			 1 },
+	{ SHIFT_R, REG_A|REG_B|REG_C,  1 },
+	{ SHIFT_L, REG_A|REG_B|REG_C,  1 }
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // Core 1 sits in a loop grabbing bus cycles
@@ -336,7 +391,6 @@ int every_4th_bit(uint64_t data, int n)
 // various things with that.
 //
 
-int pending_data = 0;
 int pending_data_inst = 0;
 
 uint64_t dreg_a = 0, dreg_b = 0;
@@ -350,149 +404,68 @@ void dump_dregs(void)
 	// If the display is off, we don't up date anything
 	if (!display_on)
 	{
-		//return;
+		//return; ???????????
 	}
 
 	dreg_a &= MASK_48_BIT;
 	dreg_b &= MASK_48_BIT;
+	dreg_c &= REG_C_48_MASK;
 
 #if CF_DUMP_DBG_DREGS
-	printf("\nA:%016llX B:%016llX C:%016llX", dreg_a, dreg_b, dreg_c);
+	printf(" A:%012llX B:%012llX C:%012llX", dreg_a, dreg_b, dreg_c);
 #endif
 
 	// Build a text form of the display
-
-#if CF_DUMP_DBG_DREGS
-	printf("\n'");
-#endif
-
 	int j = 0;
 
-	for (i = 0; i < 12; i++)
+	for (i = 0; i < NR_CHARS; i++)
 	{
 		char cc = 0;
 		char cl = 0;
 		int u = 0;
 
 		uint64_t m = 0xf;
-		int b1 = (11 - i);
+		int b1 = ((NR_CHARS-1)) - i);
 		int b = 4 * b1;
 
 		cc |= (((m << b) & dreg_a) >> b) << 0;
 		cc |= (((m << b) & dreg_b) >> b) << 4;
 		u = (dreg_c >> b) & 1;
 
-		cl = cc & 0xc0;
+		cl = (cc & 0xc0) >> 6;
 		cc &= 0x3f;
-		printf("(%X %02X %02X)", u,  cl, cc);
+		printf("(%X %X %02X)", u,  cl, cc);
 
 		bPunct[j] = false;
 
-		if ( (cc >= 0x00) && (cc <= 0x3F) ) {
-			if (u) {
-				// Upper ROM character
-				cc |= 0x80;
-			} else {
-				// Convert to ASCII character
-				if( cc < 0x20 )
-					cc |= 0x40;
-			}
-			dtext[j++] = cc;
-#if CF_DUMP_DBG_DREGS
-			printf("[%02X%c]", cc, cc);
-#endif
+		if (u) {
+			// Upper ROM character
+			cc |= 0x80;
+		} else {
+			// Convert to ASCII character
+			if( cc < 0x20 )
+				cc |= 0x40;
 		}
-/*		else
-		{
 
-			switch (cc)
-			{
+		dtext[j++] = cc;
 
-			case 0x00:
-				cc = '@';
-				dtext[j++] = cc;
-#if CF_DUMP_DBG_DREGS
-//				printf("%c", cc);
-#endif
-				break;
-
-			case 0x2c:
-			case 0x2e:
-			case 0x3a:
-				dtext[j++] = cc;
-#if CF_DUMP_DBG_DREGS
-//				printf("%c", cc);
-#endif
-				break;
-
-			case 0x1E:	// ^
-			case 0x1F:  // _
-				cc |= 0x40; //'_';
-				dtext[j++] = cc;
-#if CF_DUMP_DBG_DREGS
-//				printf("%c", cc);
-#endif
-				break;
-
-			default:
-				dtext[j++] = cc & 0x3f;
-#if CF_DUMP_DBG_DREGS
-//				printf("%c", cc & 0x3f);
-#endif
-				break;
-			}
-		}
-*/
-		if (cl)
-		{
-			switch (cl)
-			{
-			case 0x40:
-				bPunct[j] = true;
-				dtext[j++] = '.';
-#if CF_DUMP_DBG_DREGS
-//				printf(".");
-#endif
-				break;
-			case 0x80:
-				bPunct[j] = true;
-				dtext[j++] = ':';
-#if CF_DUMP_DBG_DREGS
-//				printf(":");
-#endif
-				break;
-			case 0xC0:
-				bPunct[j] = true;
-				dtext[j++] = ',';
-#if CF_DUMP_DBG_DREGS
-//				printf(",");
-#endif
-				break;
-			}
+		if (cl)	{
+			// Add punctuation
+			bPunct[j] = true;
+			dtext[j++] = " .:,"[cl];
 		}
 	}
-#if CF_DUMP_DBG_DREGS
-	printf("'");
-#endif
+
 	dtext[j++] = '\0';
 
 #if CF_DISPLAY_LCD
-	printf("\n[%s]", dtext);
-	extern void UpdateLCD(char *, bool *);
-	if (display_on)
-	{
+	if (display_on)	{
+		extern void UpdateLCD(char *, bool *);
 		UpdateLCD(dtext, bPunct);
+		printf("\n[%s]", dtext);
+	} else {
+		printf("\n[%s] (OFF)", dtext);
 	}
-#endif
-
-	while (strlen(dtext) < 15)
-	{
-		strcat(dtext, " ");
-	}
-
-#if CF_DISPLAY_OLED
-	oled_set_xy(&oled0, 0, 16);
-	oled_display_string(&oled0, dtext);
 #endif
 }
 
@@ -503,36 +476,75 @@ uint64_t y;
 #define REG_A	0x01
 #define REG_B	0x02
 #define REG_C	0x04
-#define SHIFT_R	1
+#define SHIFT_R	2
 #define SHIFT_L	0
-void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *inst)
+#define D_LONG	1
+#define D_SHORT	0
+
+//void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *inst)
+void updateDispReg(uint64_t data, uin8_t r)
 {
+	int bShift = inst50cmd[r].shft;
+	int bReg = inst50cmd[r].reg;
+	int bits = inst50cmd[r].len;
+
 	uint64_t *ra = (bReg & REG_A) ? &dreg_a : NULL;
 	uint64_t *rb = (bReg & REG_B) ? &dreg_b : NULL;
 	uint64_t *rc = (bReg & REG_C) ? &dreg_c : NULL;
 
 #if CF_DBG_DISP_INST
-	printf("\n%s %016llX", inst, data);
+	printf("\n%s %016llX -->", inst50[r], data);
 #endif
 
-	if( !bits ) {
+	if( (bShift & D_LONG) && bits == 48 ) {
 		if( ra ) *ra = data & (MASK_48_BIT);
 		if( rb ) *rb = data & (MASK_48_BIT);
-		if( rc ) *rc = data & (MASK_48_BIT);
+		if( rc ) *rc = data & (REG_C_48_MASK);
 	} else {
-		int n = 48/bits;
+		int n = (bShift & D_LONG) ? 48/bits : 1;
 		for(int i=0; i<n; i++) {
 			uint16_t ch9 = CH9(data);
-			if( bShift ) {
+			if( bShift & SHIFT_R ) { 	// Shift RIGHT
 				if( ra ) *ra = (*ra>>4) | (((uint64_t)CH9_B03(ch9)) << 44);
 				if( rb ) *rb = (*rb>>4) | (((uint64_t)CH9_B47(ch9)) << 44);
 				if( rc ) *rc = (*rc>>4) | (((uint64_t)CH9_B8(ch9))  << 44);
-			} else {
+			} else {									// Shift LEFT
 				if( ra ) *ra = (*ra<<4) | (CH9_B03(ch9));
 				if( rb ) *rb = (*rb<<4) | (CH9_B47(ch9));
 				if( rc ) *rc = (*rc<<4) | (CH9_B8(ch9));
 			}
-			data >>= bits;
+			data >>= bits; // shift 8 or 12 bits ...
+		}
+		if( ra ) *ra &= MASK_48_BIT;
+		if( rb ) *rb &= MASK_48_BIT;
+		if( rc ) *rc &= REG_C_48_MASK;
+	}
+	dump_dregs();
+}
+
+void rotateDispReg(uint8_t r)
+{
+	int bShift = inst70cmd[r].shft;
+	int bReg = inst70cmd[r].reg;
+	int ch = inst70[r].len;
+
+	uint64_t *ra = (bReg & REG_A) ? &dreg_a : NULL;
+	uint64_t *rb = (bReg & REG_B) ? &dreg_b : NULL;
+	uint64_t *rc = (bReg & REG_C) ? &dreg_c : NULL;
+
+#if CF_DBG_DISP_INST
+	printf("\n%s -->", inst70[r]);
+#endif
+
+	for(int i=0; i<ch; i++) {
+		if( bShift & SHIFT_R ) { 	// Shift RIGHT
+			if( ra ) ROTATE_RIGHT(*ra);
+			if( rb ) ROTATE_RIGHT(*rb);
+			if( rc ) ROTATE_RIGHT(*rc);
+		} else {									// Shift LEFT
+			if( ra ) ROTATE_LEFT(*ra);
+			if( rb ) ROTATE_LEFT(*rb);
+			if( rc ) ROTATE_LEFT(*rc);
 		}
 	}
 	dump_dregs();
@@ -540,130 +552,82 @@ void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *in
 
 void handle_bus(int addr, int inst, int pa, uint64_t data56)
 {
-	uint16_t ch9;	// Hold 9 bit character
 	//printf("\nDCE:%d ADDR:%04X (%o) INST=%04X (%o)", display_ce, addr, addr, inst, inst);
 
 	// Check for a pending instruction from the previous cycle
-	if (pending_data)
+	if (pending_data_inst)
 	{
-		pending_data = 0;
-
 		switch (pending_data_inst)
 		{
 		case INST_PRPH_SLCT:
 #if CF_DBG_SLCT
 			printf("\nPF AD:%02X", pa);
 #endif
-			if (pa == 0xFD)
-			{
-				display_ce = 1;
-			}
-			else
-			{
-				display_ce = 0;
-			}
+			display_ce = (pa == DISP_ADDR) ? 1 : 0;
 			break;
+
 		case INST_WRITE_ANNUNCIATORS:
 #if CF_DBG_DISP_INST
 			printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
-    		{
-				char sBuf[64];
+			{
+				typedef struct {
+					uint8_t len;
+					char ann[4];
+					bool sp;
+				} Annu_t;
+				Annu_t annu[NR_ANNUN] = {
+					{ 1, "B",  true },
+					{ 2, "US", true },
+					{ 1, "G",  true },
+					{ 1, "R",  true },
+					{ 2, "SH", true },
+					{ 1, "0",  false },
+					{ 1, "1",  false },
+					{ 1, "2",  false },
+					{ 1, "3",  false },
+					{ 1, "4",  true },
+					{ 1, "P",  true },
+					{ 2, "AL", false }
+				};
+				char sBuf[24];
 				extern void UpdateAnnun(char *ann);
-				memset(sBuf,' ', 32);
-				if( data56 & 1<<11 ) {
-					sBuf[0] = 'B';
+				memset(sBuf,' ', 24);
+				int pa = 0;
+				for(int a=0; a<NR_ANNUN; a++) {
+					if( data56 & 1<<((NR_ANNUN-1)-a) ) {
+						for(int i=0; i<annu[a].len; i++)
+							sBuf[p+i] = annu[a].ann[i];
+					}
+					// Add space is needed ...
+					p += annu[a].len+annu[a].sp ? 1 : 0;
 				}
-				if( data56 & 1<<10 ) {
-					sBuf[2] = 'U';
-					sBuf[3] = 'S';
-				}
-				if( data56 & 1<<9 ) {
-					sBuf[5] = 'G';
-				}
-				if( data56 & 1<<8 ) {
-					sBuf[6] = 'R';
-				}
-				if( data56 & 1<<7 ) {
-					sBuf[8] = 'S';
-					sBuf[9] = 'H';
-				}
-				if( data56 & 1<<6 ) {
-					sBuf[11] = '0';
-				}
-				if( data56 & 1<<5 ) {
-					sBuf[12] = '1';
-				}
-				if( data56 & 1<<4 ) {
-					sBuf[13] = '2';
-				}
-				if( data56 & 1<<3 ) {
-					sBuf[14] = '3';
-				}
-				if( data56 & 1<<2 ) {
-					sBuf[15] = '4';
-				}
-				if( data56 & 1<<1 ) {
-					sBuf[17] = 'P';
-				}
-				if( data56 & 1<<0 ) {
-					sBuf[19] = 'A';
-					sBuf[20] = 'L';
-				}
-				sBuf[21] = 0;
-    			UpdateAnnun(sBuf);
+				sBuf[p] = 0;
+				UpdateAnnun(sBuf);
 			}
 			break;
 
 		case INST_SRLDA:
-			updateDispReg(data56, SHIFT_R, REG_A, 0, "SRLDA");
-			break;
 		case INST_SRLDB:
-			updateDispReg(data56, SHIFT_R, REG_B, 0, "SRLDB");
-			break;
 		case INST_SRLDC:
-			updateDispReg(data56, SHIFT_R, REG_C, 0, "SRLDC");
-			break;
 		case INST_SRLDAB:
-			updateDispReg(data56, SHIFT_R, REG_A|REG_B, 8, "SRLDAB");
-			break;
 		case INST_SRLABC:
-			updateDispReg(data56, SHIFT_R, REG_A|REG_B|REG_C, 12, "SRLABC");
-			break;
 		case INST_SLLDAB:
-			updateDispReg(data56, SHIFT_L, REG_A|REG_B, 8, "SLLDAB");
-			break;
 		case INST_SLLABC:
-			updateDispReg(data56, SHIFT_L, REG_A|REG_B|REG_C, 12, "SLLABC");
-			break;
 		case INST_SRSDA:
-			updateDispReg(data56, SHIFT_R, REG_A, 48, "SRSDA");
-			break;
 		case INST_SRSDB:
-  		updateDispReg(data56, SHIFT_R, REG_B, 48, "SRSDB");
-			break;
 		case INST_SRSDC:
-			updateDispReg(data56, SHIFT_R, REG_C, 48, "SRSDC");
-			break;
 		case INST_SLSDA:
-			updateDispReg(data56, SHIFT_L, REG_A, 48, "SLSDA");
-			break;
 		case INST_SLSDB:
-			updateDispReg(data56, SHIFT_L, REG_B, 48, "SLSDB");
-			break;
 		case INST_SRSDAB:
-			updateDispReg(data56, SHIFT_R, REG_A|REG_B, 48, "SRSDAB");
-			break;
 		case INST_SLSDAB:
-			updateDispReg(data56, SHIFT_L, REG_A|REG_B, 48, "SLSDAB");
-			break;
 		case INST_SRSABC:
-			updateDispReg(data56, SHIFT_R, REG_A|REG_B|REG_C, 48, "SRSABC");
-			break;
 		case INST_SLSABC:
-			updateDispReg(data56, SHIFT_L, REG_A|REG_B|REG_C, 48, "SLSABC");
+			updateDispReg(inst>>6);
 			break;
 		}
+		// Clear pending flag ...
+		pending_data_inst = 0;
 	}
 
 	switch (inst)
@@ -683,7 +647,6 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 		break;
 
 	case INST_PRPH_SLCT:
-		pending_data = 1;
 		pending_data_inst = INST_PRPH_SLCT;
 		break;
 	}
@@ -710,209 +673,45 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 		switch (inst)
 		{
 		case INST_WRITE_ANNUNCIATORS:
-#if CF_DBG_DISP_INST
-			printf("\nWRTEN (annun)");
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_WRITE_ANNUNCIATORS;
+		case INST_SRLABC:
+		case INST_SRLDA:
+		case INST_SRLDB:
+		case INST_SRLDC:
+		case INST_SRSABC:
+		case INST_SLSABC:
+			pending_data_inst = inst;
 			break;
 
 		case INST_SRLDAB:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDAB");
-#endif
-			break;
-
-		case INST_SRLABC:
-#if CF_DBG_DISP_INST
-			printf("\nSRLABC");
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_SRLABC;
-			break;
-
-		case INST_SRLDA:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDA");
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_SRLDA;
-			break;
-
-		case INST_SRLDB:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDB");
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_SRLDB;
-			break;
-
-		case INST_SRLDC:
-#if CF_DBG_DISP_INST
-			printf("\nSRLDC");
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_SRLDC;
-			break;
-
 		case INST_SLLABC:
-#if CF_DBG_DISP_INST
-			printf("\nSLLABC");
-#endif
-			break;
-
 		case INST_SRSDA:
-#if CF_DBG_DISP_INST
-			printf("\nSRSDA");
-#endif
-			break;
-
 		case INST_SRSDB:
-#if CF_DBG_DISP_INST
-			printf("\nSRSDB");
-#endif
-			break;
-
 		case INST_SRSDC:
-#if CF_DBG_DISP_INST
-			printf("\nSRSDC");
-#endif
-			break;
-
 		case INST_SLSDA:
-#if CF_DBG_DISP_INST
-			printf("\nSLSDA");
-#endif
-			break;
-
 		case INST_SLSDB:
-#if CF_DBG_DISP_INST
-			printf("\nSLSDB");
-#endif
-			break;
-
 		case INST_SRSDAB:
-#if CF_DBG_DISP_INST
-			printf("\nSRSDAB");
-#endif
-			break;
-
 		case INST_SLSDAB:
 #if CF_DBG_DISP_INST
-			printf("\nSLSDAB");
+			printf("\n%s", inst50[inst>>6]);
 #endif
-			break;
-
-		case INST_SRSABC:
-#if CF_DBG_DISP_INST
-			printf("\nSRSABC data56:%08llX", data56);
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_SRSABC;
-			break;
-
-		case INST_SLSABC:
-#if CF_DBG_DISP_INST
-			printf("\nSLSABC");
-#endif
-			pending_data = 1;
-			pending_data_inst = INST_SLSABC;
 			break;
 
 		case INST_FLLDA:
-#if CF_DBG_DISP_INST
-			printf("\nFLLDA:");
-#endif
-			break;
-
 		case INST_FLLDB:
-#if CF_DBG_DISP_INST
-			printf("\nFLLDB:");
-#endif
-			break;
-
 		case INST_FLLDC:
-#if CF_DBG_DISP_INST
-			printf("\nFLLDC:");
-#endif
-			dump_dregs();
-			break;
-
 		case INST_FLLDAB:
-#if CF_DBG_DISP_INST
-			printf("\nFLLDAB:");
-#endif
-			break;
-
 		case INST_FLLDABC:
-#if CF_DBG_DISP_INST
-			printf("\nFLLDABC:");
-#endif
-			break;
-
-		case INST_FLSDC:
-#if CF_DBG_DISP_INST
-			printf("\nFLSDC:");
-#endif
-			break;
-
 		case INST_FRSDA:
-#if CF_DBG_DISP_INST
-			printf("\nFRSDA:");
-#endif
-			break;
-
 		case INST_FRSDB:
-#if CF_DBG_DISP_INST
-			printf("\nFRSDB:");
-#endif
-			break;
-
 		case INST_FRSDC:
-#if CF_DBG_DISP_INST
-			printf("\nFRSDC:");
-#endif
-			break;
-
 		case INST_FLSDA:
-#if CF_DBG_DISP_INST
-			printf("\nFLSDA:");
-#endif
-			break;
 		case INST_FLSDB:
-#if CF_DBG_DISP_INST
-			printf("\nFLSDB:");
-#endif
-			break;
+		case INST_FLSDC:
 		case INST_FRSDAB:
-#if CF_DBG_DISP_INST
-			printf("\nFRSDAB:");
-#endif
-			break;
 		case INST_FLSDAB:
-#if CF_DBG_DISP_INST
-			printf("\nFLSDAB:");
-#endif
-			break;
-
 		case INST_FRSDABC:
-#if CF_DBG_DISP_INST
-			printf("\nFRSDABC data56:%016llX", data56);
-#endif
-			ROTATE_RIGHT(dreg_a);
-			ROTATE_RIGHT(dreg_b);
-			ROTATE_RIGHT(dreg_c);
-			dump_dregs();
-			break;
-
 		case INST_FLSDABC:
-#if CF_DBG_DISP_INST
-			printf("\nFLSDABC:");
-#endif
-			ROTATE_LEFT(dreg_a);
-			ROTATE_LEFT(dreg_b);
-			ROTATE_LEFT(dreg_c);
-			dump_dregs();
+			rotateDispReg(inst>>6);
 			break;
 		}
 	}
