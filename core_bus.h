@@ -9,6 +9,8 @@
 // Bus instructions
 // Beware: These are in octal
 
+#define INST_LDI                       00460
+
 #define INST_DISPLAY_OFF               01340
 #define INST_DISPLAY_TOGGLE            01440
 #define INST_COMPENSATION_INSTRUCTION  01774

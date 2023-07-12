@@ -9,11 +9,13 @@
 //#include "zenrom.h"
 //#include "embedrom.h"
 
+void disAsm(int inst, int addr);
+
 #define CF_DUMP_DBG_DREGS  1
 #define CF_DISPLAY_LCD     1
 #define CF_DISPLAY_OLED    0
 #define CF_DBG_DISP_ON     1
-#define CF_DBG_SLCT        0
+#define CF_DBG_SLCT        1
 #define CF_DBG_DISP_INST   1
 #define CF_USE_DISP_ON     1
 #define CF_DBG_KEY         1
@@ -356,11 +358,11 @@ void core1_main_3(void)
 	}
 }
 
-const uint LED_PIN = TINY2040_LED_R_PIN;
+const uint LED_PIN_R = TINY2040_LED_R_PIN;
 
 void process_bus(void)
 {
-    gpio_put(LED_PIN, 0);
+    gpio_put(LED_PIN_R, 1);
 	// Process data coming in from the bus via core 1
 	while (data_in != data_out)
 	{
@@ -378,7 +380,7 @@ void process_bus(void)
 #endif
 		data_out = (data_out + 1) % NUM_BUS_T;
 	}
-    gpio_put(LED_PIN, 1);
+    gpio_put(LED_PIN_R, 0);
 }
 
 int every_4th_bit(uint64_t data, int n)
@@ -400,6 +402,7 @@ int every_4th_bit(uint64_t data, int n)
 //
 
 int pending_data_inst = 0;
+bool bLdi = false;
 
 uint64_t dreg_a = 0, dreg_b = 0;
 uint64_t dreg_c = 0;
@@ -552,13 +555,21 @@ void rotateDispReg(uint8_t r)
 
 void handle_bus(int addr, int inst, int pa, uint64_t data56)
 {
-	printf("\nDCE:%d ADDR:%04X (%o) INST=%04X (%o)", display_ce, addr, addr, inst, inst);
+	printf("\n- DCE:%d ADDR:%04X (%06o) INST=%04X (%04o) PA=%02X (%03o) DATA=%016llX", display_ce, addr, addr, inst, inst, pa, pa, data56);
+	disAsm(inst, addr);
 
 	// Check for a pending instruction from the previous cycle
 	if (pending_data_inst)
 	{
 		switch (pending_data_inst)
 		{
+		case INST_LDI:
+			{
+				int sx = (int)(data56 & 0x3FF);
+				printf("\nLDI CON:%03X (%04o)", sx, sx);
+				bLdi = true;
+			}
+			break;
 		case INST_PRPH_SLCT:
 #if CF_DBG_SLCT
 			printf("\nPF AD:%02X", pa);
@@ -579,7 +590,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 				Annu_t annu[NR_ANNUN] = {
 					{ 1, "B",  true },
 					{ 2, "US", true },
-					{ 1, "G",  true },
+					{ 1, "G",  false },
 					{ 1, "R",  true },
 					{ 2, "SH", true },
 					{ 1, "0",  false },
@@ -600,7 +611,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 							sBuf[pa+i] = annu[a].ann[i];
 					}
 					// Add space is needed ...
-					pa += annu[a].len+annu[a].sp ? 1 : 0;
+					pa += annu[a].len+(annu[a].sp ? 1 : 0);
 				}
 				sBuf[pa] = 0;
 				UpdateAnnun(sBuf);
@@ -644,6 +655,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 		printf("\nDisplay toggle");
 #endif
 		display_on = !display_on;
+		dump_dregs();
 		break;
 
 	case INST_PRPH_SLCT:
@@ -667,8 +679,12 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 		break;
 	}
 
+	if( inst == INST_LDI ) {
+		bLdi = true;
+		pending_data_inst = inst;
+	}
 	// Check for display transactions
-	if (display_ce)
+	if (display_ce && !bLdi)
 	{
 		switch (inst)
 		{
@@ -715,6 +731,7 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 			break;
 		}
 	}
+	bLdi = false;
 }
 
 void display_bus_fragment(void)
@@ -901,4 +918,189 @@ void capture_bus_transactions(void)
     }
   
   printf("\n");
+}
+
+void prtCl2Param(int inst)
+{
+/*3   6   1   7   5   0   2   4
+	ALL M 	S&X MS 	XS 	@PT PT← P-Q
+  00E 01A 006 01E 016 002 00A 012
+	011 110 001 111 101 000 010 100
+	*/
+	switch((inst>>2)&0x07) {
+	case 0b000: printf("@PT"); break;
+	case 0b001: printf("S&X"); break;
+	case 0b010: printf("PT<"); break;
+	case 0b011: printf("ALL"); break;
+	case 0b100: printf("P-Q"); break;
+	case 0b101: printf("XS "); break;
+	case 0b110: printf("M  "); break;
+	case 0b111: printf("MS "); break;
+	}
+}
+
+void prtCl2Cmd(int inst)
+{
+	printf(" - ");
+	switch((inst)&0x3E0) {
+	case 0x000: printf("A=0		 "); break;		//Clear A
+	case 0x020: printf("B=0 	 "); break;		//Clear B
+	case 0x040: printf("C=0 	 "); break;		//Clear C
+	case 0x100: printf("A=C 	 "); break;		//Copy C to A
+	case 0x0C0: printf("C=B 	 "); break;		//Copy B to C
+	case 0x080: printf("B=A 	 "); break;		//Copy B to A
+	case 0x0A0: printf("A<>C 	 "); break;		//Exchange A and C
+	case 0x0E0: printf("C<>B 	 "); break;		//Exchange C and B
+	case 0x060: printf("A<>B 	 "); break;		//Exchange A and B
+	case 0x200: printf("C=C+A  "); break;		//Add A to C
+	case 0x140: printf("A=A+C  "); break;		//Add C to A
+	case 0x120: printf("A=A+B  "); break;		//Add B to A
+	case 0x1E0: printf("C=C+C  "); break;		//Shift C 1 bit left
+	case 0x240: printf("C=A-C  "); break;		//Subtract C from A
+	case 0x1C0: printf("A=A-C  "); break;		//Subtract C from A
+	case 0x180: printf("A=A-B  "); break;		//Subtract B from A
+	case 0x220: printf("C=C+1  "); break;		//Increment C
+	case 0x160: printf("A=A+1  "); break;		//Increment A
+	case 0x260: printf("C=C-1  "); break;		//Decrement C
+	case 0x1A0: printf("A=A-1  "); break;		//Decrement A
+	case 0x2E0: printf("?C!=0  "); break;		//Carry if C≠0
+	case 0x340: printf("?A!=0  "); break;		//Carry if A≠0
+	case 0x2C0: printf("?B!=0  "); break;		//Carry if B≠0
+	case 0x360: printf("?A!=C  "); break;		//Carry if A≠C
+	case 0x300: printf("?A<C 	 "); break;		//Carry if A<C
+	case 0x320: printf("?A<B 	 "); break;		//Carry if A<B
+	case 0x3C0: printf("RSHFC  "); break;		//Shift C 1 digit right
+	case 0x380: printf("RSHFA  "); break;		//Shift A 1 digit
+	case 0x3A0: printf("RSHFB  "); break;		//Shift B 1 digit right
+	case 0x3E0: printf("LSHFA  "); break;		//Shift A 1 digit left
+	case 0x280: printf("C=0-C  "); break;		//1’s complement
+	case 0x2A0: printf("C=-C-1 "); break;		//2’s comp
+	}
+	prtCl2Param(inst);
+}
+
+void prtCl0Cmd(int inst)
+{
+	printf(" - ");
+	switch(inst) {
+	case 0x000: printf("NOP 				"); break; // no operation
+	case 0x130: printf("LDI S&X 		"); break; // load the 10-bit word at next address to C[2;0]
+	case 0x3DC: printf("PT=PT+1 		"); break; // decrement pointer (if PT=0 then PT=13)
+	case 0x3D4: printf("PT=PT-1 		"); break; // increment pointer (if PT=13 then PT=0)
+	case 0x0A0: printf("SLCT P 			"); break; // select P as active pointer
+	case 0x0E0: printf("SLCT Q 			"); break; // select Q as active pointer
+	case 0x120: printf("?P=Q 				"); break; // set carry if P and Q have the same value
+	case 0x198: printf("C=M ALL 		"); break; // copy M register to C
+	case 0x158: printf("M=C ALL 		"); break; // copy C register to M
+	case 0x1D8: printf("C<>M ALL 		"); break; // exchange C and M registers
+	case 0x0B0: printf("C=N ALL 		"); break; // copy N register to C
+	case 0x070: printf("N=C ALL 		"); break; // copy C register to N
+	case 0x0F0: printf("C<>N ALL 		"); break; // exchange C and N registers
+	case 0x098: printf("C=G @PT,+ 	"); break; // copy G register to C register digits at PT and PT+1
+	case 0x058: printf("G=C @PT,+ 	"); break; // copy C register digits at PT and PT+1 to G register
+	case 0x0D8: printf("C<>G @PT,+ 	"); break; // exchange C register digits at PT and PT+1 with G register
+	case 0x398: printf("C=ST XP 		"); break; // copy ST to C[1;0]
+	case 0x358: printf("ST=C XP 		"); break; // copy C[1;0] to ST
+	case 0x3D8: printf("C<>ST XP 		"); break; // exchange ST and C[1;0]
+	case 0x3C4: printf("ST=0 				"); break; // clears ST (CPU flags 0-7)
+	case 0x298: printf("ST=T 				"); break; // copy T to ST
+	case 0x258: printf("T=ST 				"); break; // copy ST to T
+	case 0x2D8: printf("ST<>T 			"); break; // exchange ST and T
+	case 0x038: printf("READ DATA 	"); break; // copy active user memory register to C
+	case 0x2F0: printf("WRIT DATA 	"); break; // copy C to active user memory register
+	case 0x330: printf("FETCH S&X 	"); break; // fetches the word at system memory given in C[6;3] to C[2;0]
+	case 0x040: printf("WRIT S&X 		"); break; // writes word in C[2;0] to system memory given in C[6;3]
+	case 0x270: printf("RAM SLCT 		"); break; // select user memory register specified in C[2;0]
+	case 0x3F0: printf("PRPH SLCT 	"); break; // select peripheral unit specified in C[2;0]
+	case 0x3C8: printf("CLRKEY 			"); break; // clears the keydown flag (immediately set if key is down)
+	case 0x3CC: printf("?KEY 				"); break; // set carry if keydown flag is set
+	case 0x220: printf("C=KEY KY 		"); break; // copy key code from KY to C[4;3]
+	case 0x230: printf("GOTO KEY 		"); break; // KEY register is written into lowets byte of PC
+	case 0x1A0: printf("A=B=C=0 		"); break; // clear A, B and C registers
+	case 0x2A0: printf("SETDEC 			"); break; // set CPU to decimal mode
+	case 0x260: printf("SETHEX 			"); break; // set CPU to hexadecimal mode
+	case 0x3B0: printf("C=C AND A 	"); break; // do logical AND on C and A registers and store result in C
+	case 0x370: printf("C=C OR A 		"); break; // do logical OR on C and A registers and store result in C
+	case 0x3E0: printf("RTN 				"); break; // return to address in STK
+	case 0x360: printf("?C RTN 			"); break; // return to address in STK if carry is set
+	case 0x3A0: printf("?NC RTN 		"); break; // return to address in STK if carry is clear
+	case 0x1B0: printf("POP ADR 		"); break; // copy bottom STK to C[6;3] and STK drops
+	case 0x170: printf("PUSH ADR 		"); break; // push STK up and store C[6;3] in bottom STK
+	case 0x1E0: printf("GOTO ADR 		"); break; // jumps to address in C[6;3]
+	case 0x020: printf("XQ>GO 			"); break; // pop return stack, turns the latest XQ into a GO
+	case 0x2E0: printf("DSPOFF 			"); break; // turns display off
+	case 0x320: printf("DSPTOG 			"); break; // toggles display on/off
+	case 0x160: printf("?LOWBAT 		"); break; // set carry if battery is low
+	case 0x060: printf("POWOFF 			"); break; // disp on: stop CPU, disp off: turn HP41 off, must be followed by NOP
+	case 0x36C: printf("?ALM  			"); break; // set carry if an alarm from the timer has occured
+	case 0x32C: printf("?CRDR 			"); break; // used with card reader
+	case 0x0AC: printf("?EDAV 			"); break; // set carry if the diode of IR module is available
+	case 0x12C: printf("?FRAV 			"); break; // set carry if a frame is available from HP-IL interface
+	case 0x26C: printf("?FRNS 			"); break; // set carry if the frame transmitted (HPIL) not returns as sent
+	case 0x16C: printf("?IFCR 			"); break; // set carry if HP-IL interface is ready
+	case 0x0EC: printf("?ORAV 			"); break; // set carry if output register is available
+	case 0x3AC: printf("?PBSY 			"); break; // set carry if HP82143 printer is busy
+	case 0x2EC: printf("?SERV 			"); break; // set carry if any peripheral unit needs service
+	case 0x2AC: printf("?SRQR 			"); break; // set carry if HPIL interface needs service
+	case 0x22C: printf("?WNDB 			"); break; // set carry if there is data in the wand buffer
+	case 0x100: printf("ENBANK1 		"); break; // enables primary bank
+	case 0x180: printf("ENBANK2 		"); break; // enables secondary bank
+	case 0x140: printf("ENBANK3 		"); break; // enables third bank
+	case 0x1C0: printf("ENBANK4 		"); break; // enables forth bank
+	case 0x1F0: printf("WPTOG 			"); break; // toggles write protection of HEPAX RAM specified in C[0]
+	case 0x030: printf("ROM BLK 		"); break; // moves HEPAX ROM to memroy block specified in C[0]
+	default:
+		printf("TBD!");
+	}
+}
+
+void disAsm(int inst, int addr)
+{
+	static int prev;
+	static bool bClass1 = false;
+
+	if( bClass1 ) {
+		printf(" - ");
+		switch( inst & 0x3 ) {
+		case 0b00: printf("?NC XQ"); break;
+		case 0b01: printf("?C XQ"); break;
+		case 0b10: printf("?NC GO"); break;
+		case 0b11: printf("?C GO"); break;
+		}
+		printf(" %02X%02X", (inst >> 2) & 0xFF, prev);
+		bClass1 = false;
+		return;
+	}
+
+	switch(inst & 0x03 ) {
+		case 0b00:
+			prtCl0Cmd(inst);
+			break;
+		case 0b01:
+			prev = (inst >> 2) & 0xFF;
+			bClass1 = true;
+			break;
+		case 0b10:
+			prtCl2Cmd(inst);
+			break;
+		case 0b11:
+		{
+			int ad;
+			printf(" - ");
+			if( inst & 0b100 )
+				printf("JNC");
+			else
+				printf("JC");
+			if( inst & 0x200 ) {
+				printf(" -");
+				prev = 0x40 - ((inst&0x1F8) >> 3);
+				ad = addr - prev;
+			} else {
+				printf(" +");
+				prev = (inst&0x1F8) >> 3;
+				ad = addr + prev;
+			}
+			printf("%02X [%04X]", prev, ad);
+		}
+	}
 }

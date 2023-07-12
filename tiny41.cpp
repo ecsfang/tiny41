@@ -5,7 +5,8 @@
 #include "pico/multicore.h"
 #include "tiny41.h"
 
-const uint LED_PIN = TINY2040_LED_B_PIN;
+const uint LED_PIN_R = TINY2040_LED_R_PIN;
+const uint LED_PIN_B = TINY2040_LED_B_PIN;
 
 
 extern void core1_main_3(void);
@@ -83,8 +84,12 @@ int main()
     // run through the complete initialization process
     SSD1306_init();
 
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_init(LED_PIN_R);
+    gpio_init(LED_PIN_B);
+    gpio_set_dir(LED_PIN_R, GPIO_OUT);
+    gpio_set_dir(LED_PIN_B, GPIO_OUT);
+    gpio_put(LED_PIN_R, 0);
+    gpio_put(LED_PIN_B, 0);
 
     multicore_launch_core1(core1_main_3);
 
@@ -171,5 +176,6 @@ void UpdateLCD(char *txt, bool *bp)
 }
 void UpdateAnnun(char *ann)
 {
+	printf("\nAnnunciators: [%s]", ann);
     WriteString(buf, 0, 32, ann);
 }
