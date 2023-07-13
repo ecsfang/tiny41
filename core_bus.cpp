@@ -9,13 +9,13 @@
 //#include "zenrom.h"
 //#include "embedrom.h"
 
-void disAsm(int inst, int addr);
+void disAsm(int inst, int addr, uint64_t data);
 
 #define CF_DUMP_DBG_DREGS  1
 #define CF_DISPLAY_LCD     1
 #define CF_DISPLAY_OLED    0
 #define CF_DBG_DISP_ON     1
-#define CF_DBG_SLCT        1
+#define CF_DBG_SLCT        0
 #define CF_DBG_DISP_INST   1
 #define CF_USE_DISP_ON     1
 #define CF_DBG_KEY         1
@@ -556,7 +556,7 @@ void rotateDispReg(uint8_t r)
 void handle_bus(int addr, int inst, int pa, uint64_t data56)
 {
 	printf("\n- DCE:%d ADDR:%04X (%06o) INST=%04X (%04o) PA=%02X (%03o) DATA=%016llX", display_ce, addr, addr, inst, inst, pa, pa, data56);
-	disAsm(inst, addr);
+	disAsm(inst, addr, data56);
 
 	// Check for a pending instruction from the previous cycle
 	if (pending_data_inst)
@@ -566,7 +566,6 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 		case INST_LDI:
 			{
 				int sx = (int)(data56 & 0x3FF);
-				printf("\nLDI CON:%03X (%04o)", sx, sx);
 				bLdi = true;
 			}
 			break;
@@ -979,86 +978,219 @@ void prtCl2Cmd(int inst)
 	prtCl2Param(inst);
 }
 
-void prtCl0Cmd(int inst)
+const char *mcl0[0x10] = {
+	"3",	"4",	"5",	"10",
+	"8",	"6",	"11",	"Unused",
+	"2",	"9",	"7",	"13",
+	"1",	"12",	"0",	"Special"
+};
+
+void cl0mod(int m, bool bA)
 {
-	printf(" - ");
-	switch(inst) {
-	case 0x000: printf("NOP 				"); break; // no operation
-	case 0x130: printf("LDI S&X 		"); break; // load the 10-bit word at next address to C[2;0]
-	case 0x3DC: printf("PT=PT+1 		"); break; // decrement pointer (if PT=0 then PT=13)
-	case 0x3D4: printf("PT=PT-1 		"); break; // increment pointer (if PT=13 then PT=0)
-	case 0x0A0: printf("SLCT P 			"); break; // select P as active pointer
-	case 0x0E0: printf("SLCT Q 			"); break; // select Q as active pointer
-	case 0x120: printf("?P=Q 				"); break; // set carry if P and Q have the same value
-	case 0x198: printf("C=M ALL 		"); break; // copy M register to C
-	case 0x158: printf("M=C ALL 		"); break; // copy C register to M
-	case 0x1D8: printf("C<>M ALL 		"); break; // exchange C and M registers
-	case 0x0B0: printf("C=N ALL 		"); break; // copy N register to C
-	case 0x070: printf("N=C ALL 		"); break; // copy C register to N
-	case 0x0F0: printf("C<>N ALL 		"); break; // exchange C and N registers
-	case 0x098: printf("C=G @PT,+ 	"); break; // copy G register to C register digits at PT and PT+1
-	case 0x058: printf("G=C @PT,+ 	"); break; // copy C register digits at PT and PT+1 to G register
-	case 0x0D8: printf("C<>G @PT,+ 	"); break; // exchange C register digits at PT and PT+1 with G register
-	case 0x398: printf("C=ST XP 		"); break; // copy ST to C[1;0]
-	case 0x358: printf("ST=C XP 		"); break; // copy C[1;0] to ST
-	case 0x3D8: printf("C<>ST XP 		"); break; // exchange ST and C[1;0]
-	case 0x3C4: printf("ST=0 				"); break; // clears ST (CPU flags 0-7)
-	case 0x298: printf("ST=T 				"); break; // copy T to ST
-	case 0x258: printf("T=ST 				"); break; // copy ST to T
-	case 0x2D8: printf("ST<>T 			"); break; // exchange ST and T
-	case 0x038: printf("READ DATA 	"); break; // copy active user memory register to C
-	case 0x2F0: printf("WRIT DATA 	"); break; // copy C to active user memory register
-	case 0x330: printf("FETCH S&X 	"); break; // fetches the word at system memory given in C[6;3] to C[2;0]
-	case 0x040: printf("WRIT S&X 		"); break; // writes word in C[2;0] to system memory given in C[6;3]
-	case 0x270: printf("RAM SLCT 		"); break; // select user memory register specified in C[2;0]
-	case 0x3F0: printf("PRPH SLCT 	"); break; // select peripheral unit specified in C[2;0]
-	case 0x3C8: printf("CLRKEY 			"); break; // clears the keydown flag (immediately set if key is down)
-	case 0x3CC: printf("?KEY 				"); break; // set carry if keydown flag is set
-	case 0x220: printf("C=KEY KY 		"); break; // copy key code from KY to C[4;3]
-	case 0x230: printf("GOTO KEY 		"); break; // KEY register is written into lowets byte of PC
-	case 0x1A0: printf("A=B=C=0 		"); break; // clear A, B and C registers
-	case 0x2A0: printf("SETDEC 			"); break; // set CPU to decimal mode
-	case 0x260: printf("SETHEX 			"); break; // set CPU to hexadecimal mode
-	case 0x3B0: printf("C=C AND A 	"); break; // do logical AND on C and A registers and store result in C
-	case 0x370: printf("C=C OR A 		"); break; // do logical OR on C and A registers and store result in C
-	case 0x3E0: printf("RTN 				"); break; // return to address in STK
-	case 0x360: printf("?C RTN 			"); break; // return to address in STK if carry is set
-	case 0x3A0: printf("?NC RTN 		"); break; // return to address in STK if carry is clear
-	case 0x1B0: printf("POP ADR 		"); break; // copy bottom STK to C[6;3] and STK drops
-	case 0x170: printf("PUSH ADR 		"); break; // push STK up and store C[6;3] in bottom STK
-	case 0x1E0: printf("GOTO ADR 		"); break; // jumps to address in C[6;3]
-	case 0x020: printf("XQ>GO 			"); break; // pop return stack, turns the latest XQ into a GO
-	case 0x2E0: printf("DSPOFF 			"); break; // turns display off
-	case 0x320: printf("DSPTOG 			"); break; // toggles display on/off
-	case 0x160: printf("?LOWBAT 		"); break; // set carry if battery is low
-	case 0x060: printf("POWOFF 			"); break; // disp on: stop CPU, disp off: turn HP41 off, must be followed by NOP
-	case 0x36C: printf("?ALM  			"); break; // set carry if an alarm from the timer has occured
-	case 0x32C: printf("?CRDR 			"); break; // used with card reader
-	case 0x0AC: printf("?EDAV 			"); break; // set carry if the diode of IR module is available
-	case 0x12C: printf("?FRAV 			"); break; // set carry if a frame is available from HP-IL interface
-	case 0x26C: printf("?FRNS 			"); break; // set carry if the frame transmitted (HPIL) not returns as sent
-	case 0x16C: printf("?IFCR 			"); break; // set carry if HP-IL interface is ready
-	case 0x0EC: printf("?ORAV 			"); break; // set carry if output register is available
-	case 0x3AC: printf("?PBSY 			"); break; // set carry if HP82143 printer is busy
-	case 0x2EC: printf("?SERV 			"); break; // set carry if any peripheral unit needs service
-	case 0x2AC: printf("?SRQR 			"); break; // set carry if HPIL interface needs service
-	case 0x22C: printf("?WNDB 			"); break; // set carry if there is data in the wand buffer
-	case 0x100: printf("ENBANK1 		"); break; // enables primary bank
-	case 0x180: printf("ENBANK2 		"); break; // enables secondary bank
-	case 0x140: printf("ENBANK3 		"); break; // enables third bank
-	case 0x1C0: printf("ENBANK4 		"); break; // enables forth bank
-	case 0x1F0: printf("WPTOG 			"); break; // toggles write protection of HEPAX RAM specified in C[0]
-	case 0x030: printf("ROM BLK 		"); break; // moves HEPAX ROM to memroy block specified in C[0]
-	default:
-		printf("TBD!");
+	if( !bA ) {
+		printf("%2d");
+		if( m>9 )
+			printf(" (%X)", m);
+	} else {
+		printf("%s", mcl0[m]);
 	}
 }
 
-void disAsm(int inst, int addr)
+bool bLDICON = false;
+
+void prtCl0Cmd(int inst, int data)
+{
+	int mod = (inst>>6) & 0x0F;
+	int sub = (inst>>2) & 0x0F;
+	printf(" - ");
+	switch(sub) {
+		case 0x0:
+			switch(mod) {
+				case 0x0: printf("NOP"); break; 				// no operation
+				case 0x1: printf("WRIT S&X"); break; 		// writes word in C[2;0] to system memory given in C[6;3]
+				case 0x2: printf("-unused-"); break;
+				case 0x3: printf("-unused-"); break;
+				case 0x4: printf("ENBANK1"); break; 		// enables primary bank
+				case 0x5: printf("ENBANK3"); break; 		// enables third bank
+				case 0x6: printf("ENBANK2"); break; 		// enables secondary bank
+				case 0x7: printf("ENBANK4"); break; 		// enables forth bank
+				case 0x8: printf("HPIL=C 0"); break;
+				case 0x9: printf("HPIL=C 1"); break;
+				case 0xA: printf("HPIL=C 2"); break;
+				case 0xB: printf("HPIL=C 3"); break;
+				case 0xC: printf("HPIL=C 4"); break;
+				case 0xD: printf("HPIL=C 5"); break;
+				case 0xE: printf("HPIL=C 6"); break;
+				case 0xF: printf("HPIL=C 7"); break;
+			}
+			break;
+		case 0x1:
+			if( mod == 0xF )
+				 printf("ST=0");	// clears ST (CPU flags 0-7)
+			else {
+				printf("CF ");
+				cl0mod(mod, false);
+			}
+			break;
+		case 0x2:
+			if( mod == 0xF )
+				 printf("CLRKEY"); // clears the keydown flag (immediately set if key is down)
+			else {
+				printf("SF ");
+				cl0mod(mod, false);
+			}
+			break;
+		case 0x3:
+			if( mod == 0xF )
+				 printf("?KEY"); // set carry if keydown flag is set
+			else {
+				printf("?FS ");
+				cl0mod(mod, false);
+			}
+			break;
+		case 0x4:
+			printf("LC ");
+			cl0mod(mod, true);
+			break;
+		case 0x5:
+			if( mod == 0xF )
+				printf("PT=PT-1");	// decrement pointer (if PT=0 then PT=13)
+			else {
+				printf("?PT= ");
+				cl0mod(mod, false);
+			}
+			break;
+		case 0x6:
+			switch(mod) {
+				case 0x0: printf("-unused-"); break;
+				case 0x1: printf("G=C @PT,+"); break; 	// copy C register digits at PT and PT+1 to G register
+				case 0x2: printf("C=G @PT,+"); break; 	// copy G register to C register digits at PT and PT+1
+				case 0x3: printf("C<>G @PT,+"); break; 	// exchange C register digits at PT and PT+1 with G register
+				case 0x4: printf("-unused-"); break;
+				case 0x5: printf("M=C ALL"); break; 		// copy C register to M
+				case 0x6: printf("C=M ALL"); break; 		// copy M register to C
+				case 0x7: printf("C<>M ALL"); break; 		// exchange C and M registers
+				case 0x8: printf("-unused-"); break;
+				case 0x9: printf("T=ST"); break; 				// copy ST to T
+				case 0xA: printf("ST=T"); break; 				// copy T to ST
+				case 0xB: printf("ST<>T"); break; 			// exchange ST and T
+				case 0xC: printf("-unused-"); break;
+				case 0xD: printf("ST=C XP"); break; 		// copy C[1;0] to ST
+				case 0xE: printf("C=ST XP"); break; 		// copy ST to C[1;0]
+				case 0xF: printf("C<>ST XP"); break; 		// exchange ST and C[1;0]
+			}
+			break;
+		case 0x7:
+			if( mod == 0xF )
+				printf("PT=PT+1");	// increment pointer (if PT=13 then PT=0)
+			else {
+				printf("PT= ");
+				cl0mod(mod, false);
+			}
+			break;
+		case 0x8:
+			switch(mod) {
+				case 0x0: printf("XQ>GO"); break; 			// pop return stack, turns the latest XQ into a GO
+				case 0x1: printf("POWOFF"); break; 			// disp on: stop CPU, disp off: turn HP41 off, must be followed by NOP
+				case 0x2: printf("SLCT P"); // select P as active pointer
+				case 0x3: printf("SLCT Q"); // select Q as active pointer
+				case 0x4: printf("?P=Q"); 	// set carry if P and Q have the same value
+				case 0x5: printf("?LOWBAT"); break; 		// set carry if battery is low
+				case 0x6: printf("A=B=C=0"); break; 		// clear A, B and C registers
+				case 0x7: printf("GOTO ADR"); break; 		// jumps to address in C[6;3]
+				case 0x8: printf("C=KEY KY"); break; 		// copy key code from KY to C[4;3]
+				case 0x9: printf("SETHEX"); break; 			// set CPU to hexadecimal mode
+				case 0xA: printf("SETDEC"); break; 			// set CPU to decimal mode
+				case 0xB: printf("DSPOFF"); break; 			// turns display off
+				case 0xC: printf("DSPTOG"); break; 			// toggles display on/off
+				case 0xD: printf("?C RTN"); break; 			// return to address in STK if carry is set
+				case 0xE: printf("?NC RTN"); break; 		// return to address in STK if carry is clear
+				case 0xF: printf("RTN"); break; 				// return to address in STK
+			}
+			break;
+		case 0x9:
+			printf("PERTCT ");
+			cl0mod(mod, true);
+			break;
+		case 0xA:
+			printf("REG=C ");
+			cl0mod(mod, true);
+			break;
+		case 0xB:
+			switch(mod) {
+				case 0x0: printf("?PF 3"); break;
+				case 0x1: printf("?PF 4"); break;
+				case 0x2: printf("?EDAV"); break; 			// set carry if the diode of IR module is available
+				case 0x3: printf("?ORAV"); break; 			// set carry if output register is available
+				case 0x4: printf("?FRAV"); break; 			// set carry if a frame is available from HP-IL interface
+				case 0x5: printf("?IFCR"); break; 			// set carry if HP-IL interface is ready
+				case 0x6: printf("?TFAIL"); break;
+				case 0x7: printf("-unused-"); break;
+				case 0x8: printf("?WNDB"); break; 			// set carry if there is data in the wand buffer
+				case 0x9: printf("?FRNS"); break; 			// set carry if the frame transmitted (HPIL) not returns as sent
+				case 0xA: printf("?SRQR"); break; 			// set carry if HPIL interface needs service
+				case 0xB: printf("?SERV"); break; 			// set carry if any peripheral unit needs service
+				case 0xC: printf("?CRDR"); break; 			// used with card reader
+				case 0xD: printf("?ALM"); break; 				// set carry if an alarm from the timer has occured
+				case 0xE: printf("?PBSY"); break; 			// set carry if HP82143 printer is busy
+				case 0xF: printf("-unused-"); break;
+			}
+			break;
+		case 0xC:
+			switch(mod) {
+				case 0x0: printf("ROM BLK"); break; 	// moves HEPAX ROM to memroy block specified in C[0]
+				case 0x1: printf("N=C ALL"); break; 	// copy C register to N
+				case 0x2: printf("C=N ALL"); break; 	// copy N register to C
+				case 0x3: printf("C<>N ALL"); break; 	// exchange C and N registers
+				case 0x4: printf("LDI S&X");
+									bLDICON = true;
+									break;	// load the 10-bit word at next address to C[2;0]
+				case 0x5: printf("PUSH ADR"); break; 		// push STK up and store C[6;3] in bottom STK
+				case 0x6: printf("POP ADR"); break; 		// copy bottom STK to C[6;3] and STK drops
+				case 0x7: printf("WPTOG"); break; 		// toggles write protection of HEPAX RAM specified in C[0]
+				case 0x8: printf("GOTO KEY"); break; 	// KEY register is written into lowets byte of PC
+				case 0x9: printf("RAM SLCT (PA=%02X)", data&0xFF); break; 	// select user memory register specified in C[2;0]
+				case 0xA: printf("-unused-"); break;
+				case 0xB: printf("WRIT DATA"); break; // copy C to active user memory register
+				case 0xC: printf("FETCH S&X"); break; // fetches the word at system memory given in C[6;3] to C[2;0]
+				case 0xD: printf("C=C OR A"); break; 	// do logical OR on C and A registers and store result in C
+				case 0xE: printf("C=C AND A"); break; // do logical AND on C and A registers and store result in C
+				case 0xF: printf("PRPH SLCT (PA=%02X)", data&0xFF); break; // select peripheral unit specified in C[2;0]
+			}
+			break;
+		case 0xD:
+			printf("-unused-");
+			break;
+		case 0xE:
+			if( mod == 0x0 )
+				printf("READ DATA");	// copy active user memory register to C
+			else {
+				printf("C=REG ");
+				cl0mod(mod, true);
+			}
+			break;
+		case 0xF:
+			if( mod == 0xF )
+				printf("???");
+			else {
+				printf("RCR ");
+				cl0mod(mod, false);
+			}
+			break;
+	}
+}
+
+void disAsm(int inst, int addr, uint64_t data)
 {
 	static int prev;
 	static bool bClass1 = false;
 
+	if( bLDICON ) {
+		int con = data & 0x3FF;
+		printf(" - CON: %03X (%04o)", con, con);
+		bLDICON = false;
+		return;
+	}
 	if( bClass1 ) {
 		printf(" - ");
 		switch( inst & 0x3 ) {
@@ -1074,11 +1206,12 @@ void disAsm(int inst, int addr)
 
 	switch(inst & 0x03 ) {
 		case 0b00:
-			prtCl0Cmd(inst);
+			prtCl0Cmd(inst, data & 0x3FF);
 			break;
 		case 0b01:
 			prev = (inst >> 2) & 0xFF;
 			bClass1 = true;
+			printf(" - -->");
 			break;
 		case 0b10:
 			prtCl2Cmd(inst);
