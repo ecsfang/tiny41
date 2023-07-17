@@ -6,8 +6,10 @@
 #include "tiny41.h"
 #include "core_bus.h"
 
-//#include "zenrom.h"
+#include "zenrom.h"
 //#include "embedrom.h"
+
+//#define DRIVE_ISA
 
 void disAsm(int inst, int addr, uint64_t data);
 
@@ -127,7 +129,8 @@ volatile int driven_isa = 0;
 volatile int embed_seen = 0;
 volatile int sync_count = 0;
 
-void handle_bus(int addr, int inst, int pa, uint64_t data56);
+//void handle_bus(int addr, int inst, int pa, uint64_t data56);
+void handle_bus(int idx);
 
 #define NUM_FRAG 100
 
@@ -160,6 +163,7 @@ volatile int bus_addr[NUM_BUS_T];
 volatile int bus_inst[NUM_BUS_T];
 volatile int bus_pa[NUM_BUS_T];
 volatile uint64_t bus_data56[NUM_BUS_T];
+volatile int bus_sync[NUM_BUS_T];
 int last_sync = 0;
 int trans_i = 0;
 int data = 0;
@@ -170,6 +174,10 @@ int gpio_states = 0;
 int sync = 0;
 int address = 0;
 uint64_t data56 = 0;
+
+
+char cpu2buf[1024];
+int nCpu2 = 0;
 
 void core1_main_3(void)
 {
@@ -201,19 +209,22 @@ void core1_main_3(void)
 
 		if ((bit_no >= 43) && (bit_no <= 52))
 		{
-#if 0
+#ifdef DRIVE_ISA
 			if (/*(sync!=0) &&*/ drive_data_flag)
 			{
 				// Drive the ISA line for this data bit
 				if (!bIsaEn)
 				{
+//					printf("\nDRIVE ISA:");
 					gpio_set_dir(P_ISA, GPIO_OUT);
+				    gpio_put(LED_PIN_R, LED_ON);
 					bIsaEn = 1;
 				}
 
 				//  gpio_put(P_ISA_OE, 0);
 				bIsa = drive_data & 1;
 				gpio_put(P_ISA, bIsa);
+				printf("%d", bIsa);
 				drive_data >>= 1;
 				driven_isa++;
 			}
@@ -224,6 +235,7 @@ void core1_main_3(void)
 				if (bIsaEn)
 				{
 					gpio_set_dir(P_ISA, GPIO_IN);
+				    gpio_put(LED_PIN_R, LED_OFF);
 					bIsaEn = 0;
 				}
 			}
@@ -243,7 +255,9 @@ void core1_main_3(void)
 			if (bIsaEn)
 			{
 				gpio_set_dir(P_ISA, GPIO_IN);
+			    gpio_put(LED_PIN_R, LED_OFF);
 				bIsaEn = 0;
+//				printf("<Done ISA");
 			}
 		}
 
@@ -305,7 +319,7 @@ void core1_main_3(void)
 				embed_seen++;
 				drive_data_flag = 1;
 				drive_data = embed_zenrom_rom[address - LOW_EMBED_ROM2_ADDR];
-				printf("ZEN: %04X -> [%03o] (%03o)\n", address, drive_data, instruction);
+				sprintf(cpu2buf, "ZEN: %04X -> [%03o] (%03o)\n", address, drive_data, instruction);
 			}
 
 #endif
@@ -333,6 +347,7 @@ void core1_main_3(void)
 			bus_inst[data_in] = instruction;
 			bus_pa[data_in] = periph_addr;
 			bus_data56[data_in] = data56;
+			bus_sync[data_in] = sync?1:0;
 
 			address = 0;
 			instruction = 0;
@@ -358,11 +373,11 @@ void core1_main_3(void)
 	}
 }
 
-const uint LED_PIN_R = TINY2040_LED_R_PIN;
-
 void process_bus(void)
 {
-    gpio_put(LED_PIN_R, 1);
+	if (data_in != data_out)
+    	gpio_put(LED_PIN_B, LED_ON);
+
 	// Process data coming in from the bus via core 1
 	while (data_in != data_out)
 	{
@@ -376,11 +391,12 @@ void process_bus(void)
 		 bus_data56[data_out]);
 #else
 		// Handle the bus traffic
-		handle_bus(bus_addr[data_out], bus_inst[data_out], bus_pa[data_out], bus_data56[data_out]);
+		//handle_bus(bus_addr[data_out], bus_inst[data_out], bus_pa[data_out], bus_data56[data_out]);
+		handle_bus(data_out);
 #endif
 		data_out = (data_out + 1) % NUM_BUS_T;
 	}
-    gpio_put(LED_PIN_R, 0);
+    gpio_put(LED_PIN_B, LED_OFF);
 }
 
 int every_4th_bit(uint64_t data, int n)
@@ -403,6 +419,7 @@ int every_4th_bit(uint64_t data, int n)
 
 int pending_data_inst = 0;
 bool bLdi = false;
+bool bFetch = false;
 
 uint64_t dreg_a = 0, dreg_b = 0;
 uint64_t dreg_c = 0;
@@ -553,21 +570,34 @@ void rotateDispReg(uint8_t r)
 	dump_dregs();
 }
 
-void handle_bus(int addr, int inst, int pa, uint64_t data56)
+//void handle_bus(int addr, int inst, int pa, uint64_t data56)
+void handle_bus(int idx)
 {
-	printf("\n- DCE:%d ADDR:%04X (%06o) INST=%04X (%04o) PA=%02X (%03o) DATA=%016llX", display_ce, addr, addr, inst, inst, pa, pa, data56);
-	disAsm(inst, addr, data56);
+	int addr = bus_addr[idx];
+	int inst = bus_inst[idx];
+	int pa = bus_pa[idx];
+	uint64_t data56 = bus_data56[idx];
+	int sync = bus_sync[idx];
+	//printf("\n- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
+	if( cpu2buf[0]) {
+		printf("\n[%s]", cpu2buf);
+		cpu2buf[0] = 0;
+	}
+	printf("\n");
 
+	if( bFetch ) { 
+		printf("        @[%04X] - 0x%03X (%04o)", addr, inst, inst);
+		bFetch = false;
+	} else {
+		disAsm(inst, addr, data56);
+	}
 	// Check for a pending instruction from the previous cycle
 	if (pending_data_inst)
 	{
 		switch (pending_data_inst)
 		{
 		case INST_LDI:
-			{
-				int sx = (int)(data56 & 0x3FF);
-				bLdi = true;
-			}
+			bLdi = true;
 			break;
 		case INST_PRPH_SLCT:
 #if CF_DBG_SLCT
@@ -681,6 +711,9 @@ void handle_bus(int addr, int inst, int pa, uint64_t data56)
 	if( inst == INST_LDI ) {
 		bLdi = true;
 		pending_data_inst = inst;
+	}
+	if( inst == INST_FETCH ) {
+		bFetch = true;
 	}
 	// Check for display transactions
 	if (display_ce && !bLdi)
@@ -987,8 +1020,8 @@ const char *mcl0[0x10] = {
 
 void cl0mod(int m, bool bA)
 {
-	if( !bA ) {
-		printf("%2d");
+	if( bA ) {
+		printf("%2d", m);
 		if( m>9 )
 			printf(" (%X)", m);
 	} else {
@@ -1185,8 +1218,9 @@ void disAsm(int inst, int addr, uint64_t data)
 	static int prev;
 	static bool bClass1 = false;
 
+	printf(" %04X [%02o %04o]", addr, addr>>10, addr & 0x3FF);
 	if( bLDICON ) {
-		int con = data & 0x3FF;
+		int con = inst & 0x3FF;
 		printf(" - CON: %03X (%04o)", con, con);
 		bLDICON = false;
 		return;

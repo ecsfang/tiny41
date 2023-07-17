@@ -5,10 +5,6 @@
 #include "pico/multicore.h"
 #include "tiny41.h"
 
-const uint LED_PIN_R = TINY2040_LED_R_PIN;
-const uint LED_PIN_B = TINY2040_LED_B_PIN;
-
-
 extern void core1_main_3(void);
 extern void process_bus(void);
 extern void capture_bus_transactions(void);
@@ -88,8 +84,8 @@ int main()
     gpio_init(LED_PIN_B);
     gpio_set_dir(LED_PIN_R, GPIO_OUT);
     gpio_set_dir(LED_PIN_B, GPIO_OUT);
-    gpio_put(LED_PIN_R, 0);
-    gpio_put(LED_PIN_B, 0);
+    gpio_put(LED_PIN_R, LED_OFF);
+    gpio_put(LED_PIN_B, LED_OFF);
 
     multicore_launch_core1(core1_main_3);
 
@@ -172,7 +168,7 @@ int main()
 
 void UpdateLCD(char *txt, bool *bp)
 {
-    Write41String(buf, 5, 16, txt, bp);
+    Write41String(buf, 3, 16, txt, bp);
 }
 void UpdateAnnun(char *ann)
 {

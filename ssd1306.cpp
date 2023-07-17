@@ -249,7 +249,7 @@ inline void _write41char(uint8_t *buf, int p, uint16_t c) {
 }
 
 int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp) {
-    if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
+    if ((x > SSD1306_WIDTH - (bp?3:8)) || y > SSD1306_HEIGHT - 8)
         return 0;
 
     // For the moment, only write on Y row boundaries (every 8 vertical pixels)

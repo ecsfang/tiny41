@@ -15,3 +15,10 @@
 #define P_CLK1  6
 #define P_VBAT  7
 
+#define LED_ON  0
+#define LED_OFF 1
+
+#define LED_PIN_R TINY2040_LED_R_PIN
+#define LED_PIN_G TINY2040_LED_G_PIN
+#define LED_PIN_B TINY2040_LED_B_PIN
+
