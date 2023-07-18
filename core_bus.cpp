@@ -6,7 +6,7 @@
 #include "tiny41.h"
 #include "core_bus.h"
 
-#include "zenrom.h"
+//#include "zenrom.h"
 //#include "embedrom.h"
 
 //#define DRIVE_ISA
@@ -152,18 +152,28 @@ int fcycno[NUM_FRAG];
 
 // Data transfer to core 0
 
-#define NUM_BUS_T 7000
+#define NUM_BUS_T 3000 // 7000
 
 int queue_overflow = 0;
 
 volatile int data_in = 0;
 volatile int data_out = 0;
 
-volatile int bus_addr[NUM_BUS_T];
-volatile int bus_inst[NUM_BUS_T];
-volatile int bus_pa[NUM_BUS_T];
-volatile uint64_t bus_data56[NUM_BUS_T];
-volatile int bus_sync[NUM_BUS_T];
+typedef struct {
+  uint64_t  data;
+  uint16_t  addr;
+  uint16_t  cmd;
+  uint8_t   pa;
+	uint8_t		sync;
+} Bus_t;
+
+volatile Bus_t bus[NUM_BUS_T];
+
+//volatile int bus_addr[NUM_BUS_T];
+//volatile int bus_inst[NUM_BUS_T];
+//volatile int bus_pa[NUM_BUS_T];
+//volatile uint64_t bus_data56[NUM_BUS_T];
+//volatile int bus_sync[NUM_BUS_T];
 int last_sync = 0;
 int trans_i = 0;
 int data = 0;
@@ -179,6 +189,164 @@ uint64_t data56 = 0;
 char cpu2buf[1024];
 int nCpu2 = 0;
 
+#if 1
+
+#define FI(x) ((gpio_states = sio_hw->gpio_in) & (1 << P_CLK##x))
+#define LOW 0
+#define HIGH 1
+
+void core1_main_3(void)
+{
+	static int bIsaEn = 0;
+	static int bIsa = 0;
+	static uint64_t isa = 0;
+	static uint16_t drive_isa = 0;
+	static uint16_t inst = 0;
+
+	irq_set_mask_enabled(0xffffffff, false);
+
+	gpio_states = sio_hw->gpio_in;
+	last_sync = gpio_states & (1 << P_SYNC);
+
+	while (1)
+	{
+		// Wait for CLK2 to have a falling edge
+		// Wait while low
+		while (FI(2) == LOW) { }
+		// Now high, wait for falling edge
+		while (FI(2) == HIGH) { }
+
+		// Another bit, check SYNC to find bit number
+		sync = gpio_states & (1 << P_SYNC);
+
+		// Do we drive the ISA line?
+		// Bit numbers are out by one as bit_no hasn't been incremented yet.
+
+		if( drive_data_flag ) {
+			switch(bit_no) {
+			case 38:
+				// Drive the ISA line for this data bit
+				gpio_put(LED_PIN_B, LED_ON);
+				break;
+			case 39:
+				// Drive the ISA line for this data bit
+				gpio_set_dir(P_ISA, GPIO_OUT);
+				break;
+			case 42:
+				// Drive the ISA line for this data bit
+				gpio_put(P_ISA, 1);
+				bIsaEn = true;
+				break;
+			case 52:
+        // Don't drive data any more after this
+        drive_data_flag = 0;
+			default:
+				if ((bit_no >= 43) && (bit_no <= 52))	{
+#if 1
+					gpio_put(P_ISA, drive_isa & 1);
+					drive_isa >>= 1;
+					driven_isa++;
+#endif
+				}
+			}
+		}
+
+		// Now high, wait for falling edge
+		while (FI(1) == LOW) { }
+		// Now high, wait for falling edge
+		while (FI(1) == HIGH) { }
+
+		if (bIsaEn && bit_no == 53)	{
+			// Don't drive data any more
+			gpio_set_dir(P_ISA, GPIO_IN);
+			bIsaEn = 0;
+		}
+
+		// Another bit, check SYNC to find bit number
+		sync = gpio_states & (1 << P_SYNC);
+
+		if ((last_sync == 0) && (sync != 0)) {
+			sync_count++;
+			bit_no = 44;
+		} else {
+			bit_no = (bit_no + 1) % 56;
+		}
+
+    // Save all bits in data56 reg ...
+		if( (gpio_states & (1 << P_DATA)) )
+      data56 |= 1LL << bit_no;
+		if( (gpio_states & (1 << P_ISA)) )
+      isa |= 1LL << bit_no;
+
+		// Get data and put into data or instruction if bit no is OK for those fields
+		// If the SYNC is high and we are to drive the ISA line then if we have embedded data
+		// then we drive the ISA line.
+
+//		if ( bit_no == 54 )
+//			inst = bus[data_in].cmd = inst ? inst : (isa>>44) & 0x3FF;
+
+		// Got address. If the address is that of the embedded ROM then we flag that we have
+		// to put an instruction on the bus later
+		if (bit_no == 29)
+		{
+			address = (isa >> 14) & 0xFFFF;
+			bus[data_in].addr = address;
+
+			drive_data_flag = 0;
+
+#ifdef EMBED_8000_ROM
+			if ((address >= LOW_EMBED_ROM_ADDR) && (address <= HIGH_EMBED_ROM_ADDR))
+			{
+				embed_seen++;
+				drive_data_flag = 1;
+				drive_isa = embed_rom[address - LOW_EMBED_ROM_ADDR];
+				printf("ROM: %04X -> [%03o]\n", address, drive_isa);
+			}
+#endif
+#ifdef EMBED_9000_ROM
+			if ((address >= LOW_EMBED_ROM2_ADDR) && (address <= HIGH_EMBED_ROM2_ADDR))
+			{
+				embed_seen++;
+				drive_data_flag = 1;
+				inst = drive_isa = embed_zenrom_rom[address - LOW_EMBED_ROM2_ADDR];
+				//printf("\n--> ZEN: %04X -> [%03o] (%03o)\n", address, drive_isa, inst);
+			}
+#endif
+		}
+
+		if (bit_no == 7) {
+			bus[data_in].pa = data56 & 0xFF;
+		}
+
+		// If bitno = 55 then we have another frame, store the transaction
+		if (bit_no == 55)
+		{
+			// A 56 bit frame has completed, we send some information to core0 so it can update
+			// the display and anything else it needs to
+			inst = bus[data_in].cmd = inst ? inst : (isa>>44) & 0x3FF;
+			bus[data_in].data = data56;
+			//bus[data_in].sync = sync?1:0;
+
+			isa = data56 = 0LL;
+			inst = 0;
+
+			int last_data_in = data_in;
+
+			data_in = (data_in + 1) % NUM_BUS_T;
+
+			if (data_out == data_in)
+			{
+				// No space
+				queue_overflow = 1;
+				data_in = last_data_in;
+			}
+			gpio_put(LED_PIN_B, LED_OFF);
+		}
+		last_sync = sync;
+	}
+}
+
+#else
 void core1_main_3(void)
 {
 	static int bIsaEn = 0;
@@ -343,11 +511,12 @@ void core1_main_3(void)
 			// A 56 bit frame has completed, we send some information to core0 so it can update
 			// the display and anything else it needs to
 
-			bus_addr[data_in] = address;
-			bus_inst[data_in] = instruction;
-			bus_pa[data_in] = periph_addr;
-			bus_data56[data_in] = data56;
-			bus_sync[data_in] = sync?1:0;
+			bus[data_in].addr = address;
+			bus[data_in].cmd = instruction;
+			bus[data_in].pa = periph_addr;
+			bus[data_in].data = data56;
+			bus[data_in].sync = sync?1:0;
+			bus[data_in].bits = data_in;
 
 			address = 0;
 			instruction = 0;
@@ -372,6 +541,7 @@ void core1_main_3(void)
 		last_sync = sync;
 	}
 }
+#endif
 
 void process_bus(void)
 {
@@ -382,15 +552,19 @@ void process_bus(void)
 	while (data_in != data_out)
 	{
 #if 0
-	  printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%016llX",
+	  printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%014llX",
 		 data_out,
-		 bus_addr[data_out],
-		 bus_addr[data_out],
-		 bus_inst[data_out],
-		 bus_pa[data_out],
-		 bus_data56[data_out]);
+		 bus[data_out].addr,
+		 bus[data_out].addr,
+		 bus[data_out].cmd,
+		 bus[data_out].pa,
+		 bus[data_out].data);
 #else
 		// Handle the bus traffic
+		if( queue_overflow ) {
+			printf("\n## Bus overflow!! #####\n");
+			queue_overflow = 0;
+		}
 		//handle_bus(bus_addr[data_out], bus_inst[data_out], bus_pa[data_out], bus_data56[data_out]);
 		handle_bus(data_out);
 #endif
@@ -573,17 +747,18 @@ void rotateDispReg(uint8_t r)
 //void handle_bus(int addr, int inst, int pa, uint64_t data56)
 void handle_bus(int idx)
 {
-	int addr = bus_addr[idx];
-	int inst = bus_inst[idx];
-	int pa = bus_pa[idx];
-	uint64_t data56 = bus_data56[idx];
-	int sync = bus_sync[idx];
-	//printf("\n- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
+	int addr = bus[idx].addr;
+	int inst = bus[idx].cmd;
+	int pa = bus[idx].pa;
+	uint64_t data56 = bus[idx].data;
+	int sync = bus[idx].sync;
 	if( cpu2buf[0]) {
 		printf("\n[%s]", cpu2buf);
 		cpu2buf[0] = 0;
 	}
 	printf("\n");
+//	printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
+	printf("- DCE:%d (%02o %04o) sync=%d DATA=%016llX", display_ce, addr>>10, addr&0x3FF, sync, data56);
 
 	if( bFetch ) { 
 		printf("        @[%04X] - 0x%03X (%04o)", addr, inst, inst);
