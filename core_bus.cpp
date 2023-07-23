@@ -150,10 +150,10 @@ volatile int data_in = 0;
 volatile int data_out = 0;
 
 typedef struct {
-  uint64_t  data;
-  uint16_t  addr;
-  uint16_t  cmd;
-  uint8_t   pa;
+  	uint64_t  data;
+  	uint16_t  addr;
+  	uint16_t  cmd;
+  	uint8_t   pa;
 	uint8_t		sync;
 } Bus_t;
 
@@ -316,8 +316,6 @@ void core1_main_3(void)
 		last_sync = sync;
 	}
 }
-#endif
-
 
 void process_bus(void)
 {
