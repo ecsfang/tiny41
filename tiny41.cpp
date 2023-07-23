@@ -28,8 +28,12 @@ void bus_init(void)
   gpio_pull_down(P_ISA);
   gpio_init(P_DATA);
   gpio_set_dir(P_DATA, GPIO_IN);
-  gpio_init(P_VBAT);
-  gpio_set_dir(P_VBAT, GPIO_IN);
+  gpio_init(P_ISA_OE);
+  gpio_set_dir(P_ISA_OE, GPIO_OUT);
+  gpio_put(P_ISA_OE, 1);
+  gpio_init(P_ISA_DRV);
+  gpio_set_dir(P_ISA_DRV, GPIO_OUT);
+  gpio_put(P_ISA_DRV, 0);
 }
 
 uint8_t buf[SSD1306_BUF_LEN];
@@ -168,10 +172,51 @@ int main()
 
 void UpdateLCD(char *txt, bool *bp)
 {
-    Write41String(buf, 3, 16, txt, bp);
+    if( txt )
+        Write41String(buf, 3, 16, txt, bp);
+    else {
+        Write41String(buf, 3, 16, NULL, NULL);
+        UpdateAnnun(0);
+    }
+
 }
-void UpdateAnnun(char *ann)
+
+typedef struct {
+    uint8_t len;
+    char ann[4];
+    bool sp;
+} Annu_t;
+Annu_t annu[NR_ANNUN] = {
+    { 1, "B",  true },
+    { 2, "US", true },
+    { 1, "G",  false },
+    { 1, "R",  true },
+    { 2, "SH", true },
+    { 1, "0",  false },
+    { 1, "1",  false },
+    { 1, "2",  false },
+    { 1, "3",  false },
+    { 1, "4",  true },
+    { 1, "P",  true },
+    { 2, "AL", false }
+};
+
+void UpdateAnnun(uint16_t ann)
 {
-	printf("\nAnnunciators: [%s]", ann);
-    WriteString(buf, 0, 32, ann);
+    char sBuf[24];
+    memset(sBuf, ' ', 24);
+    int pa = 0;
+    for (int a = 0; a < NR_ANNUN; a++)
+    {
+        if (ann & 1 << ((NR_ANNUN - 1) - a))
+        {
+            for (int i = 0; i < annu[a].len; i++)
+                sBuf[pa + i] = annu[a].ann[i];
+        }
+        // Add space is needed ...
+        pa += annu[a].len + (annu[a].sp ? 1 : 0);
+    }
+    sBuf[pa] = 0;
+	printf("\nAnnunciators: [%s]", sBuf);
+    WriteString(buf, 0, 32, sBuf);
 }

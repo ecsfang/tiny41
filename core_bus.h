@@ -36,6 +36,7 @@
 #define INST_SLSABC                    01750
 #define INST_PRPH_SLCT                 01760
 #define INST_RAM_SLCT                  01160
+#define INST_POWOFF                    00140
 
 #define INST_FLLDA                     00070
 #define INST_FLLDB                     00170
@@ -64,14 +65,16 @@
 #define INST_ENROM3                    0x1D40
 #define INST_ENROM4                    0x1C0
 
+#define INST_WANDRD                    00070
+
 #define DISP_ADDR                      0xFD
+#define WAND_ADDR                      0xFE
 
 
 #define MASK_48_BIT    (0xFFFFFFFFFFFFL)
 #define REG_C_48_MASK  (0x111111111111L)
 
-#define NR_CHARS  12
-#define NR_ANNUN  12
+int wand_ce = 0;
 
 int display_ce = 0;
 char dtext[2*NR_CHARS+1];

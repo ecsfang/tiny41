@@ -300,8 +300,14 @@ void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
     if (x > SSD1306_WIDTH - CHAR41_WIDTH || y > SSD1306_HEIGHT - 2*8)
         return;
 
-    while (*str) {
-        x += Write41Char(buf, x, y, *str++, *pbp++);
+    if( str ) {
+        while (*str) {
+            x += Write41Char(buf, x, y, *str++, *pbp++);
+        }
+    } else {
+        for(int c=0; c<12; c++) {
+            x += Write41Char(buf, x, y, ' ', false);
+        }
     }
 }
 
