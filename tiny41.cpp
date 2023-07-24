@@ -5,6 +5,8 @@
 #include "pico/multicore.h"
 #include "tiny41.h"
 
+#define DEBUG_ANALYZER
+
 extern void core1_main_3(void);
 extern void process_bus(void);
 extern void capture_bus_transactions(void);
@@ -15,28 +17,39 @@ extern volatile int embed_seen;
 extern volatile int data_in;
 extern volatile int data_out;
 
+#define INIT_PIN(n,io,def)      \
+    do {                        \
+        gpio_init(n);           \
+        gpio_set_dir(n, io);    \
+        if( io == GPIO_OUT )    \
+            gpio_put(n, def);   \
+    } while(0)
+
 void bus_init(void)
 {
-  gpio_init(P_CLK1);
-  gpio_set_dir(P_CLK1, GPIO_IN);
-  gpio_init(P_CLK2);
-  gpio_set_dir(P_CLK2, GPIO_IN);
-  gpio_init(P_SYNC);
-  gpio_set_dir(P_SYNC, GPIO_IN);
-  gpio_init(P_ISA);
-  gpio_set_dir(P_ISA, GPIO_IN);
-  gpio_pull_down(P_ISA);
-  gpio_init(P_DATA);
-  gpio_set_dir(P_DATA, GPIO_IN);
-  gpio_init(P_ISA_OE);
-  gpio_set_dir(P_ISA_OE, GPIO_OUT);
-  gpio_put(P_ISA_OE, 1);
-  gpio_init(P_ISA_DRV);
-  gpio_set_dir(P_ISA_DRV, GPIO_OUT);
-  gpio_put(P_ISA_DRV, 0);
+    // Init the input pins ...
+    INIT_PIN(P_CLK1,    GPIO_IN,  0);
+    INIT_PIN(P_CLK2,    GPIO_IN,  0);
+    INIT_PIN(P_SYNC,    GPIO_IN,  0);
+    INIT_PIN(P_ISA,     GPIO_IN,  0);
+    INIT_PIN(P_DATA,    GPIO_IN,  0);
+    // Init the ISA driver ...
+    INIT_PIN(P_ISA_OE,  GPIO_OUT, 1);
+    INIT_PIN(P_ISA_DRV, GPIO_OUT, 0);
+    // Init leds ...
+    INIT_PIN(LED_PIN_R, GPIO_OUT, LED_OFF);
+    INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
 }
 
 uint8_t buf[SSD1306_BUF_LEN];
+
+// Initialize render area for entire frame (SSD1306_WIDTH pixels by SSD1306_NUM_PAGES pages)
+struct render_area frame_area = {
+    start_col : 0,
+    end_col : SSD1306_WIDTH - 1,
+    start_page : 0,
+    end_page : SSD1306_NUM_PAGES - 1
+};
 
 int main()
 {
@@ -84,37 +97,14 @@ int main()
     // run through the complete initialization process
     SSD1306_init();
 
-    gpio_init(LED_PIN_R);
-    gpio_init(LED_PIN_B);
-    gpio_set_dir(LED_PIN_R, GPIO_OUT);
-    gpio_set_dir(LED_PIN_B, GPIO_OUT);
-    gpio_put(LED_PIN_R, LED_OFF);
-    gpio_put(LED_PIN_B, LED_OFF);
-
     multicore_launch_core1(core1_main_3);
-
-    // Initialize render area for entire frame (SSD1306_WIDTH pixels by SSD1306_NUM_PAGES pages)
-    struct render_area frame_area = {
-        start_col: 0,
-        end_col : SSD1306_WIDTH - 1,
-        start_page : 0,
-        end_page : SSD1306_NUM_PAGES - 1
-        };
 
     calc_render_area_buflen(&frame_area);
 
     // zero the entire display
     memset(buf, 0, SSD1306_BUF_LEN);
     render(buf, &frame_area);
-/*
-    // intro sequence: flash the screen 3 times
-    for (int i = 0; i < 3; i++) {
-        SSD1306_send_cmd(SSD1306_SET_ALL_ON);    // Set all pixels on
-        sleep_ms(500);
-        SSD1306_send_cmd(SSD1306_SET_ENTIRE_ON); // go back to following RAM for pixel state
-        sleep_ms(500);
-    }
-*/
+
     char *text[] = {
         (char*)" \x2c Tiny41 \x2e",
         (char*)"\x5e 3.1416"
@@ -125,67 +115,68 @@ int main()
     Write41String(buf, 5, 0, text[0], bp);
     bp[1] = true;
     Write41String(buf, 5, 16, text[1], bp);
-/*    for( int x=0; x<12; x++) {
-        Write41Char(buf, 5+x*10, 0, (char)text[0][x]);
-        //Write41Char(buf, 5+x*10, 16, (char)x+48);
-    }*/
 
-    char sBuf[64];
-    sprintf(sBuf, "B US GR SH 0123 PG AL");
-    WriteString(buf, 0, 32, sBuf);
+    // Turn on all annunciators ...
+    UpdateAnnun(0xFFF);
 
     render(buf, &frame_area);
 
-    int z=0;
+#ifdef DEBUG_ANALYZER
+    char sBuf[32];
+    int oSync, oEmbed, oDin, oDout;
+    int bRend;
+
+    oSync = oEmbed = oDin = oDout = -1;
+    bRend = 0;
+#endif
+
     while (1) {
         //capture_bus_transactions();
         process_bus();
         // Update the USB CLI
         //serial_loop();
-        
-/*        gpio_put(LED_PIN, 0);
-        sleep_ms(250);
-        gpio_put(LED_PIN, 1);
-//        printf("Hello HP41!\n");
-        sleep_ms(250);
-        for( int x=0; x<12; x++) {
-            //Write41Char(buf, 5+x*10, 0, (char)x+z);
+
+#ifdef DEBUG_ANALYZER
+        if( oSync != sync_count || oEmbed != embed_seen ) {
+            sprintf(sBuf, "S:%d E:%d", sync_count, embed_seen);
+            WriteString(buf, 5, 48, sBuf);
+            oSync = sync_count;
+            oEmbed = embed_seen;
+            bRend++;
         }
-        for( int x=2; x<8; x++) {
-            if( gpio_get(x) )
-                Write41Char(buf, 5+x*10, 16, (char)48);
-            else
-                Write41Char(buf, 5+x*10, 16, (char)49);
+        if( oDin != data_in || oDout != data_out ) {
+            sprintf(sBuf, "I:%d O:%d", data_in, data_out);
+            WriteString(buf, 5, 56, sBuf);
+            oDin = data_in;
+            oDout = data_out;
+            bRend++;
         }
-        */
-        sprintf(sBuf, "S:%d E:%d", sync_count, embed_seen);
-        //printf("%s\n", sBuf);
-        WriteString(buf, 5, 48, sBuf);
-        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
-        WriteString(buf, 5, 56, sBuf);
-        render(buf, &frame_area);
-        z++;
-        if( z > 127 )
-            z = 0;
+        if( bRend ) {
+            render(buf, &frame_area);
+            bRend = 0;
+        }
+#endif//DEBUG_ANALYZER
     }
 }
 
 void UpdateLCD(char *txt, bool *bp)
 {
-    if( txt )
+    if( txt ) {
         Write41String(buf, 3, 16, txt, bp);
-    else {
+//        render(buf, &frame_area);
+    } else {
+        // Turn of the display
         Write41String(buf, 3, 16, NULL, NULL);
         UpdateAnnun(0);
     }
-
 }
 
 typedef struct {
-    uint8_t len;
+    uint8_t len;    // Length of the text
     char ann[4];
-    bool sp;
+    bool sp;        // True if followed by a space
 } Annu_t;
+
 Annu_t annu[NR_ANNUN] = {
     { 1, "B",  true },
     { 2, "US", true },
@@ -219,4 +210,5 @@ void UpdateAnnun(uint16_t ann)
     sBuf[pa] = 0;
 	printf("\nAnnunciators: [%s]", sBuf);
     WriteString(buf, 0, 32, sBuf);
+//    render(buf, &frame_area);
 }

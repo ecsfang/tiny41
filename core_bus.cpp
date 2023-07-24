@@ -7,9 +7,9 @@
 #include "core_bus.h"
 #include "disasm.h"
 
-//#include "zenrom.h"
+#include "zenrom.h"
 //#include "embedrom.h"
-#include "ppcrom.rom"
+//#include "ppcrom.rom"
 
 typedef struct {
     uint16_t start;
@@ -72,7 +72,7 @@ void disAsm(int inst, int addr, uint64_t data);
 #define CF_DISPLAY_OLED    0
 #define CF_DBG_DISP_ON     1
 #define CF_DBG_SLCT        0
-#define CF_DBG_DISP_INST   1
+#define CF_DBG_DISP_INST   0
 #define CF_USE_DISP_ON     1
 #define CF_DBG_KEY         1
 
@@ -120,7 +120,7 @@ volatile int driven_isa = 0;
 volatile int embed_seen = 0;
 volatile int sync_count = 0;
 
-void handle_bus(int idx);
+void handle_bus(volatile Bus_t *pBus);
 
 #define NUM_FRAG 100
 
@@ -148,14 +148,6 @@ int queue_overflow = 0;
 
 volatile int data_in = 0;
 volatile int data_out = 0;
-
-typedef struct {
-  	uint64_t  data;
-  	uint16_t  addr;
-  	uint16_t  cmd;
-  	uint8_t   pa;
-	uint8_t		sync;
-} Bus_t;
 
 volatile Bus_t bus[NUM_BUS_T];
 
@@ -186,6 +178,8 @@ void core1_main_3(void)
 	static int bIsa = 0;
 	static uint64_t isa = 0LL;
 	static uint16_t inst = 0;
+	Module_t *mp = NULL;
+	volatile Bus_t *pBus = &bus[data_in];
 
 	irq_set_mask_enabled(0xffffffff, false);
 
@@ -201,12 +195,9 @@ void core1_main_3(void)
 		// Now high, wait for falling edge
 		while(FI(2) == HIGH ) {}
 
-		// Another bit, check SYNC to find bit number
-		sync = GPIO_PIN(P_SYNC);
-
-		// Do we drive the ISA line?
 		// Bit numbers are out by one as bit_no hasn't been incremented yet.
 
+		// Do we drive the ISA line?
 		if( drive_data_flag ) {
 			// Drive the ISA line for this data bit
 			switch( bit_no ) {
@@ -214,7 +205,7 @@ void core1_main_3(void)
 				gpio_put(LED_PIN_B, LED_ON);
 				break;
 			case 39:
-				gpio_put(P_ISA_OE, 0);
+				gpio_put(P_ISA_OE, 0); // Enable ISA driver
 				break;
 			case 42:
 				gpio_put(P_ISA_DRV, 0);
@@ -238,24 +229,21 @@ void core1_main_3(void)
 		// Now high, wait for falling edge
 		while(FI(1) == HIGH ) {}
 
-		if( bit_no == 53 && bIsaEn )
-		{
+		// Another bit, check SYNC to find bit number
+		sync = GPIO_PIN(P_SYNC);
+
+		if( bIsaEn && bit_no == 53 ) {
 			// Don't drive data any more
 			gpio_put(P_ISA_OE, 1);
 			gpio_put(P_ISA_DRV, 0);
 			bIsaEn = 0;
 		}
 
-		// Another bit, check SYNC to find bit number
-		sync = GPIO_PIN(P_SYNC);
-
-		if ((last_sync == 0) && (sync != 0))
-		{
+		if ((last_sync == 0) && (sync != 0)) {
+      pBus->sync = 1;
 			sync_count++;
 			bit_no = 44;
-		}
-		else
-		{
+		} else {
 			bit_no = (bit_no + 1) % 56;
 		}
 
@@ -265,37 +253,41 @@ void core1_main_3(void)
 		if( GPIO_PIN(P_ISA) )
 			isa |= 1LL << bit_no;
 
-		// Got address. If the address is that of the embedded ROM then we flag that we have
-		// to put an instruction on the bus later
-		if (bit_no == 29)
-		{
+		switch( bit_no ) {
+		case 0:
+			pBus = &bus[data_in];
+			break;
+
+		case 7:
+			pBus->pa = data56 & 0xFF;
+      pBus->sync = 0;
+			break;
+
+		case 29:
+			// Got address. If the address is that of the embedded ROM then we flag that we have
+			// to put an instruction on the bus later
 			address = (isa >> 14) & 0xFFFF;
-			bus[data_in].addr = address;
-
+			pBus->addr = address;
 			drive_data_flag = 0;
+			mp = roms[address>>12];
+			break;
 
-			Module_t *mp = roms[address>>12];
-			if( mp ) {
-				if ((address >= mp->start) && (address <= mp->end))
-				{
-					embed_seen++;
-					drive_data_flag = 1;
-					inst = drive_data = mp->rom[address - mp->start];
-					//printf("ROM: %04X -> [%03o]\n", address, drive_data);
-				}
+		case 30:
+			// Check if we should emulate any modules ...
+			if( mp && (address >= mp->start) && (address <= mp->end) ) {
+				embed_seen++;
+				drive_data_flag = 1;
+				inst = drive_data = mp->rom[address - mp->start];
+				//printf("ROM: %04X -> [%03o]\n", address, drive_data);
 			}
-		}
+			break;
 
-		if( bit_no == 7 )
-			bus[data_in].pa = data56 & 0xFF;
-
-		// If bitno = 55 then we have another frame, store the transaction
-		if (bit_no == 55)
-		{
+		case 55:
+			// If bitno = 55 then we have another frame, store the transaction
 			// A 56 bit frame has completed, we send some information to core0 so it can update
 			// the display and anything else it needs to
-			inst = bus[data_in].cmd = inst ? inst : (isa >>44) & 0x3FF;
-			bus[data_in].data = data56;
+			inst = pBus->cmd = inst ? inst : (isa >>44) & 0x3FF;
+			pBus->data = data56;
 
 			isa = data56 = 0LL;
 			inst = 0;
@@ -312,6 +304,7 @@ void core1_main_3(void)
 				gpio_put(LED_PIN_R, LED_ON);
 			}
 			gpio_put(LED_PIN_B, LED_OFF);
+			break;
 		}
 		last_sync = sync;
 	}
@@ -332,7 +325,7 @@ void process_bus(void)
 		 bus[data_out].data);
 #else
 		// Handle the bus traffic
-		handle_bus(data_out);
+		handle_bus(&bus[data_out]);
 #endif
 		data_out = (data_out + 1) % NUM_BUS_T;
 	}
@@ -487,12 +480,33 @@ void rotateDispReg(uint8_t r)
 	dump_dregs();
 }
 
-void handle_bus(int idx)
+void handle_bus(volatile Bus_t *pBus)
 {
-	int addr = bus[idx].addr;
-	int inst = bus[idx].cmd;
-	int pa = bus[idx].pa;
-	uint64_t data56 = bus[idx].data;
+	int addr = pBus->addr;
+	int inst = pBus->cmd;
+	int pa = pBus->pa;
+	int sync = pBus->sync;
+	uint64_t data56 = pBus->data;
+
+	if (pending_data_inst == INST_PRPH_SLCT) {
+		switch (pa) {
+		case DISP_ADDR:
+			peripheral_ce = PH_DISPLAY;
+			break;
+		case WAND_ADDR:
+			peripheral_ce = PH_WAND;
+			break;
+		case TIMR_ADDR:
+			peripheral_ce = PH_TIMER;
+			break;
+		case CRDR_ADDR:
+			peripheral_ce = PH_CRDR;
+			break;
+		default:
+			peripheral_ce = PH_NONE;
+		}
+	}
+
 	//int sync = bus_sync[idx];
 	//printf("\n- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
 	if( cpu2buf[0]) {
@@ -500,11 +514,28 @@ void handle_bus(int idx)
 		cpu2buf[0] = 0;
 	}
 	printf("\n");
+	switch( peripheral_ce ) {
+			case PH_DISPLAY:
+				printf("DISP");
+				break;
+			case PH_WAND:
+				printf("WAND");
+				break;
+			case PH_TIMER:
+				printf("TIMR");
+				break;
+			case PH_CRDR:
+				printf("CRDR");
+				break;
+			default:
+				printf("    ");
+			}
 //	printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
-	printf("- DCE:%d (%02o %04o) sync=%d DATA=%016llX", display_ce, addr>>10, addr&0x3FF, sync, data56);
+//	printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
+	printf(" %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr>>12, (addr>>10)&0b11, addr&0x3FF, inst);
 
 	if( bFetch ) { 
-		printf("        @[%04X] - 0x%03X (%04o)", addr, inst, inst);
+		printf("   > @%04X --> %03X (%04o)", addr, inst, inst);
 		bFetch = false;
 	} else {
 		disAsm(inst, addr, data56);
@@ -521,22 +552,11 @@ void handle_bus(int idx)
 #if CF_DBG_SLCT
 			printf("\nPF AD:%02X", pa);
 #endif
-			switch( pa ) {
-			case DISP_ADDR:
-				display_ce = 1;
-				break;
-			case WAND_ADDR:
-				wand_ce = 1;
-				break;
-			default:
-				display_ce = 0;
-				wand_ce = 0;
-			}
 			break;
 
 		case INST_WRITE_ANNUNCIATORS:
 #if CF_DBG_DISP_INST
-			printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
+//			printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
 			UpdateAnnun((uint16_t)data56&0xFFF);
 			break;
@@ -566,56 +586,48 @@ void handle_bus(int idx)
 		pending_data_inst = 0;
 	}
 
+	// Check for instructions
 	switch (inst)
 	{
 	case INST_DISPLAY_OFF:
 #if CF_DBG_DISP_ON
-		printf("\nDisplay off");
+		printf(" - Display off");
 #endif
 		display_on = 0;
 		break;
-
 	case INST_DISPLAY_TOGGLE:
 		display_on = !display_on;
 #if CF_DBG_DISP_ON
-		printf("\nDisplay toggle --> %s", display_on?"ON":"OFF");
+		printf(" (%s)", display_on?"ON":"OFF");
 #endif
 		dump_dregs();
 		break;
-
-	case INST_PRPH_SLCT:
-		pending_data_inst = INST_PRPH_SLCT;
-		break;
-	}
-
-	// Check for instructions
-	switch (inst)
-	{
 	case INST_PRPH_SLCT:
 #if CF_DBG_SLCT
 		printf("\nPRPH_SLCT: PA=%02X", pa);
 #endif
+		pending_data_inst = inst;
 		break;
-
 	case INST_RAM_SLCT:
 #if CF_DBG_SLCT
 		printf("\nRAM_SLCT: PA=%02X", pa);
 #endif
+		pending_data_inst = inst;
+		break;
+	case INST_LDI:
+		bLdi = true;
+		pending_data_inst = inst;
+		break;
+	case INST_FETCH:
+		bFetch = true;
+		break;
+	case INST_POWOFF:
+		dump_dregs();
 		break;
 	}
 
-	if( inst == INST_LDI ) {
-		bLdi = true;
-		pending_data_inst = inst;
-	}
-	if( inst == INST_FETCH ) {
-		bFetch = true;
-	}
-	if( inst == INST_POWOFF ) {
-		dump_dregs();
-	}
 	// Check for display transactions
-	if (wand_ce && !bLdi)
+	if (peripheral_ce == PH_WAND && !bLdi)
 	{
 		switch (inst)
 		{
@@ -625,7 +637,7 @@ void handle_bus(int idx)
 		}
 	}
 	// Check for display transactions
-	if (display_ce && !bLdi)
+	if (peripheral_ce == PH_DISPLAY && !bLdi)
 	{
 		switch (inst)
 		{
@@ -861,53 +873,9 @@ void capture_bus_transactions(void)
   printf("\n");
 }
 
-void prtCl2Param(int inst)
-{
-/*3   6   1   7   5   0   2   4
-	ALL M 	S&X MS 	XS 	@PT PT← P-Q
-  00E 01A 006 01E 016 002 00A 012
-	011 110 001 111 101 000 010 100 */
-	printf(cmd2param[(inst>>2)&0x07]);
-}
-
 void prtCl2Cmd(int inst)
 {
-	printf(" - ");
-	switch((inst)&0x3E0) {
-	case 0x000: printf("A=0	 "); break;		//Clear A
-	case 0x020: printf("B=0  "); break;		//Clear B
-	case 0x040: printf("C=0  "); break;		//Clear C
-	case 0x100: printf("A=C  "); break;		//Copy C to A
-	case 0x0C0: printf("C=B  "); break;		//Copy B to C
-	case 0x080: printf("B=A  "); break;		//Copy B to A
-	case 0x0A0: printf("A<>C  "); break;		//Exchange A and C
-	case 0x0E0: printf("C<>B  "); break;		//Exchange C and B
-	case 0x060: printf("A<>B  "); break;		//Exchange A and B
-	case 0x200: printf("C=C+A  "); break;		//Add A to C
-	case 0x140: printf("A=A+C  "); break;		//Add C to A
-	case 0x120: printf("A=A+B  "); break;		//Add B to A
-	case 0x1E0: printf("C=C+C  "); break;		//Shift C 1 bit left
-	case 0x240: printf("C=A-C  "); break;		//Subtract C from A
-	case 0x1C0: printf("A=A-C  "); break;		//Subtract C from A
-	case 0x180: printf("A=A-B  "); break;		//Subtract B from A
-	case 0x220: printf("C=C+1  "); break;		//Increment C
-	case 0x160: printf("A=A+1  "); break;		//Increment A
-	case 0x260: printf("C=C-1  "); break;		//Decrement C
-	case 0x1A0: printf("A=A-1  "); break;		//Decrement A
-	case 0x2E0: printf("?C!=0  "); break;		//Carry if C≠0
-	case 0x340: printf("?A!=0  "); break;		//Carry if A≠0
-	case 0x2C0: printf("?B!=0  "); break;		//Carry if B≠0
-	case 0x360: printf("?A!=C  "); break;		//Carry if A≠C
-	case 0x300: printf("?A<C  "); break;		//Carry if A<C
-	case 0x320: printf("?A<B  "); break;		//Carry if A<B
-	case 0x3C0: printf("RSHFC  "); break;		//Shift C 1 digit right
-	case 0x380: printf("RSHFA  "); break;		//Shift A 1 digit
-	case 0x3A0: printf("RSHFB  "); break;		//Shift B 1 digit right
-	case 0x3E0: printf("LSHFA  "); break;		//Shift A 1 digit left
-	case 0x280: printf("C=0-C  "); break;		//1’s complement
-	case 0x2A0: printf("C=-C-1  "); break;		//2’s comp
-	}
-	prtCl2Param(inst);
+	printf("%s %s", cmd2[(inst>>5)&0x1F], cmd2param[(inst>>2)&0x07]);
 }
 
 void cl0mod(int m, bool bA)
@@ -923,11 +891,10 @@ void cl0mod(int m, bool bA)
 
 bool bLDICON = false;
 
-void prtCl0Cmd(int inst, int data)
+void prtCl0Cmd(int inst, int data, int con)
 {
 	int mod = (inst>>6) & 0x0F;
 	int sub = (inst>>2) & 0x0F;
-	printf(" - ");
 	switch(sub) {
 		case 0x0:
 			printf(cmd00[mod]);
@@ -1001,7 +968,18 @@ void prtCl0Cmd(int inst, int data)
 				break;
 			case 0x9:
 			case 0xF:
-				printf(" (PA=%02X)", data&0xFF);
+				// Don't know yet - data is pending ...
+				// printf(" (PA=%02X)", con&0xFF);
+				break;
+			case 0xB:
+				switch( peripheral_ce ) {
+				case PH_DISPLAY:
+					printf(" (WRTEN - writes annunciators)");
+					break;
+				case PH_CRDR:
+					printf(" (write to cardreader)");
+					break;
+				}
 				break;
 			}
 			break;
@@ -1031,57 +1009,51 @@ void disAsm(int inst, int addr, uint64_t data)
 {
 	static int prev;
 	static bool bClass1 = false;
+	static int con;
+//	printf(" %04X [%02o %04o] %03X %014llX - ", addr, addr>>10, addr & 0x3FF, inst, data);
+	printf(" - ");
 
-	printf(" %04X [%02o %04o] %03X ", addr, addr>>10, addr & 0x3FF, inst);
+	// Second word of LDI instruction ...
 	if( bLDICON ) {
-		int con = inst & 0x3FF;
-		printf(" - CON: %03X (%04o)", con, con);
+		con = inst & 0x3FF;
+		printf("CON: %03X (%04o)", con, con);
 		bLDICON = false;
 		return;
 	}
+
+	// Second word of jump instruction ...
 	if( bClass1 ) {
-		printf(" - ");
-		switch( inst & 0x3 ) {
-		case 0b00: printf("?NC XQ"); break;
-		case 0b01: printf("?C XQ"); break;
-		case 0b10: printf("?NC GO"); break;
-		case 0b11: printf("?C GO"); break;
-		}
-		printf(" %02X%02X", (inst >> 2) & 0xFF, prev);
+		prev |= (inst << 6) & 0xFF00;
+		printf("%s %04X", cmd1[inst&0x03], prev);
 		bClass1 = false;
 		return;
 	}
 
 	switch(inst & 0x03 ) {
 		case 0b00:
-			prtCl0Cmd(inst, data & 0x3FF);
+			prtCl0Cmd(inst, data & 0x3FF, con);
 			break;
 		case 0b01:
 			prev = (inst >> 2) & 0xFF;
 			bClass1 = true;
-			printf(" - -->");
+			printf("-->");
 			break;
 		case 0b10:
 			prtCl2Cmd(inst);
 			break;
 		case 0b11:
 		{
-			int ad;
-			printf(" - ");
-			if( inst & 0b100 )
-				printf("JNC");
-			else
-				printf("JC");
+			int ad, dir;
 			if( inst & 0x200 ) {
-				printf(" -");
+				dir = '-';
 				prev = 0x40 - ((inst&0x1F8) >> 3);
 				ad = addr - prev;
 			} else {
-				printf(" +");
+				dir = '+';
 				prev = (inst&0x1F8) >> 3;
 				ad = addr + prev;
 			}
-			printf("%02X [%04X]", prev, ad);
+			printf("J%s %c%02X [%04X]", inst&0x100?"NC":"C", dir, prev, ad);
 		}
 	}
 }

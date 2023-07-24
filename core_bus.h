@@ -67,20 +67,36 @@
 
 #define INST_WANDRD                    00070
 
-#define DISP_ADDR                      0xFD
-#define WAND_ADDR                      0xFE
+#define TIMR_ADDR                      0xFB   // The Timer
+#define CRDR_ADDR                      0xFC   // The Card Reader
+#define DISP_ADDR                      0xFD   // The display
+#define WAND_ADDR                      0xFE   // The Wand
 
 
 #define MASK_48_BIT    (0xFFFFFFFFFFFFL)
 #define REG_C_48_MASK  (0x111111111111L)
 
-int wand_ce = 0;
+enum {
+  PH_NONE     = 0b0000,
+  PH_TIMER    = 0b0001,
+  PH_CRDR     = 0b0010,
+  PH_DISPLAY  = 0b0100,
+  PH_WAND     = 0b1000
+};
 
-int display_ce = 0;
+int peripheral_ce = 0;
 char dtext[2*NR_CHARS+1];
 bool bPunct[2*NR_CHARS+1];
 
 #define ROTATE_RIGHT(V) {uint64_t t = (V & 0xF); V >>= 4; V |= t<<44;}
 #define  ROTATE_LEFT(V) {uint64_t t = (V & (0xFLL << 44)); V <<= 4; V |= t>>44;}
+
+typedef struct {
+  uint64_t  data;
+  uint16_t  addr;
+  uint16_t  cmd;
+  uint8_t   pa;
+  uint8_t   sync;
+} Bus_t;
 
 #endif//__CORE_BUS_H__

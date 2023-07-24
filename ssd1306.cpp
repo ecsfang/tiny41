@@ -38,8 +38,8 @@ void SSD1306_send_buf(uint8_t buf[], int buflen) {
     // and then wraps around to the next page, so we can send the entire frame
     // buffer in one gooooooo!
 
-    // copy our frame buffer into a new buffer because we need to add the control byte
-    // to the beginning
+    // copy our frame buffer into a new buffer because we need to add
+    // the control byte to the beginning
 
     uint8_t *temp_buf = (uint8_t *)malloc(buflen + 1);
 

@@ -64,10 +64,6 @@ Inst_t inst70cmd[16] = {
 	{ SHIFT_L, REG_A|REG_B|REG_C,  1 }
 };
 
-const char *cmd2param[8] = {
-    "@PT", "S&X", "PT<", "ALL", "P-Q", "XS", "M", "MS"
-};
-
 const char *mcl0[0x10] = {
 	"3",	"4",	"5",	"10",
 	"8",	"6",	"11",	"Unused",
@@ -168,6 +164,56 @@ const char *cmd0c[16] = {
     "C=C OR A",  // do logical OR on C and A registers and store result in C
     "C=C AND A", // do logical AND on C and A registers and store result in C
     "PRPH SLCT"  // select peripheral unit specified in C[2;0]
+};
+
+
+const char *cmd1[4] = {
+    "?NC XQ", "?C XQ", "?NC GO", "?C GO"
+};
+
+/*
+   3   6   1   7   5   0   2   4
+  ALL  M  S&X MS  XS  @PT PT← P-Q
+  00E 01A 006 01E 016 002 00A 012
+  011 110 001 111 101 000 010 100
+*/
+const char *cmd2param[8] = {
+    "@PT", "S&X", "PT<", "ALL", "P-Q", "XS", "M", "MS"
+};
+
+const char *cmd2[32] = {
+	"A=0",    //Clear A
+	"B=0",    //Clear B
+	"C=0",    //Clear C
+	"A<>B",   //Exchange A and B
+	"B=A",    //Copy B to A
+	"A<>C",   //Exchange A and C
+	"C=B",    //Copy B to C
+	"C<>B",   //Exchange C and B
+	"A=C",    //Copy C to A
+	"A=A+B",  //Add B to A
+	"A=A+C",  //Add C to A
+	"A=A+1",  //Increment A
+	"A=A-B",  //Subtract B from A
+	"A=A-1",  //Decrement A
+	"A=A-C",  //Subtract C from A
+	"C=C+C",  //Shift C 1 bit left
+	"C=C+A",  //Add A to C
+	"C=C+1",  //Increment C
+	"C=A-C",  //Subtract C from A
+	"C=C-1",  //Decrement C
+	"C=0-C",  //1’s complement
+	"C=-C-1", //2’s comp
+	"?B!=0",  //Carry if B≠0
+	"?C!=0",  //Carry if C≠0
+	"?A<C",   //Carry if A<C
+	"?A<B",   //Carry if A<B
+	"?A!=0",  //Carry if A≠0
+	"?A!=C",  //Carry if A≠C
+	"RSHFA",  //Shift A 1 digit
+	"RSHFB",  //Shift B 1 digit right
+	"RSHFC",  //Shift C 1 digit right
+	"LSHFA"   //Shift A 1 digit left
 };
 
 #endif
