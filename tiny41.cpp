@@ -4,26 +4,9 @@
 #include "hardware/gpio.h"
 #include "pico/multicore.h"
 #include "tiny41.h"
+#include "core_bus.h"
 
 #define DEBUG_ANALYZER
-
-extern void core1_main_3(void);
-extern void process_bus(void);
-extern void capture_bus_transactions(void);
-
-extern volatile int sync_count;
-extern volatile int embed_seen;
-
-extern volatile int data_in;
-extern volatile int data_out;
-
-#define INIT_PIN(n,io,def)      \
-    do {                        \
-        gpio_init(n);           \
-        gpio_set_dir(n, io);    \
-        if( io == GPIO_OUT )    \
-            gpio_put(n, def);   \
-    } while(0)
 
 void bus_init(void)
 {
@@ -33,6 +16,7 @@ void bus_init(void)
     INIT_PIN(P_SYNC,    GPIO_IN,  0);
     INIT_PIN(P_ISA,     GPIO_IN,  0);
     INIT_PIN(P_DATA,    GPIO_IN,  0);
+    INIT_PIN(P_POW,     GPIO_IN,  0);
     // Init the ISA driver ...
     INIT_PIN(P_ISA_OE,  GPIO_OUT, 1);
     INIT_PIN(P_ISA_DRV, GPIO_OUT, 0);
@@ -53,7 +37,6 @@ struct render_area frame_area = {
 
 int main()
 {
-#if 1
   ////////////////////////////////////////////////////////////////////////////////
   //
   // Overclock as needed
@@ -73,7 +56,6 @@ int main()
   
   /* Overclock */
   set_sys_clock_khz( OVERCLOCK, 1 );
-#endif
 
   stdio_init_all();
 
@@ -113,7 +95,7 @@ int main()
     memset(bp, 0, 12);
 
     Write41String(buf, 5, 0, text[0], bp);
-    bp[1] = true;
+    bp[3] = true;
     Write41String(buf, 5, 16, text[1], bp);
 
     // Turn on all annunciators ...
@@ -135,6 +117,12 @@ int main()
         process_bus();
         // Update the USB CLI
         //serial_loop();
+
+        if( CHK_GPIO(P_POW) ) {
+            WriteString(buf, 5, 40, (char*)"    ");
+        } else {
+            WriteString(buf, 5, 40, (char*)"IDLE");
+        }
 
 #ifdef DEBUG_ANALYZER
         if( oSync != sync_count || oEmbed != embed_seen ) {
@@ -159,15 +147,19 @@ int main()
     }
 }
 
-void UpdateLCD(char *txt, bool *bp)
+static int cAnn = 0;
+
+#define ANN_OFF 0x5117
+
+void UpdateLCD(char *txt, bool *bp, int on)
 {
-    if( txt ) {
+    if( on ) {
         Write41String(buf, 3, 16, txt, bp);
-//        render(buf, &frame_area);
+        UpdateAnnun(cAnn);
     } else {
-        // Turn of the display
+        // Turn off the display
         Write41String(buf, 3, 16, NULL, NULL);
-        UpdateAnnun(0);
+        UpdateAnnun(ANN_OFF);
     }
 }
 
@@ -197,6 +189,10 @@ void UpdateAnnun(uint16_t ann)
     char sBuf[24];
     memset(sBuf, ' ', 24);
     int pa = 0;
+    if( ann == ANN_OFF )
+        ann = 0;
+    else
+        cAnn = ann;
     for (int a = 0; a < NR_ANNUN; a++)
     {
         if (ann & 1 << ((NR_ANNUN - 1) - a))

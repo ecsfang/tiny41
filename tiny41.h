@@ -13,6 +13,7 @@
 #define P_SYNC  4
 #define P_CLK2  5
 #define P_CLK1  6
+#define P_POW   28
 
 #define P_ISA_OE 29
 #define P_ISA_DRV 7
@@ -27,6 +28,6 @@
 #define NR_CHARS  12
 #define NR_ANNUN  12
 
-extern void UpdateLCD(char *, bool *);
+extern void UpdateLCD(char *, bool *, int);
 extern void UpdateAnnun(uint16_t ann);
 
