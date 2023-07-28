@@ -28,6 +28,6 @@
 #define NR_CHARS  12
 #define NR_ANNUN  12
 
-extern void UpdateLCD(char *, bool *, int);
+extern void UpdateLCD(char *, bool *, bool);
 extern void UpdateAnnun(uint16_t ann);
 

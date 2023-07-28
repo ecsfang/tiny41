@@ -151,7 +151,7 @@ static int cAnn = 0;
 
 #define ANN_OFF 0x5117
 
-void UpdateLCD(char *txt, bool *bp, int on)
+void UpdateLCD(char *txt, bool *bp, bool on)
 {
     if( on ) {
         Write41String(buf, 3, 16, txt, bp);

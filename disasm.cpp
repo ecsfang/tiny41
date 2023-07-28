@@ -150,6 +150,7 @@ bool disAsmPeripheral(int inst)
 {
 	const char *dBuf = NULL;
   int cmd = inst & 0077;
+  int mod = inst >> 6;
 	switch (peripheral_ce) {
 	case PH_DISPLAY:
     if( inst == INST_WRITE_ANNUNCIATORS )
@@ -157,13 +158,13 @@ bool disAsmPeripheral(int inst)
     else if( inst == INST_READ_ANNUNCIATORS )
       dBuf = "READEN";
     else if( cmd == 0050 )
-      dBuf = inst50disp[inst>>6];
+      dBuf = inst50disp[mod];
     else if( cmd == 0070 )
-      dBuf = inst70disp[inst>>6];
+      dBuf = inst70disp[mod];
 		break;
 	case PH_CRDR:
     if( cmd == 0050 )
-      dBuf = inst50crd[inst>>6];
+      dBuf = inst50crd[mod];
 		break;
 	case PH_PRINTER:
     switch( inst ) {
@@ -183,9 +184,9 @@ bool disAsmPeripheral(int inst)
     case 001554: dBuf = "ALARM?"; break;
     }
     if( cmd == 0050 )
-      dBuf = inst50timer[inst>>6];
+      dBuf = inst50timer[mod];
     else if( cmd == 0070 )
-      dBuf = inst70timer[inst>>6];
+      dBuf = inst70timer[mod];
 		break;
 	}
 	if( dBuf ) {

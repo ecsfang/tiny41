@@ -78,7 +78,7 @@ const char *inst50timer[] = {
   "ENALM",    // 001350
   "STOPC",    // 001450
   "STARTC",   // 001550
-  "PT_B",     // 001650
+  "PT=B",     // 001650
   "PT=A"      // 001750
 };
 

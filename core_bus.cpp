@@ -309,18 +309,11 @@ void process_bus(void)
 // various things with that.
 //
 
-int pending_data_inst = 0;
-bool bLdi = false;
-bool bFetch = false;
-
-uint64_t dreg_a = 0, dreg_b = 0;
-uint64_t dreg_c = 0;
-int display_on = 0;
+uint64_t dreg_a = 0, dreg_b = 0, dreg_c = 0;
+bool display_on = false;
 
 void dump_dregs(void)
 {
-	int i;
-
 	dreg_a &= MASK_48_BIT;
 	dreg_b &= MASK_48_BIT;
 	dreg_c &= REG_C_48_MASK;
@@ -332,7 +325,7 @@ void dump_dregs(void)
 	// Build a text form of the display
 	int j = 0;
 
-	for (i = 0; i < NR_CHARS; i++)
+	for (int i = 0; i < NR_CHARS; i++)
 	{
 		char cc = 0;
 		char cl = 0;
@@ -374,11 +367,6 @@ void dump_dregs(void)
 #endif
 }
 
-uint64_t x;
-uint64_t z;
-uint64_t y;
-
-//void updateDispReg(uint64_t data, int bShift, int bReg, int bits, const char *inst)
 void updateDispReg(uint64_t data, uint8_t r)
 {
 	int bShift = inst50cmd[r].shft;
@@ -454,8 +442,13 @@ void handle_bus(volatile Bus_t *pBus)
 	int pa = pBus->pa;
 	int sync = pBus->sync;
 	uint64_t data56 = pBus->data;
+	bool bLdi = false;
+	static int pending_data_inst = 0;
 
 	if (pending_data_inst == INST_PRPH_SLCT) {
+#if CF_DBG_SLCT
+		printf("\nPF AD:%02X", pa);
+#endif
 		switch (pa) {
 		case DISP_ADDR:
 			peripheral_ce = PH_DISPLAY;
@@ -474,12 +467,12 @@ void handle_bus(volatile Bus_t *pBus)
 		}
 	}
 
-	//int sync = bus_sync[idx];
-	//printf("\n- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
+	// Any printouts from the other CPU ... ?
 	if( cpu2buf[0]) {
 		printf("\n[%s]", cpu2buf);
 		cpu2buf[0] = 0;
 	}
+
 	printf("\n");
 	switch (peripheral_ce) {
 	case PH_DISPLAY:
@@ -501,92 +494,73 @@ void handle_bus(volatile Bus_t *pBus)
 	//	printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
 	printf(" %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr>>12, (addr>>10)&0b11, addr&0x3FF, inst);
 
-	if( bFetch ) { 
+	if( pending_data_inst == INST_FETCH ) { 
 		printf("   > @%04X --> %03X (%04o)", addr, inst, inst);
-		bFetch = false;
 	} else {
 		disAsm(inst, addr, data56);
 	}
 	// Check for a pending instruction from the previous cycle
-	if (pending_data_inst)
+	switch (pending_data_inst)
 	{
-		switch (pending_data_inst)
-		{
-		case INST_LDI:
-			bLdi = true;
-			break;
-		case INST_PRPH_SLCT:
-#if CF_DBG_SLCT
-			printf("\nPF AD:%02X", pa);
-#endif
-			break;
+	case INST_LDI:
+		bLdi = true;
+		break;
 
-		case INST_WRITE_ANNUNCIATORS:
+	case INST_WRITE_ANNUNCIATORS:
 #if CF_DBG_DISP_INST
-			printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
+		printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
-			UpdateAnnun((uint16_t)data56&0xFFF);
-			break;
+		UpdateAnnun((uint16_t)data56&0xFFF);
+		break;
 
-		case INST_SRLDA:
-		case INST_SRLDB:
-		case INST_SRLDC:
-		case INST_SRLDAB:
-		case INST_SRLABC:
-		case INST_SLLDAB:
-		case INST_SLLABC:
-		case INST_SRSDA:
-		case INST_SRSDB:
-		case INST_SRSDC:
-		case INST_SLSDA:
-		case INST_SLSDB:
-		case INST_SRSDAB:
-		case INST_SLSDAB:
-		case INST_SRSABC:
-		case INST_SLSABC:
-			updateDispReg(data56,pending_data_inst>>6);
-			break;
-		case INST_WANDRD:
-			printf("\n%s %03llX", "WAND BUF", data56 & 0xFFF);
-		}
-		// Clear pending flag ...
-		pending_data_inst = 0;
+	case INST_SRLDA:
+	case INST_SRLDB:
+	case INST_SRLDC:
+	case INST_SRLDAB:
+	case INST_SRLABC:
+	case INST_SLLDAB:
+	case INST_SLLABC:
+	case INST_SRSDA:
+	case INST_SRSDB:
+	case INST_SRSDC:
+	case INST_SLSDA:
+	case INST_SLSDB:
+	case INST_SRSDAB:
+	case INST_SLSDAB:
+	case INST_SRSABC:
+	case INST_SLSABC:
+		updateDispReg(data56,pending_data_inst>>6);
+		break;
+	case INST_WANDRD:
+		printf("\n%s %03llX", "WAND BUF", data56 & 0xFFF);
 	}
+	// Clear pending flag ...
+	pending_data_inst = 0;
 
 	// Check for instructions
 	if (sync) {
 		switch (inst) {
 		case INST_DISPLAY_OFF:
-#if CF_DBG_DISP_ON
-			printf(" - Display off");
-#endif
-			display_on = 0;
-			break;
+			display_on = true; // Turns fff below ...:P
 		case INST_DISPLAY_TOGGLE:
 			display_on = !display_on;
 #if CF_DBG_DISP_ON
-			printf(" (%s)", display_on ? "ON" : "OFF");
+			printf(" - Display %s", display_on ? "ON" : "OFF");
 #endif
 			dump_dregs();
 			break;
 		case INST_PRPH_SLCT:
-#if CF_DBG_SLCT
-			printf("\nPRPH_SLCT: PA=%02X", pa);
-#endif
-			pending_data_inst = inst;
-			break;
 		case INST_RAM_SLCT:
 #if CF_DBG_SLCT
-			printf("\nRAM_SLCT: PA=%02X", pa);
+			printf("\n%s_SLCT: PA=%02X", inst==INST_PRPH_SLCT?"PRPH":"RAM", pa);
 #endif
 			pending_data_inst = inst;
 			break;
 		case INST_LDI:
 			bLdi = true;
-			pending_data_inst = inst;
-			break;
+			// Falls through
 		case INST_FETCH:
-			bFetch = true;
+			pending_data_inst = inst;
 			break;
 		case INST_POWOFF:
 			dump_dregs();
@@ -606,50 +580,20 @@ void handle_bus(volatile Bus_t *pBus)
 	// Check for display transactions
 	if (peripheral_ce == PH_DISPLAY && !bLdi)
 	{
-		switch (inst)
+		switch (inst & 000077)
 		{
-		case INST_WRITE_ANNUNCIATORS:
-		case INST_SRLABC:
-		case INST_SRLDA:
-		case INST_SRLDB:
-		case INST_SRLDC:
-		case INST_SRSABC:
-		case INST_SLSABC:
-			pending_data_inst = inst;
-			break;
-
-		case INST_SRLDAB:
-		case INST_SLLABC:
-		case INST_SRSDA:
-		case INST_SRSDB:
-		case INST_SRSDC:
-		case INST_SLSDA:
-		case INST_SLSDB:
-		case INST_SRSDAB:
-		case INST_SLSDAB:
+		case 000050:
 #if CF_DBG_DISP_INST
 			printf("\n%s", inst50disp[inst>>6]);
 #endif
+			pending_data_inst = inst;
 			break;
-
-		case INST_FLLDA:
-		case INST_FLLDB:
-		case INST_FLLDC:
-		case INST_FLLDAB:
-		case INST_FLLDABC:
-		case INST_FRSDA:
-		case INST_FRSDB:
-		case INST_FRSDC:
-		case INST_FLSDA:
-		case INST_FLSDB:
-		case INST_FLSDC:
-		case INST_FRSDAB:
-		case INST_FLSDAB:
-		case INST_FRSDABC:
-		case INST_FLSDABC:
+		case 000070:
+#if CF_DBG_DISP_INST
+			printf("\n%s", inst50disp[inst>>6]);
+#endif
 			rotateDispReg(inst>>6);
 			break;
 		}
 	}
-	bLdi = false;
 }
