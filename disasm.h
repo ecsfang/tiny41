@@ -1,3 +1,17 @@
+/*
+ * disasm.h
+ *
+ * This file is part of the Tiny41 HP41/Pico project.
+ * Copyright (C) 2023 Thomas Fänge <ecsfang@hotmail.com>
+ *
+ * This is free software: you are free to change and redistribute it.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ */
+
 #ifndef __DISASM_H__
 #define __DISASM_H__
 
