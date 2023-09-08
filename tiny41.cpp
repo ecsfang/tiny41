@@ -6,7 +6,10 @@
 #include "tiny41.h"
 #include "core_bus.h"
 
-#define DEBUG_ANALYZER
+//#define DEBUG_ANALYZER
+
+int bRend = 0;
+
 
 void bus_init(void)
 {
@@ -89,7 +92,7 @@ int main()
 
     char *text[] = {
         (char*)" \x2c Tiny41 \x2e",
-        (char*)"\x5e 3.1416"
+        (char*)"\x5e 3.1415"
     };
     bool bp[12];
     memset(bp, 0, 12);
@@ -139,11 +142,11 @@ int main()
             oDout = data_out;
             bRend++;
         }
+#endif//DEBUG_ANALYZER
         if( bRend ) {
             render(buf, &frame_area);
             bRend = 0;
         }
-#endif//DEBUG_ANALYZER
     }
 }
 
@@ -204,7 +207,9 @@ void UpdateAnnun(uint16_t ann)
         pa += annu[a].len + (annu[a].sp ? 1 : 0);
     }
     sBuf[pa] = 0;
-	printf("\nAnnunciators: [%s]", sBuf);
+#ifdef TRACE    
+	printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
+#endif
     WriteString(buf, 0, 32, sBuf);
 //    render(buf, &frame_area);
 }

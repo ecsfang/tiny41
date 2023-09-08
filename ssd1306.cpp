@@ -295,6 +295,8 @@ void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str) {
     }
 }
 
+extern int bRend;
+
 void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
     // Cull out any string off the screen
     if (x > SSD1306_WIDTH - CHAR41_WIDTH || y > SSD1306_HEIGHT - 2*8)
@@ -309,6 +311,7 @@ void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
             x += Write41Char(buf, x, y, ' ', false);
         }
     }
+    bRend++;
 }
 
 

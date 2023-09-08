@@ -6,16 +6,74 @@
 #include "tiny41.h"
 #include "core_bus.h"
 #include "disasm.h"
+//#include "disstr.h"
+#include <malloc.h>
+#ifdef USE_FLASH
+#include "hardware/flash.h"
+#endif
+
+// We're going to erase and reprogram a region 256k from the start of flash.
+// Once done, we can access this at XIP_BASE + 256k.
+#define FLASH_TARGET_OFFSET (512 * 1024)
+
+
+uint32_t getTotalHeap(void) {
+   extern char __StackLimit, __bss_end__;
+   
+   return &__StackLimit  - &__bss_end__;
+}
+
+uint32_t getFreeHeap(void) {
+   struct mallinfo m = mallinfo();
+
+   return getTotalHeap() - m.uordblks;
+}
+
+extern const char *inst50disp[16];
+extern const char *inst70disp[16];
+
+#ifdef USE_FLASH
+void erasePort(int n)
+{
+	uint32_t ints = save_and_disable_interrupts();
+    printf("\nErasing target region %X ...\n", n);
+    flash_range_erase(FLASH_TARGET_OFFSET + 2*n*FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+    flash_range_erase(FLASH_TARGET_OFFSET + (2*n+1)*FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+    printf("Done!\n");
+	restore_interrupts (ints);    // Note that a whole number of sectors must be erased at a time.
+}
+
+void writePort(int n, uint8_t *data)
+{
+	uint32_t ints = save_and_disable_interrupts();
+    printf("\nProgramming target region %X...\n", n);
+    flash_range_program(FLASH_TARGET_OFFSET + 2*n*FLASH_SECTOR_SIZE, data, FLASH_PAGE_SIZE);
+    flash_range_program(FLASH_TARGET_OFFSET + (2*n+1)*FLASH_SECTOR_SIZE, data+FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
+    printf("Done!\n");
+	restore_interrupts (ints);    // Note that a whole number of sectors must be erased at a time.
+}
+
+void readPort(int n, uint8_t *data)
+{
+	const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
+	const uint8_t *fp = flash_target_contents + 2*n*FLASH_SECTOR_SIZE;
+    printf("\nRead flash to port %X...\n", n);
+    for (int i = 0; i < 2*FLASH_PAGE_SIZE; ++i) {
+        data[i] = fp[i];
+    }
+	printf("Done!\n");
+}
+#endif
 
 #include "zenrom.h"
 //#include "embedrom.h"
-//#include "ppcrom.rom"
+#include "ppcrom.rom"
 
 #ifdef EMBED_ZEN_ROM
 Module_t	zen = {
 	LOW_EMBED_ROM2_ADDR,
 	HIGH_EMBED_ROM2_ADDR,
-	embed_zenrom_rom
+	(uint16_t *)embed_zenrom_rom
 };
 #endif
 
@@ -31,7 +89,18 @@ Module_t	emb = {
 Module_t	ppc = {
 	LOW_EMBED_PPC_ROM_ADDR,
 	HIGH_EMBED_PPC_ROM_ADDR,
-	embed_ppc_rom
+	(uint16_t *)embed_ppc_rom
+};
+#endif
+
+#define EMBED_RAM
+#define RAM_SIZE	0xFFF
+static uint16_t embed_ram[RAM_SIZE];
+#ifdef EMBED_RAM
+Module_t	ram = {
+	0x0,
+	0x0,
+	embed_ram
 };
 #endif
 
@@ -41,10 +110,52 @@ void addRom(Module_t *r)
 {
 	roms[r->start>>12] = r;
 	roms[r->end>>12] = r;
-	printf("Add rom @ %04X - %04X\n", r->start, r->end);
+	printf("Add rom[%X-%X] @ %04X - %04X\n", r->start>>12, r->end>>12, r->start, r->end);
 }
+
+#ifdef USE_FLASH
+int dirty = 0;
+void saveRam(void)
+{
+	if( dirty ) {
+		dirty = 0;
+		int port = ram.start>>12;
+		erasePort(port);
+		writePort(port, (uint8_t*)ram.rom);
+		printf("Wrote RAM[%x] to flash\n", port);
+	}
+}
+#endif
+
+#ifdef EMBED_RAM
+void addRam(Module_t *r, uint16_t start, uint16_t len)
+{
+	int port1 = start>>12;
+	int port2 = (start+len)>>12;
+	
+	r->start = start;
+	r->end = start + len;
+	for(int i=0; i<len; i++)
+		embed_ram[i] = 0x000;
+	//memset((void*)embed_ram, 0x00, sizeof(embed_ram));
+	//saveRam();
+	readPort(port1, (uint8_t*)embed_ram);
+	roms[port1] = r;
+	roms[port2] = r;
+	printf("Add ram[%X-%X] @ %04X - %04X (%p)\n", port1, port2, r->start, r->end, r->rom);
+}
+#endif
+
+
 void initRom()
 {
+#ifdef USE_FLASH
+	printf("Flash offset: %X\n", FLASH_TARGET_OFFSET);
+	printf("Sector size: %X (%d)\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+#endif
+	printf("%d bytes total heap\n", getTotalHeap());
+	printf("%d bytes free heap\n", getFreeHeap());
+	printf("%d bytes for RAM\n", 0xFFF*sizeof(uint16_t));
 	memset(roms, 0, sizeof(roms));
 #ifdef EMBED_PPC_ROM
 	addRom(&ppc);
@@ -55,6 +166,9 @@ void initRom()
 #ifdef EMBED_ZEN_ROM
 	addRom(&zen);
 #endif
+#ifdef EMBED_RAM
+	addRam(&ram, 0xC000, RAM_SIZE);
+#endif
 }
 
 #define DRIVE_ISA
@@ -64,10 +178,10 @@ void disAsm(int inst, int addr, uint64_t data);
 #define CF_DUMP_DBG_DREGS  0
 #define CF_DISPLAY_LCD     1
 #define CF_DISPLAY_OLED    0
-#define CF_DBG_DISP_ON     1
+#define CF_DBG_DISP_ON     0
 #define CF_DBG_SLCT        0
 #define CF_DBG_DISP_INST   0
-#define CF_USE_DISP_ON     1
+#define CF_USE_DISP_ON     0
 #define CF_DBG_KEY         1
 
 #define	CH9(c) 		(c&0x1FF)
@@ -151,6 +265,7 @@ bool bPunct[2*NR_CHARS+1];
 char cpu2buf[1024];
 int nCpu2 = 0;
 
+//void __not_in_flash_func(core1_main_3)(void)
 void core1_main_3(void)
 {
 	static int bIsaEn = 0;
@@ -158,6 +273,7 @@ void core1_main_3(void)
 	static uint64_t isa = 0LL;
 	static uint16_t inst = 0;
 	int last_data_in;
+	int rAddr = 0;
 	Module_t *mp = NULL;
 	volatile Bus_t *pBus = &bus[data_in];
 
@@ -237,20 +353,25 @@ void core1_main_3(void)
 			// to put an instruction on the bus later
 			pBus->addr = address = (isa >> 14) & 0xFFFF;
 			mp = roms[address >> 12];
+			if(mp) {
+				rAddr = address - mp->start;
+			}
 			break;
 
 		case 30:
 			// Check if we should emulate any modules ...
-			if( mp && (address >= mp->start) && (address <= mp->end) ) {
+			if( mp ) { //&& (address >= mp->start) && (address <= mp->end) ) {
 				embed_seen++;
-				inst = drive_data = mp->rom[address - mp->start];
+				inst = drive_data = mp->rom[rAddr]; //address - mp->start];
 				drive_data_flag = 1;
+#if 0
 			} else {
 				if( address == 016066 ) {
 					inst = drive_data = 001;
 					drive_data_flag = 1;
 				} else
 					drive_data_flag = 0;
+#endif
 			}
 			break;
 
@@ -363,7 +484,9 @@ void dump_dregs(void)
 
 #if CF_DISPLAY_LCD
 	UpdateLCD(dtext, bPunct, display_on);
+#ifdef TRACE
 	printf("\n[%s] (%s)", dtext, display_on ? "ON":"OFF");
+#endif
 #endif
 }
 
@@ -418,7 +541,7 @@ void rotateDispReg(uint8_t r)
 	uint64_t *rc = (bReg & REG_C) ? &dreg_c : NULL;
 
 #if CF_DBG_DISP_INST
-	printf("\n%s -->", inst70[r]);
+	printf("\n%s -->", inst70disp[r]);
 #endif
 
 	for(int i=0; i<ch; i++) {
@@ -445,6 +568,14 @@ void handle_bus(volatile Bus_t *pBus)
 	bool bLdi = false;
 	static int pending_data_inst = 0;
 
+#ifdef CPU2_PRT
+	// Any printouts from the other CPU ... ?
+	if( cpu2buf[0]) {
+		printf("\n[%s]", cpu2buf);
+		cpu2buf[0] = 0;
+	}
+#endif
+
 	if (pending_data_inst == INST_PRPH_SLCT) {
 #if CF_DBG_SLCT
 		printf("\nPF AD:%02X", pa);
@@ -467,38 +598,51 @@ void handle_bus(volatile Bus_t *pBus)
 		}
 	}
 
-	// Any printouts from the other CPU ... ?
-	if( cpu2buf[0]) {
-		printf("\n[%s]", cpu2buf);
-		cpu2buf[0] = 0;
+
+	nCpu2 = sprintf(cpu2buf, "\n");
+	switch (peripheral_ce) {
+	case PH_DISPLAY:	nCpu2 += sprintf(cpu2buf+nCpu2, "DISP");		break;
+	case PH_WAND:		nCpu2 += sprintf(cpu2buf+nCpu2, "WAND");		break;
+	case PH_TIMER:		nCpu2 += sprintf(cpu2buf+nCpu2, "TIMR");		break;
+	case PH_CRDR:		nCpu2 += sprintf(cpu2buf+nCpu2, "CRDR");		break;
+	default:			nCpu2 += sprintf(cpu2buf+nCpu2, "    ");
 	}
 
-	printf("\n");
-	switch (peripheral_ce) {
-	case PH_DISPLAY:
-		printf("DISP");
-		break;
-	case PH_WAND:
-		printf("WAND");
-		break;
-	case PH_TIMER:
-		printf("TIMR");
-		break;
-	case PH_CRDR:
-		printf("CRDR");
-		break;
-	default:
-		printf("    ");
-	}
 	//	printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
 	//	printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
-	printf(" %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr>>12, (addr>>10)&0b11, addr&0x3FF, inst);
+	nCpu2 += sprintf(cpu2buf+nCpu2, " %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr>>12, (addr>>10)&0b11, addr&0x3FF, inst);
 
-	if( pending_data_inst == INST_FETCH ) { 
-		printf("   > @%04X --> %03X (%04o)", addr, inst, inst);
-	} else {
+	switch(pending_data_inst) {
+	case INST_FETCH:
+#ifdef TRACE
+		printf("%s   > @%04X --> %03X (%04o)", cpu2buf, addr, inst, inst);
+#endif
+		break;
+	case INST_WRITE:
+		if(1) {
+			int wAddr = (data56 >>12) & 0xFFFF;
+			int wDat  = data56 & 0x3FF;
+			Module_t *ram = roms[wAddr >> 12];
+			if(ram) {
+				ram->rom[wAddr - ram->start] = wDat;
+				dirty++;
+				printf("   W> %03X -> @%04X !!", wDat, wAddr);
+			} else {
+				printf("   W> %03X -> @%04X (No RAM!)", wDat, wAddr);
+			}
+		}
+		break;
+	default:
+#ifdef TRACE
+		printf("%s", cpu2buf);
 		disAsm(inst, addr, data56);
+#endif
+		break;
 	}
+
+	cpu2buf[0] = 0;
+	nCpu2 = 0;
+
 	// Check for a pending instruction from the previous cycle
 	switch (pending_data_inst)
 	{
@@ -510,7 +654,7 @@ void handle_bus(volatile Bus_t *pBus)
 #if CF_DBG_DISP_INST
 		printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
-		UpdateAnnun((uint16_t)data56&0xFFF);
+		UpdateAnnun((uint16_t)(data56&0xFFF));
 		break;
 
 	case INST_SRLDA:
@@ -559,11 +703,13 @@ void handle_bus(volatile Bus_t *pBus)
 		case INST_LDI:
 			bLdi = true;
 			// Falls through
+		case INST_WRITE:
 		case INST_FETCH:
 			pending_data_inst = inst;
 			break;
 		case INST_POWOFF:
 			dump_dregs();
+			saveRam();
 			break;
 		}
 	}
@@ -580,6 +726,9 @@ void handle_bus(volatile Bus_t *pBus)
 	// Check for display transactions
 	if (peripheral_ce == PH_DISPLAY && !bLdi)
 	{
+		if( inst == INST_WRITE_ANNUNCIATORS ) {
+			pending_data_inst = inst;
+		}
 		switch (inst & 000077)
 		{
 		case 000050:

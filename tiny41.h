@@ -31,3 +31,6 @@
 extern void UpdateLCD(char *, bool *, bool);
 extern void UpdateAnnun(uint16_t ann);
 
+//#define TRACE
+#define USE_FLASH
+

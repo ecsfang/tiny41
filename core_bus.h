@@ -47,6 +47,8 @@ typedef struct {
 #define HIGH 1
 
 extern void core1_main_3(void);
+//extern void __not_in_flash_func(core1_main_3)(void);
+
 extern void process_bus(void);
 extern void capture_bus_transactions(void);
 

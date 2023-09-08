@@ -153,40 +153,40 @@ bool disAsmPeripheral(int inst)
   int mod = inst >> 6;
 	switch (peripheral_ce) {
 	case PH_DISPLAY:
-    if( inst == INST_WRITE_ANNUNCIATORS )
-      dBuf = "WRTEN";
-    else if( inst == INST_READ_ANNUNCIATORS )
-      dBuf = "READEN";
-    else if( cmd == 0050 )
-      dBuf = inst50disp[mod];
-    else if( cmd == 0070 )
-      dBuf = inst70disp[mod];
+		if( inst == INST_WRITE_ANNUNCIATORS )
+			dBuf = "WRTEN";
+		else if( inst == INST_READ_ANNUNCIATORS )
+			dBuf = "READEN";
+		else if( cmd == 0050 )
+			dBuf = inst50disp[mod];
+		else if( cmd == 0070 )
+			dBuf = inst70disp[mod];
 		break;
 	case PH_CRDR:
-    if( cmd == 0050 )
-      dBuf = inst50crd[mod];
+		if( cmd == 0050 )
+			dBuf = inst50crd[mod];
 		break;
 	case PH_PRINTER:
-    switch( inst ) {
-    case 000007: dBuf = "PRINTC"; break;
-    case 000072: dBuf = "RDPTRN"; break;
-    case 000073: dBuf = "RDPTRR"; break;
-    case 000005: dBuf = "RTNCPU"; break;
-    }
+    	switch( inst ) {
+    	case 000007: dBuf = "PRINTC"; break;
+    	case 000072: dBuf = "RDPTRN"; break;
+    	case 000073: dBuf = "RDPTRR"; break;
+    	case 000005: dBuf = "RTNCPU"; break;
+    	}
 		break;
 	case PH_WAND:
-  	if( inst == INST_WANDRD )
-	  	dBuf = "WANDRD";
+  		if( inst == INST_WANDRD )
+	  		dBuf = "WANDRD";
     break;
 	case PH_TIMER:
-    switch( inst ) {
-    case 000654: dBuf = "FAIL?"; break;
-    case 001554: dBuf = "ALARM?"; break;
-    }
-    if( cmd == 0050 )
-      dBuf = inst50timer[mod];
-    else if( cmd == 0070 )
-      dBuf = inst70timer[mod];
+	    switch( inst ) {
+		case 000654: dBuf = "FAIL?"; break;
+    	case 001554: dBuf = "ALARM?"; break;
+    	}
+    	if( cmd == 0050 )
+      		dBuf = inst50timer[mod];
+    	else if( cmd == 0070 )
+      		dBuf = inst70timer[mod];
 		break;
 	}
 	if( dBuf ) {

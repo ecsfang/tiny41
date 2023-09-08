@@ -30,4 +30,5 @@ target_link_libraries(
   hardware_clocks
 	hardware_adc
   pico_multicore
+#  hardware_flash
 )
