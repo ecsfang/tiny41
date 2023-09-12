@@ -38,6 +38,8 @@ struct render_area frame_area = {
     end_page : SSD1306_NUM_PAGES - 1
 };
 
+extern void initRoms(void);
+
 int main()
 {
   ////////////////////////////////////////////////////////////////////////////////
@@ -57,8 +59,6 @@ int main()
   sleep_ms(1000);
 #endif
   
-  /* Overclock */
-  set_sys_clock_khz( OVERCLOCK, 1 );
 
   stdio_init_all();
 
@@ -68,8 +68,14 @@ int main()
   printf("\n*  Tiny 41  *");
   printf("\n*************");
   printf("\n");
+
+  // Must read flash before we goto highspeed ...
+  initRoms();
+
+  /* Overclock */
+  set_sys_clock_khz( OVERCLOCK, 1 );
   
-    bus_init();
+  bus_init();
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent

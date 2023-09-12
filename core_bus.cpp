@@ -12,163 +12,171 @@
 #include "hardware/flash.h"
 #endif
 
+//#define RESET_FLASH
+//#define RESET_RAM
+
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
 #define FLASH_TARGET_OFFSET (512 * 1024)
 
 
-uint32_t getTotalHeap(void) {
+uint32_t getTotalHeap(void)
+{
    extern char __StackLimit, __bss_end__;
-   
    return &__StackLimit  - &__bss_end__;
 }
 
-uint32_t getFreeHeap(void) {
+uint32_t getFreeHeap(void)
+{
    struct mallinfo m = mallinfo();
-
    return getTotalHeap() - m.uordblks;
 }
 
 extern const char *inst50disp[16];
 extern const char *inst70disp[16];
 
+#define PAGE1(n) (FLASH_TARGET_OFFSET + 2*n*FLASH_SECTOR_SIZE)
+#define PAGE2(n) (FLASH_TARGET_OFFSET + (2*n+1)*FLASH_SECTOR_SIZE)
+
 #ifdef USE_FLASH
 void erasePort(int n)
 {
 	uint32_t ints = save_and_disable_interrupts();
-    printf("\nErasing target region %X ...\n", n);
-    flash_range_erase(FLASH_TARGET_OFFSET + 2*n*FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
-    flash_range_erase(FLASH_TARGET_OFFSET + (2*n+1)*FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
-    printf("Done!\n");
+  printf("\nErasing target region %X ", n);
+  printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n)+FLASH_SECTOR_SIZE);
+  flash_range_erase(PAGE1(n), FLASH_SECTOR_SIZE);
+  flash_range_erase(PAGE2(n), FLASH_SECTOR_SIZE);
+  printf("Done!\n");
 	restore_interrupts (ints);    // Note that a whole number of sectors must be erased at a time.
 }
 
+void swapRam(uint8_t *dta, int n);
 void writePort(int n, uint8_t *data)
 {
+	// Swap 16-bit word to get right endian ...
+	swapRam(data, FLASH_SECTOR_SIZE);
 	uint32_t ints = save_and_disable_interrupts();
-    printf("\nProgramming target region %X...\n", n);
-    flash_range_program(FLASH_TARGET_OFFSET + 2*n*FLASH_SECTOR_SIZE, data, FLASH_PAGE_SIZE);
-    flash_range_program(FLASH_TARGET_OFFSET + (2*n+1)*FLASH_SECTOR_SIZE, data+FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
-    printf("Done!\n");
+  printf("\nProgramming target region %X ", n);
+  printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n)+FLASH_SECTOR_SIZE);
+  flash_range_program(PAGE1(n), data, FLASH_SECTOR_SIZE);
+  flash_range_program(PAGE2(n), data + FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+  printf("Done!\n");
 	restore_interrupts (ints);    // Note that a whole number of sectors must be erased at a time.
+	// Swap back ...
+	swapRam(data, FLASH_SECTOR_SIZE);
 }
 
+// Read flash into ram with right endian
 void readPort(int n, uint8_t *data)
 {
 	const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
 	const uint8_t *fp = flash_target_contents + 2*n*FLASH_SECTOR_SIZE;
-    printf("\nRead flash to port %X...\n", n);
-    for (int i = 0; i < 2*FLASH_PAGE_SIZE; ++i) {
-        data[i] = fp[i];
-    }
-	printf("Done!\n");
+  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
+		// Swap order to get right endian of 16-bit word ...
+    data[2*i+1] = *fp++;
+    data[2*i] =   *fp++;
+  }
 }
 #endif
 
-#include "zenrom.h"
-//#include "embedrom.h"
-#include "ppcrom.rom"
+//#define EMBED_RAM
+#define RAM_SIZE	0x1000
+#define PAGE_SIZE	0x1000
+#define FIRST_PAGE	0x04
+#define LAST_PAGE		(0x10-1)
 
-#ifdef EMBED_ZEN_ROM
-Module_t	zen = {
-	LOW_EMBED_ROM2_ADDR,
-	HIGH_EMBED_ROM2_ADDR,
-	(uint16_t *)embed_zenrom_rom
-};
-#endif
+// Allocate memory for all flash images ...
+static uint16_t rom_pages[LAST_PAGE-FIRST_PAGE+1][PAGE_SIZE];
 
-#ifdef EMBED_8000_ROM
-Module_t	emb = {
-	LOW_EMBED_ROM_ADDR,
-	HIGH_EMBED_ROM_ADDR,
-	embed_rom
-};
-#endif
-
-#ifdef EMBED_PPC_ROM
-Module_t	ppc = {
-	LOW_EMBED_PPC_ROM_ADDR,
-	HIGH_EMBED_PPC_ROM_ADDR,
-	(uint16_t *)embed_ppc_rom
-};
-#endif
-
-#define EMBED_RAM
-#define RAM_SIZE	0xFFF
-static uint16_t embed_ram[RAM_SIZE];
-#ifdef EMBED_RAM
-Module_t	ram = {
-	0x0,
-	0x0,
-	embed_ram
-};
-#endif
-
-Module_t *roms[16];
-
-void addRom(Module_t *r)
+// Make space for information about all flash images
+Module_t modules[LAST_PAGE+1];
+void addRom(int port)
 {
-	roms[r->start>>12] = r;
-	roms[r->end>>12] = r;
-	printf("Add rom[%X-%X] @ %04X - %04X\n", r->start>>12, r->end>>12, r->start, r->end);
+	int pIdx = port - FIRST_PAGE;
+	modules[port].start 	 = port*PAGE_SIZE;
+	modules[port].end   	 = (port+1)*PAGE_SIZE - 1;
+	modules[port].image    = rom_pages[pIdx];
+	modules[port].inserted = true;
+	printf("Add ROM @ %04X - %04X\n", modules[port].start, modules[port].end);
 }
 
 #ifdef USE_FLASH
 int dirty = 0;
-void saveRam(void)
+void saveRam(int port, int ovr = 0)
 {
-	if( dirty ) {
+	if( ovr | dirty ) {
 		dirty = 0;
-		int port = ram.start>>12;
+		//int port = ram.start>>12;
 		erasePort(port);
-		writePort(port, (uint8_t*)ram.rom);
-		printf("Wrote RAM[%x] to flash\n", port);
+		writePort(port, (uint8_t*)rom_pages[port-FIRST_PAGE]); //(uint8_t*)ram.rom);
+		printf("Wrote RAM[%C] to flash\n", port);
 	}
 }
 #endif
 
-#ifdef EMBED_RAM
-void addRam(Module_t *r, uint16_t start, uint16_t len)
+// Swap 16-bit word (n - number of 16-bit words)
+void swapRam(uint8_t *dta, int n)
 {
-	int port1 = start>>12;
-	int port2 = (start+len)>>12;
-	
-	r->start = start;
-	r->end = start + len;
-	for(int i=0; i<len; i++)
-		embed_ram[i] = 0x000;
-	//memset((void*)embed_ram, 0x00, sizeof(embed_ram));
-	//saveRam();
-	readPort(port1, (uint8_t*)embed_ram);
-	roms[port1] = r;
-	roms[port2] = r;
-	printf("Add ram[%X-%X] @ %04X - %04X (%p)\n", port1, port2, r->start, r->end, r->rom);
+	uint8_t s;
+	for(int i=0; i<n; i++) {
+		s = dta[i*2];
+		dta[i*2] = dta[i*2+1];
+		dta[i*2+1] = s;
+	}
 }
-#endif
 
-
-void initRom()
+void initRoms()
 {
 #ifdef USE_FLASH
 	printf("Flash offset: %X\n", FLASH_TARGET_OFFSET);
 	printf("Sector size: %X (%d)\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+	printf("Page size: %X (%d)\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
 #endif
 	printf("%d bytes total heap\n", getTotalHeap());
 	printf("%d bytes free heap\n", getFreeHeap());
 	printf("%d bytes for RAM\n", 0xFFF*sizeof(uint16_t));
-	memset(roms, 0, sizeof(roms));
-#ifdef EMBED_PPC_ROM
-	addRom(&ppc);
+#ifdef RESET_RAM
+	for(int i=0; i<RAM_SIZE; i++)
+		rom_pages[0xC-FIRST_PAGE][i] = 0x0000;
+	printf("Clear MLDL RAM-page ...\n");
+	saveRam(0xC, 1);
 #endif
-#ifdef EMBED_8000_ROM
-	addRom(&emb);
+#ifdef RESET_FLASH
+	for(int p=0; p<16; p++)
+		erasePort(p);
 #endif
-#ifdef EMBED_ZEN_ROM
-	addRom(&zen);
-#endif
-#ifdef EMBED_RAM
-	addRam(&ram, 0xC000, RAM_SIZE);
-#endif
+	// Clear all pages ...
+	for(int p=0; p<=LAST_PAGE; p++) {
+		modules[p].start 		= 0;
+		modules[p].end   		= 0;
+		modules[p].image   	= NULL;
+		modules[p].inserted = false;
+		modules[p].isRam		= false;
+	}
+	// Check for existing images and add them ...
+	for(int port=FIRST_PAGE; port<=LAST_PAGE; port++) {
+		int pIdx = port - FIRST_PAGE;
+		// Read flash image
+		readPort(port, (uint8_t*)rom_pages[pIdx]);
+		if( rom_pages[pIdx][0] != 0xFFFF ) {
+			addRom(port);
+/*			printf("%04X -->", 0x0);
+			for(int i=0; i<8; i++)
+				printf(" %03X", modules[port].image[0x0+i]);
+			printf("\n");
+			printf("%04X -->", 0xFF8);
+			for(int i=8; i<16; i++)
+				printf(" %03X", modules[port].image[0xff0+i]);
+			printf("\n");
+			**/
+		}
+	}
+	// TBD - Now RAM-page is hardcoded to port C
+	int port = 0xC;
+	if( modules[port].inserted ) {
+		modules[port].isRam		 = true;
+		printf("Add RAM[%X] @ %04X - %04X\n", port, port*0x1000, port*0x1000 | 0xFFF);
+	}
 }
 
 #define DRIVE_ISA
@@ -281,7 +289,7 @@ void core1_main_3(void)
 
 	last_sync = GPIO_PIN(P_SYNC);
 
-	initRom();
+	//initRoms();
 
 	while (1)
 	{
@@ -352,19 +360,19 @@ void core1_main_3(void)
 			// Got address. If the address is that of the embedded ROM then we flag that we have
 			// to put an instruction on the bus later
 			pBus->addr = address = (isa >> 14) & 0xFFFF;
-			mp = roms[address >> 12];
-			if(mp) {
+			mp = &modules[address >> 12];
+			if(mp->inserted) {
 				rAddr = address - mp->start;
 			}
 			break;
 
 		case 30:
 			// Check if we should emulate any modules ...
-			if( mp ) { //&& (address >= mp->start) && (address <= mp->end) ) {
+			if( mp->inserted ) {
 				embed_seen++;
-				inst = drive_data = mp->rom[rAddr]; //address - mp->start];
+				inst = drive_data = mp->image[rAddr];
 				drive_data_flag = 1;
-#if 0
+#if 0 // Test to change instruction in system ROM
 			} else {
 				if( address == 016066 ) {
 					inst = drive_data = 001;
@@ -622,13 +630,13 @@ void handle_bus(volatile Bus_t *pBus)
 		if(1) {
 			int wAddr = (data56 >>12) & 0xFFFF;
 			int wDat  = data56 & 0x3FF;
-			Module_t *ram = roms[wAddr >> 12];
-			if(ram) {
-				ram->rom[wAddr - ram->start] = wDat;
+			Module_t *ram = &modules[wAddr >> 12];
+			if(ram->inserted && ram->isRam) {
+				ram->image[wAddr - ram->start] = wDat;
 				dirty++;
-				printf("   W> %03X -> @%04X !!", wDat, wAddr);
+				printf("   W> %03X -> @%04X !!\n", wDat, wAddr);
 			} else {
-				printf("   W> %03X -> @%04X (No RAM!)", wDat, wAddr);
+				printf("   W> %03X -> @%04X (No RAM!)\n", wDat, wAddr);
 			}
 		}
 		break;
@@ -709,7 +717,7 @@ void handle_bus(volatile Bus_t *pBus)
 			break;
 		case INST_POWOFF:
 			dump_dregs();
-			saveRam();
+			saveRam(0xC);
 			break;
 		}
 	}

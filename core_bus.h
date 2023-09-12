@@ -25,7 +25,9 @@ typedef struct {
 typedef struct {
     uint16_t start;
     uint16_t end;
-    uint16_t *rom;
+    uint16_t *image;
+    bool     inserted;
+    bool     isRam;
 } Module_t;
 
 
