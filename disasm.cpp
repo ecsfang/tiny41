@@ -24,19 +24,27 @@
 
 extern int peripheral_ce;
 
+static char disBuf[256];
+static int  pDis = 0;
+
 void prtCl2Cmd(int inst)
 {
-	printf("%-8s %s", cmd2[(inst>>5)&0x1F], cmd2param[(inst>>2)&0x07]);
+	pDis += sprintf(disBuf+pDis, "%-8s %s", cmd2[(inst>>5)&0x1F], cmd2param[(inst>>2)&0x07]);
+}
+
+void addDis(const char* dis)
+{
+	pDis += sprintf(disBuf+pDis, dis);
 }
 
 void cl0mod(int m, bool bA)
 {
 	if( bA ) {
-		printf("%2d", m);
+		pDis += sprintf(disBuf+pDis, "%2d", m);
 		if( m>9 )
-			printf(" (%X)", m);
+			pDis += sprintf(disBuf+pDis, " (%X)", m);
 	} else {
-		printf("%s", mcl0[m]);
+		pDis += sprintf(disBuf+pDis, "%s", mcl0[m]);
 	}
 }
 
@@ -48,71 +56,71 @@ void prtCl0Cmd(int inst, int data, int con)
 	int sub = (inst>>2) & 0x0F;
 	switch(sub) {
 		case 0x0:
-			printf(cmd00[mod]);
+			pDis += sprintf(disBuf+pDis, cmd00[mod]);
 			break;
 		case 0x1:
 			if( mod == 0xF )
-				 printf("ST=0");	// clears ST (CPU flags 0-7)
+				 addDis("ST=0");	// clears ST (CPU flags 0-7)
 			else {
-				printf("CF ");
+				addDis("CF ");
 				cl0mod(mod, false);
 			}
 			break;
 		case 0x2:
 			if( mod == 0xF )
-				 printf("CLRKEY"); // clears the keydown flag (immediately set if key is down)
+				 addDis("CLRKEY"); // clears the keydown flag (immediately set if key is down)
 			else {
-				printf("SF ");
+				addDis("SF ");
 				cl0mod(mod, false);
 			}
 			break;
 		case 0x3:
 			if( mod == 0xF )
-				 printf("?KEY"); // set carry if keydown flag is set
+				 addDis("?KEY"); // set carry if keydown flag is set
 			else {
-				printf("?FS ");
+				addDis("?FS ");
 				cl0mod(mod, false);
 			}
 			break;
 		case 0x4:
-			printf("LC ");
+			addDis("LC ");
 			cl0mod(mod, true);
 			break;
 		case 0x5:
 			if( mod == 0xF )
-				printf("PT=PT-1");	// decrement pointer (if PT=0 then PT=13)
+				addDis("PT=PT-1");	// decrement pointer (if PT=0 then PT=13)
 			else {
-				printf("?PT= ");
+				addDis("?PT= ");
 				cl0mod(mod, false);
 			}
 			break;
 		case 0x6:
-			printf(cmd06[mod]);
+			addDis(cmd06[mod]);
 			break;
 		case 0x7:
 			if( mod == 0xF )
-				printf("PT=PT+1");	// increment pointer (if PT=13 then PT=0)
+				addDis("PT=PT+1");	// increment pointer (if PT=13 then PT=0)
 			else {
-				printf("PT= ");
+				addDis("PT= ");
 				cl0mod(mod, false);
 			}
 			break;
 		case 0x8:
-			printf(cmd08[mod]);
+			addDis(cmd08[mod]);
 			break;
 		case 0x9:
-			printf("PERTCT ");
+			addDis("PERTCT ");
 			cl0mod(mod, true);
 			break;
 		case 0xA:
-			printf("REG=C ");
+			addDis("REG=C ");
 			cl0mod(mod, true);
 			break;
 		case 0xB:
-			printf(cmd0b[mod]);
+			addDis(cmd0b[mod]);
 			break;
 		case 0xC:
-			printf(cmd0c[mod]);
+			addDis(cmd0c[mod]);
 			switch( mod ) {
 			case 0x4:
 				bLDICON = true;
@@ -125,35 +133,35 @@ void prtCl0Cmd(int inst, int data, int con)
 			case 0xB:	// 001360
 				switch( peripheral_ce ) {
 				case PH_DISPLAY:
-					printf(" (WRTEN - writes annunciators)");
+					addDis(" (WRTEN - writes annunciators)");
 					break;
 				case PH_CRDR:
-					printf(" (write to cardreader)");
+					addDis(" (write to cardreader)");
 					break;
 				}
 				break;
 			}
 			break;
 		case 0xD:
-			printf("-unused-");
+			addDis("-unused-");
 			break;
 		case 0xE:
 			if( mod == 0x0 )
-				printf("READ DATA");	// copy active user memory register to C
+				addDis("READ DATA");	// copy active user memory register to C
 			else {
 				if ( mod == 5 && peripheral_ce == PH_DISPLAY)
-					printf("READEN");
+					addDis("READEN");
 				else {
-					printf("C=REG ");
+					addDis("C=REG ");
 					cl0mod(mod, true);
 				}
 			}
 			break;
 		case 0xF:
 			if( mod == 0xF )
-				printf("???");
+				addDis("???");
 			else {
-				printf("RCR ");
+				addDis("RCR ");
 				cl0mod(mod, false);
 			}
 			break;
@@ -204,39 +212,40 @@ bool disAsmPeripheral(int inst)
 		break;
 	}
 	if( dBuf ) {
-		printf("%s", dBuf);
+		addDis(dBuf);
 		return true;
 	}
 	return false;
 }
 
-void disAsm(int inst, int addr, uint64_t data)
+char *disAsm(int inst, int addr, uint64_t data)
 {
 	static int prev;
 	static bool bClass1 = false;
 	static int con;
 //	printf(" %04X [%02o %04o] %03X %014llX - ", addr, addr>>10, addr & 0x3FF, inst, data);
-	printf(" - ");
+
+	pDis = 0;
 
 	// Second word of LDI instruction ...
 	if( bLDICON ) {
 		con = inst & 0x3FF;
-		printf("CON: %03X (%04o)", con, con);
+		pDis = sprintf(disBuf, "CON: %03X (%04o)", con, con);
 		bLDICON = false;
-		return;
+		return disBuf;
 	}
 
 	// Second word of jump instruction ...
 	if( bClass1 ) {
 		prev |= (inst << 6) & 0xFF00;
-		printf("%s %04X", cmd1[inst&0x03], prev);
+		pDis = sprintf(disBuf, "%s %04X", cmd1[inst&0x03], prev);
 		bClass1 = false;
-		return;
+		return disBuf;
 	}
 
 	// Check for peripheral instructions
   if( disAsmPeripheral(inst) )
-    return;
+    return disBuf;
 
 	switch(inst & 0x03 ) {
 		case 0b00:
@@ -245,7 +254,7 @@ void disAsm(int inst, int addr, uint64_t data)
 		case 0b01:
 			prev = (inst >> 2) & 0xFF;
 			bClass1 = true;
-			printf("-->");
+			addDis("-->");
 			break;
 		case 0b10:
 			prtCl2Cmd(inst);
@@ -262,7 +271,8 @@ void disAsm(int inst, int addr, uint64_t data)
 				prev = (inst&0x1F8) >> 3;
 				ad = addr + prev;
 			}
-			printf("%-8s %c%02X [%04X]", inst&0x100?"JNC":"JC", dir, prev, ad);
+			pDis += sprintf(disBuf+pDis, "%-8s %c%02X [%04X]", inst&0x100?"JNC":"JC", dir, prev, ad);
 		}
 	}
+	return disBuf;
 }

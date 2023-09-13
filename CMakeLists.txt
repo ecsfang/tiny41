@@ -16,6 +16,7 @@ add_executable(tiny41
   ssd1306.cpp
   core_bus.cpp
   disasm.cpp
+  serial.cpp
 )
 
 pico_enable_stdio_usb(tiny41 1)

@@ -22,12 +22,18 @@ typedef struct {
   uint8_t   sync;
 } Bus_t;
 
+enum {
+    IMG_NONE = 0x00,
+    IMG_INSERTED = 0x01,
+    IMG_RAM = 0x02,
+    IMG_DIRTY = 0x04
+};
+
 typedef struct {
     uint16_t start;
-    uint16_t end;
+    //uint16_t end;
     uint16_t *image;
-    bool     inserted;
-    bool     isRam;
+    uint16_t flags;
 } Module_t;
 
 
