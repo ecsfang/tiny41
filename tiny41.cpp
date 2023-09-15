@@ -36,6 +36,8 @@ void bus_init(void)
     // Init the ISA driver ...
     INIT_PIN(P_ISA_OE, GPIO_OUT, 1);
     INIT_PIN(P_ISA_DRV, GPIO_OUT, 0);
+    // Init the FI driver ...
+    INIT_PIN(P_FI_OE, GPIO_OUT, 1);
     // Init leds ...
     INIT_PIN(LED_PIN_R, GPIO_OUT, LED_OFF);
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
@@ -113,6 +115,12 @@ int main()
 
     render(buf, &frame_area);
 
+/*    uint64_t isa = 0xAA3456789ABCDELL;
+    ISA_t *s = (ISA_t*)&isa;
+    printf("ISA:%014llX", isa);
+
+    printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
+*/
 #ifdef DEBUG_ANALYZER
     char sBuf[32];
     int oSync, oEmbed, oDin, oDout;
@@ -122,12 +130,21 @@ int main()
     bRend = 0;
 #endif
 
+    setBrk(0x018A);
+    stopBrk(0x0);
+    
     while (1)
     {
         // capture_bus_transactions();
         process_bus();
         // Update the USB CLI
         serial_loop();
+
+        extern int queue_overflow;
+        if( queue_overflow ) {
+            WriteString(buf, 5, 56, (char *)"Buffer overflow!");
+            bTrace = false;
+        }
 
 #ifdef DEBUG_ANALYZER
         WriteString(buf, 5, 40, (char *)(CHK_GPIO(P_POW)?"    ":"IDLE"));
@@ -212,8 +229,8 @@ void UpdateAnnun(uint16_t ann)
     }
     sBuf[pa] = 0;
 
-    if( bTrace )
-        printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
+//    if( bTrace )
+//        printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
 
     WriteString(buf, 0, 32, sBuf);
     //render(buf, &frame_area);

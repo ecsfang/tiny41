@@ -36,7 +36,77 @@ inline uint16_t swap16(uint16_t b)
 {
   return __builtin_bswap16(b);
 }
+
+#define BRK_SIZE (0x10000/16)
+uint32_t brkpt[BRK_SIZE]; // 2 bits per brkpt
+enum {
+  BRK_NONE,
+  BRK_START,
+  BRK_STOP,
+};
+#define BRK_MASK(a,w) ((brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0x3)
+#define BRK_SHFT(a) ((a & 0xF)<<1)
+
+// Check if breakpoint is set for given address
+inline int isBrk(uint16_t addr)
+{
+  return (brkpt[addr >> 4] >> BRK_SHFT(addr)) & 0b11;
+}
+// Clear breakpoint on given address
+void clrBrk(uint16_t addr)
+{
+  uint32_t w = addr >> 4;
+  uint32_t b = 3 << BRK_SHFT(addr);
+  brkpt[w] &= ~b;
+}
+void clrAllBrk(void)
+{
+  for(int a=0; a<BRK_SIZE; a++)
+    brkpt[a] = 0x0;
+  printf("Clear all breakpoints\n");
+}
+// Set breakpoint on given address
+void setBrk(uint16_t addr)
+{
+  uint32_t w = addr >> 4;
+  uint32_t b = BRK_START << BRK_SHFT(addr);
+  clrBrk(addr);
+  brkpt[w] |= b;
+}
+void stopBrk(uint16_t addr)
+{
+  uint32_t w = addr >> 4;
+  uint32_t b = BRK_STOP << BRK_SHFT(addr);
+  clrBrk(addr);
+  brkpt[w] |= b;
+}
+void list_brks(void)
+{
+  int n = 0;
+  for(int w=0; w<BRK_SIZE; w++) {
+    if( brkpt[w] ) {
+      for(int a=w*16; a<(w+1)*16; a++) {
+        int br = isBrk(a);
+        if( br )
+          printf("#%d: %04X -> %X\n", ++n, a, br);
+      }
+    }
+  }
+  if( !n )
+    printf("No breakpoints\n");
+}
 void swapRam(uint16_t *dta, int n);
+
+void power_on(void)
+{
+  printf("Try to power on the calculator ...\n");
+  gpio_put(P_ISA_OE, 0); // Enable ISA driver
+  // Expose the next bit on the ISA line ...
+  gpio_put(P_ISA_DRV, 1);
+  sleep_ms(1);
+  gpio_put(P_ISA_DRV, 0);
+  gpio_put(P_ISA_OE, 1); // Disable ISA driver
+}
 
 extern const char *inst50disp[16];
 extern const char *inst70disp[16];
@@ -84,12 +154,6 @@ void readPort(int n, uint16_t *data)
 }
 #endif
 
-// #define EMBED_RAM
-#define RAM_SIZE 0x1000
-#define PAGE_SIZE 0x1000
-#define PAGE_MASK 0x0FFF
-#define FIRST_PAGE 0x04
-#define LAST_PAGE (0x10 - 1)
 
 // Allocate memory for all flash images ...
 static uint16_t rom_pages[LAST_PAGE - FIRST_PAGE + 1][PAGE_SIZE];
@@ -229,7 +293,7 @@ int last_data = 0;
 
 int clk1 = 0;
 int clk2 = 0;
-int isa = 0;
+//int isa = 0;
 
 #define RISING_EDGE(SIGNAL) ((last_##SIGNAL == 0) && (SIGNAL == 1))
 #define FALLING_EDGE(SIGNAL) ((last_##SIGNAL == 1) && (SIGNAL == 0))
@@ -247,6 +311,7 @@ int dump_sync[NUM_DUMP_SIGNAL];
 
 // Do we drive ROM data?
 int drive_data_flag = 0;
+int output_isa = 0; // Output ongoing ...
 
 // The data we drive
 int drive_data = 0;
@@ -268,7 +333,9 @@ void handle_bus(volatile Bus_t *pBus);
 
 // Data transfer to core 0
 
-#define NUM_BUS_T 3000 // 7000
+#define NUM_BUS_T 0x1000 //Shoudl be power of 2! 3000 // 7000
+#define NUM_BUS_MASK (NUM_BUS_T-1)
+#define INC_BUS_PTR(d) d = (d+1) & NUM_BUS_MASK
 
 int queue_overflow = 0;
 
@@ -284,7 +351,6 @@ int bit_no = 0;
 int gpio_states = 0;
 int sync = 0;
 int address = 0;
-uint64_t data56 = 0;
 
 int peripheral_ce = 0;
 char dtext[2 * NR_CHARS + 1];
@@ -298,7 +364,9 @@ void core1_main_3(void)
 {
   static int bIsaEn = 0;
   static int bIsa = 0;
-  static uint64_t isa = 0LL;
+  //static uint64_t isa = 0LL;
+  uint64_t data56 = 0;
+  static ISA_u isa;
   static uint16_t inst = 0;
   int last_data_in;
   int rAddr = 0;
@@ -310,6 +378,7 @@ void core1_main_3(void)
   last_sync = GPIO_PIN(P_SYNC);
 
   // initRoms();
+  isa.data = data56 = 0LL;
 
   while (1) {
     // Wait for CLK2 to have a falling edge
@@ -318,7 +387,8 @@ void core1_main_3(void)
     // Bit numbers are out by one as bit_no hasn't been incremented yet.
 
     // Do we drive the ISA line?
-    if (drive_data_flag && bit_no > 41) {
+    //if (drive_data_flag && bit_no > 41) {
+    if (output_isa) {
       // Drive the ISA line for theses data bit
       switch (bit_no) {
       case 42:
@@ -330,9 +400,9 @@ void core1_main_3(void)
         gpio_put(P_ISA_OE, 1);
         bIsaEn = 0;
         // ... so no more data after this ...
-        drive_data_flag = 0;
+        output_isa = drive_data_flag = 0;
         break;
-      default:
+      default: // Drive during bit 43->52
         if (!bIsaEn) {
           gpio_put(P_ISA_OE, 0); // Enable ISA driver
           bIsaEn = 1;
@@ -356,14 +426,16 @@ void core1_main_3(void)
       sync_count++;
       bit_no = 44;
     } else {
-      bit_no = (bit_no + 1) % 56;
+      //bit_no = (bit_no + 1) % 56;
+      bit_no = (bit_no == LAST_CYCLE) ? 0 : bit_no+1;
+
     }
 
     // Save all bits in data56 reg ...
     if (GPIO_PIN(P_DATA))
       data56 |= 1LL << bit_no;
     if (GPIO_PIN(P_ISA))
-      isa |= 1LL << bit_no;
+      isa.data |= 1LL << bit_no;
 
     switch (bit_no) {
     case 0:
@@ -378,7 +450,8 @@ void core1_main_3(void)
     case 29:
       // Got address. If the address is that of the embedded ROM then we flag that we have
       // to put an instruction on the bus later
-      pBus->addr = address = (isa >> 14) & 0xFFFF;
+      //pBus->addr = address = (isa >> 14) & 0xFFFF;
+      pBus->addr = address = isa.x.addr;
       mp = &modules[address >> 12];
       if (mp->flags & IMG_INSERTED) {
         rAddr = address - mp->start;
@@ -401,28 +474,33 @@ void core1_main_3(void)
 #endif
       }
       break;
-
-    case 55:
-      // If bitno = 55 then we have another frame, store the transaction
+    case 41:
+      if( drive_data_flag )
+        output_isa = 1;
+      break;
+    case LAST_CYCLE:
+      // If bitno = LAST_CYCLE then we have another frame, store the transaction
       // A 56 bit frame has completed, we send some information to core0 so it can update
       // the display and anything else it needs to
-      pBus->cmd = inst ? inst : (isa >> 44) & 0x3FF;
-      pBus->data = data56;
-
-      isa = data56 = 0LL;
-      inst = 0;
-
-      last_data_in = data_in;
-
-      data_in = (data_in + 1) % NUM_BUS_T;
-
-      if (data_out == data_in) {
-        // No space left in ring-buffer ...
-        queue_overflow = 1;
-        data_in = last_data_in;
-        gpio_put(LED_PIN_R, LED_ON);
+      if( address || isa.data || inst ) {
+        pBus->cmd = inst ? inst : isa.x.inst;
+        pBus->data = data56;
+  
+        isa.data = data56 = 0LL;
+        inst = 0;
+  
+        last_data_in = data_in;
+  
+        INC_BUS_PTR(data_in);
+  
+        if (data_out == data_in) {
+          // No space left in ring-buffer ...
+          queue_overflow = 1;
+          data_in = last_data_in;
+          gpio_put(LED_PIN_R, LED_ON);
+        }
+        gpio_put(LED_PIN_B, LED_OFF);
       }
-      gpio_put(LED_PIN_B, LED_OFF);
       break;
     }
     last_sync = sync;
@@ -431,21 +509,39 @@ void core1_main_3(void)
 
 void process_bus(void)
 {
+  int br; // Breakpoint
+
   // Process data coming in from the bus via core 1
   while (data_in != data_out) {
 #if 0
-    printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%014llX",
+    /*printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%014llX ISA:%014llX",
      data_out,
      bus[data_out].addr,
      bus[data_out].addr,
      bus[data_out].cmd,
      bus[data_out].pa,
-     bus[data_out].data);
+     bus[data_out].data,
+     bus[data_out].isa);
+     */
+    printf("\n%4d: Addr:%04X Inst: %03X PeriAd:%02X Data56:%014llX ISA:%014llX",
+     data_out,
+     bus[data_out].addr,
+     bus[data_out].cmd,
+     bus[data_out].pa,
+     bus[data_out].data,
+     bus[data_out].isa);
+    ISA_t *s = (ISA_t*)&bus[data_out].isa;
+    printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
 #else
     // Handle the bus traffic
+    br = isBrk(bus[data_out].addr);
+    if( br == BRK_START )
+      bTrace = true;
     handle_bus(&bus[data_out]);
+    if( br == BRK_STOP )
+      bTrace = false;
 #endif
-    data_out = (data_out + 1) % NUM_BUS_T;
+    INC_BUS_PTR(data_out);
   }
 }
 
@@ -508,8 +604,8 @@ void dump_dregs(void)
 
 #if CF_DISPLAY_LCD
   UpdateLCD(dtext, bPunct, display_on);
-  if( bTrace )
-    printf("\n[%s] (%s)", dtext, display_on ? "ON" : "OFF");
+//  if( bTrace )
+//    printf("\n[%s] (%s)", dtext, display_on ? "ON" : "OFF");
 #endif
 }
 
@@ -608,6 +704,7 @@ void handle_bus(volatile Bus_t *pBus)
   uint64_t data56 = pBus->data;
   bool bLdi = false;
   static int pending_data_inst = 0;
+  static int oAddr = 0xFFFF;
 
 #ifdef CPU2_PRT
   // Any printouts from the other CPU ... ?
@@ -639,7 +736,13 @@ void handle_bus(volatile Bus_t *pBus)
     }
   }
 
-  nCpu2 = sprintf(cpu2buf, "\n");
+  //nCpu2 = sprintf(cpu2buf, "\n");
+  int remaining = (data_in - data_out) + (-((int) (data_in <= data_out)) & NUM_BUS_MASK);
+  if( queue_overflow )
+    nCpu2 = sprintf(cpu2buf, "\n[****]");
+  else
+    nCpu2 = sprintf(cpu2buf, "\n[%4d]", remaining);
+
   switch (peripheral_ce) {
   case PH_DISPLAY:
     nCpu2 += sprintf(cpu2buf + nCpu2, "DISP");
@@ -659,7 +762,8 @@ void handle_bus(volatile Bus_t *pBus)
 
   //  printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
   //  printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
-  nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  //nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  nCpu2 += sprintf(cpu2buf + nCpu2, "| %04X (%X:%d %04o) %03X", addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
 
   switch (pending_data_inst) {
   case INST_FETCH:
@@ -684,9 +788,13 @@ void handle_bus(volatile Bus_t *pBus)
   default:
     if( bTrace ) {
       char *dp = disAsm(inst, addr, data56);
-      printf("%s", cpu2buf);
+      if( oAddr != addr )
+        printf("\n%s", cpu2buf);
+      else
+        printf("%s", cpu2buf);
       if( dp )
         printf(" - %s", dp);
+      oAddr = addr + 1;
     }
     break;
   }

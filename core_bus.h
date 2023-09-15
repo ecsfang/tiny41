@@ -14,6 +14,13 @@
 #define ROTATE_RIGHT(V) {uint64_t t = (V & 0xF); V >>= 4; V |= t<<44;}
 #define  ROTATE_LEFT(V) {uint64_t t = (V & (0xFLL << 44)); V <<= 4; V |= t>>44;}
 
+// #define EMBED_RAM
+#define RAM_SIZE 0x1000
+#define PAGE_SIZE 0x1000
+#define PAGE_MASK 0x0FFF
+#define FIRST_PAGE 0x04
+#define LAST_PAGE (0x10 - 1)
+
 typedef struct {
   uint64_t  data;
   uint16_t  addr;
@@ -21,6 +28,35 @@ typedef struct {
   uint8_t   pa;
   uint8_t   sync;
 } Bus_t;
+
+typedef struct {
+    uint8_t sign    : 4;
+    uint8_t d1      : 4;
+    uint8_t d2      : 4;
+    uint8_t d3      : 4;
+    uint8_t d4      : 4;
+    uint8_t d5      : 4;
+    uint8_t d6      : 4;
+    uint8_t d7      : 4;
+    uint8_t d8      : 4;
+    uint8_t d9      : 4;
+    uint8_t d10     : 4;
+    uint8_t esgn    : 4;
+    uint8_t exp     : 8;
+} Data_t;
+
+typedef struct __attribute__ ((__packed__)) {
+    uint16_t        : 14;
+    uint16_t addr   : 16;
+    uint32_t        : 14;
+    uint16_t inst   : 10;
+    uint8_t         : 2;
+} ISA_t;
+
+typedef union {
+    ISA_t    x;
+    uint64_t data;
+} ISA_u;
 
 enum {
     IMG_NONE = 0x00,
@@ -65,5 +101,11 @@ extern volatile int embed_seen;
 
 extern volatile int data_in;
 extern volatile int data_out;
+
+// Set breakpoint on given address
+void setBrk(uint16_t addr);
+void stopBrk(uint16_t addr);
+// Clear breakpoint on given address
+void clrBrk(uint16_t addr);
 
 #endif//__CORE_BUS_H__
