@@ -13,8 +13,10 @@
 #include "hardware/flash.h"
 #endif
 
-// #define RESET_FLASH
-// #define RESET_RAM
+//#define RESET_FLASH
+//#define RESET_RAM
+//#define DRIVE_CARRY
+#define DRIVE_ISA
 
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
@@ -37,8 +39,8 @@ inline uint16_t swap16(uint16_t b)
   return __builtin_bswap16(b);
 }
 
-#define BRK_SIZE (0x10000/16)
-uint32_t brkpt[BRK_SIZE]; // 2 bits per brkpt
+#define BRK_SIZE (0x10000/(32/2)) // 2 bits per brkpt
+uint32_t brkpt[BRK_SIZE];
 enum {
   BRK_NONE,
   BRK_START,
@@ -46,18 +48,17 @@ enum {
 };
 #define BRK_MASK(a,w) ((brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0x3)
 #define BRK_SHFT(a) ((a & 0xF)<<1)
+#define BRK_WORD(a) (a >> 4)
 
 // Check if breakpoint is set for given address
 inline int isBrk(uint16_t addr)
 {
-  return (brkpt[addr >> 4] >> BRK_SHFT(addr)) & 0b11;
+  return (brkpt[BRK_WORD(addr)] >> BRK_SHFT(addr)) & 0b11;
 }
 // Clear breakpoint on given address
 void clrBrk(uint16_t addr)
 {
-  uint32_t w = addr >> 4;
-  uint32_t b = 3 << BRK_SHFT(addr);
-  brkpt[w] &= ~b;
+  brkpt[BRK_WORD(addr)] &= ~(0b11 << BRK_SHFT(addr));
 }
 void clrAllBrk(void)
 {
@@ -68,17 +69,13 @@ void clrAllBrk(void)
 // Set breakpoint on given address
 void setBrk(uint16_t addr)
 {
-  uint32_t w = addr >> 4;
-  uint32_t b = BRK_START << BRK_SHFT(addr);
   clrBrk(addr);
-  brkpt[w] |= b;
+  brkpt[BRK_WORD(addr)] |= BRK_START << BRK_SHFT(addr);
 }
 void stopBrk(uint16_t addr)
 {
-  uint32_t w = addr >> 4;
-  uint32_t b = BRK_STOP << BRK_SHFT(addr);
   clrBrk(addr);
-  brkpt[w] |= b;
+  brkpt[BRK_WORD(addr)] |= BRK_STOP << BRK_SHFT(addr);
 }
 void list_brks(void)
 {
@@ -87,8 +84,15 @@ void list_brks(void)
     if( brkpt[w] ) {
       for(int a=w*16; a<(w+1)*16; a++) {
         int br = isBrk(a);
-        if( br )
-          printf("#%d: %04X -> %X\n", ++n, a, br);
+        if( br ) {
+          printf("#%d: %04X -> ", ++n, a);
+          switch( br ) {
+            case 1: printf("start"); break;
+            case 2: printf("stop"); break;
+            default: printf("???"); break;
+          }
+          printf("\n");
+        }
       }
     }
   }
@@ -103,6 +107,22 @@ void power_on(void)
   gpio_put(P_ISA_OE, 0); // Enable ISA driver
   // Expose the next bit on the ISA line ...
   gpio_put(P_ISA_DRV, 1);
+  sleep_ms(1);
+  gpio_put(P_ISA_DRV, 0);
+  gpio_put(P_ISA_OE, 1); // Disable ISA driver
+}
+
+void fi(int flag)
+{
+
+}
+void wand_on(void)
+{
+  printf("Simulate Wand to turn on the calculator ...\n");
+  gpio_put(P_ISA_OE, 0); // Enable ISA driver
+  // Expose the next bit on the ISA line ...
+  gpio_put(P_ISA_DRV, 1);
+  fi(FI_PBSY);
   sleep_ms(1);
   gpio_put(P_ISA_DRV, 0);
   gpio_put(P_ISA_OE, 1); // Disable ISA driver
@@ -156,22 +176,26 @@ void readPort(int n, uint16_t *data)
 
 
 // Allocate memory for all flash images ...
-static uint16_t rom_pages[LAST_PAGE - FIRST_PAGE + 1][PAGE_SIZE];
+static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
+
+uint16_t readRom(int a) {
+  if( PAGE(a) >= FIRST_PAGE )
+    return rom_pages[PAGE(a)-FIRST_PAGE][a&PAGE_MASK];
+  return 0;
+}
 
 // Make space for information about all flash images
-Module_t modules[LAST_PAGE + 1];
+Module_t modules[NR_PAGES];
 void addRom(int port, uint16_t *image)
 {
 	if( image ) {
-    int pIdx = port - FIRST_PAGE;
-    modules[port].start = port * PAGE_SIZE;
-    //modules[port].end = (port+1) * PAGE_SIZE - 1;
+    //modules[port].start = port * PAGE_SIZE;
     modules[port].image = image;
     modules[port].flags = IMG_INSERTED;
-    printf("Add ROM @ %04X - %04X\n", modules[port].start, modules[port].start|PAGE_MASK);
+    //printf("Add ROM @ %04X - %04X\n", modules[port].start, modules[port].start|PAGE_MASK);
+    printf("Add ROM @ %04X - %04X\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK);
 	} else {
-    modules[port].start = 0;
-    //modules[port].end = 0;
+//    modules[port].start = 0;
     modules[port].image = NULL;
     modules[port].flags = IMG_NONE;
 	}
@@ -263,8 +287,6 @@ void initRoms()
   }
 }
 
-#define DRIVE_ISA
-
 char *disAsm(int inst, int addr, uint64_t data);
 
 #define CF_DUMP_DBG_DREGS 0
@@ -286,28 +308,8 @@ char *disAsm(int inst, int addr, uint64_t data);
 // Core 1 sits in a loop grabbing bus cycles
 //
 
-int last_clk1 = 0;
-int last_clk2 = 0;
-int last_isa = 0;
-int last_data = 0;
-
-int clk1 = 0;
-int clk2 = 0;
-//int isa = 0;
-
 #define RISING_EDGE(SIGNAL) ((last_##SIGNAL == 0) && (SIGNAL == 1))
 #define FALLING_EDGE(SIGNAL) ((last_##SIGNAL == 1) && (SIGNAL == 0))
-
-#define NUM_DUMP 100
-#define NUM_DUMP_SIGNAL 300
-
-int dump_i = 0;
-long dump_frames[NUM_DUMP];
-
-int dump_signal_i = 0;
-int dump_sync[NUM_DUMP_SIGNAL];
-
-#define DIRECT_GPIO 1
 
 // Do we drive ROM data?
 int drive_data_flag = 0;
@@ -333,7 +335,11 @@ void handle_bus(volatile Bus_t *pBus);
 
 // Data transfer to core 0
 
+#ifdef TRACE_ISA
+#define NUM_BUS_T 0x400 //Shoudl be power of 2! 3000 // 7000
+#else
 #define NUM_BUS_T 0x1000 //Shoudl be power of 2! 3000 // 7000
+#endif
 #define NUM_BUS_MASK (NUM_BUS_T-1)
 #define INC_BUS_PTR(d) d = (d+1) & NUM_BUS_MASK
 
@@ -345,18 +351,13 @@ volatile int data_out = 0;
 volatile Bus_t bus[NUM_BUS_T];
 
 int last_sync = 0;
-int trans_i = 0;
-int data = 0;
-int bit_no = 0;
 int gpio_states = 0;
-int sync = 0;
-int address = 0;
 
 int peripheral_ce = 0;
 char dtext[2 * NR_CHARS + 1];
 bool bPunct[2 * NR_CHARS + 1];
 
-char cpu2buf[1024];
+char cpu2buf[256];
 int nCpu2 = 0;
 
 // void __not_in_flash_func(core1_main_3)(void)
@@ -364,12 +365,15 @@ void core1_main_3(void)
 {
   static int bIsaEn = 0;
   static int bIsa = 0;
-  //static uint64_t isa = 0LL;
-  uint64_t data56 = 0;
-  static ISA_u isa;
-  static uint16_t inst = 0;
+  static int carry_fi_t0 = 0;
+  static int bit_no = 0;
+  static uint64_t isa = 0LL;
+  static uint64_t bit = 0LL;
+  int sync = 0;
+  static uint64_t data56 = 0;
+  //static uint16_t inst = 0;
   int last_data_in;
-  int rAddr = 0;
+  static uint16_t romAddr = 0;
   Module_t *mp = NULL;
   volatile Bus_t *pBus = &bus[data_in];
 
@@ -377,25 +381,39 @@ void core1_main_3(void)
 
   last_sync = GPIO_PIN(P_SYNC);
 
-  // initRoms();
-  isa.data = data56 = 0LL;
-
   while (1) {
     // Wait for CLK2 to have a falling edge
     WAIT_FALLING(P_CLK2);
 
-    // Bit numbers are out by one as bit_no hasn't been incremented yet.
+    // NOTE! Bit numbers are out by one as bit_no hasn't been incremented yet.
 
-    // Do we drive the ISA line?
-    //if (drive_data_flag && bit_no > 41) {
+#ifdef DRIVE_CARRY
+    // Do we drive the carry bit on FI line?
+    if (carry_fi_t0) {
+      switch(bit_no) {
+      case LAST_CYCLE:  // Bit 0 - start of T0
+        // Enable FI (input tied low)
+        gpio_put(P_FI_OE, 0);
+        break;
+      case (4-1):       // Bit 3 - end of T0
+        // Don't drive carry any more ...
+        gpio_put(P_FI_OE, 1);
+        carry_fi_t0 = 0;
+        break;
+      }
+    }
+#endif
+    // Do we drive the ISA line (bit 43-53)?
     if (output_isa) {
       // Drive the ISA line for theses data bit
       switch (bit_no) {
-      case 42:
+      case 43-1:
+        // Blue led indicates external rom-reading ...
         gpio_put(LED_PIN_B, LED_ON);
+        // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_data & 1);
         break;
-      case 53:
+      case 54-1:
         // Don't drive data any more
         gpio_put(P_ISA_OE, 1);
         bIsaEn = 0;
@@ -426,21 +444,24 @@ void core1_main_3(void)
       sync_count++;
       bit_no = 44;
     } else {
-      //bit_no = (bit_no + 1) % 56;
-      bit_no = (bit_no == LAST_CYCLE) ? 0 : bit_no+1;
-
+      bit_no = (bit_no >= LAST_CYCLE) ? 0 : bit_no+1;
     }
 
+    // NOTE! Bit numbers are ok since bit_no has been incremented!
+
     // Save all bits in data56 reg ...
+    bit = 1LL << bit_no;
     if (GPIO_PIN(P_DATA))
-      data56 |= 1LL << bit_no;
+      data56 |= bit;
     if (GPIO_PIN(P_ISA))
-      isa.data |= 1LL << bit_no;
+      isa |= bit;
 
     switch (bit_no) {
     case 0:
       pBus = &bus[data_in];
       pBus->sync = 0;
+      pBus->cmd = 0;
+      romAddr = 0;
       break;
 
     case 7:
@@ -450,31 +471,31 @@ void core1_main_3(void)
     case 29:
       // Got address. If the address is that of the embedded ROM then we flag that we have
       // to put an instruction on the bus later
-      //pBus->addr = address = (isa >> 14) & 0xFFFF;
-      pBus->addr = address = isa.x.addr;
-      mp = &modules[address >> 12];
-      if (mp->flags & IMG_INSERTED) {
-        rAddr = address - mp->start;
-      }
+      pBus->addr = (isa >> 14) & 0xFFFF;
+      mp = &modules[PAGE(pBus->addr)];
+      if (mp->flags & IMG_INSERTED)
+        romAddr = pBus->addr & PAGE_MASK; // - mp->start;
       break;
 
     case 30:
+#ifdef DRIVE_ISA
       // Check if we should emulate any modules ...
-      if (mp->flags & IMG_INSERTED) {
+      if (romAddr) {
         embed_seen++;
-        inst = drive_data = mp->image[rAddr];
+        pBus->cmd = drive_data = mp->image[romAddr];
         drive_data_flag = 1;
 #if 0 // Test to change instruction in system ROM
       } else {
-        if( address == 016066 ) {
+        if( pBus->addr == 016066 ) {
           inst = drive_data = 001;
           drive_data_flag = 1;
         } else
           drive_data_flag = 0;
 #endif
       }
+#endif
       break;
-    case 41:
+    case 42: // Enable ISA output in next loop (cycle 43)
       if( drive_data_flag )
         output_isa = 1;
       break;
@@ -482,12 +503,23 @@ void core1_main_3(void)
       // If bitno = LAST_CYCLE then we have another frame, store the transaction
       // A 56 bit frame has completed, we send some information to core0 so it can update
       // the display and anything else it needs to
-      if( address || isa.data || inst ) {
-        pBus->cmd = inst ? inst : isa.x.inst;
+      if( pBus->addr || isa || pBus->cmd ) {
+        // Is instruction fetched from flash?
+        if( !pBus->cmd )
+          pBus->cmd = (isa >> 44) & 0x3FF;
         pBus->data = data56;
-  
-        isa.data = data56 = 0LL;
-        inst = 0;
+#ifdef TRACE_ISA
+        pBus->isa = isa;
+#endif
+
+#ifdef DRIVE_CARRY
+        if( pBus->cmd == INST_PBSY && sync ) {
+          // Drive FI T0 low 
+          carry_fi_t0 = 1;
+        }
+#endif
+
+        isa = data56 = 0LL;
   
         last_data_in = data_in;
   
@@ -702,6 +734,9 @@ void handle_bus(volatile Bus_t *pBus)
   int pa = pBus->pa;
   int sync = pBus->sync;
   uint64_t data56 = pBus->data;
+#ifdef TRACE_ISA
+  uint64_t isa = pBus->isa;
+#endif
   bool bLdi = false;
   static int pending_data_inst = 0;
   static int oAddr = 0xFFFF;
@@ -762,8 +797,14 @@ void handle_bus(volatile Bus_t *pBus)
 
   //  printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
   //  printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
-  //nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX | %04X (%X:%d %04o) %03X", data56, addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
-  nCpu2 += sprintf(cpu2buf + nCpu2, "| %04X (%X:%d %04o) %03X", addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  #ifdef TRACE_ISA
+  nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX %c | %04X (%X:%d %04o) %03X",
+            data56, isa, sync ? '*':' ', addr, PAGE(addr), (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  #else
+  nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %c| %04X (%X:%d %04o) %03X",
+            data56, sync ? '*':' ', addr, PAGE(addr), (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  #endif
+  //nCpu2 += sprintf(cpu2buf + nCpu2, "| %04X (%X:%d %04o) %03X", addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
 
   switch (pending_data_inst) {
   case INST_FETCH:
@@ -774,7 +815,7 @@ void handle_bus(volatile Bus_t *pBus)
     if (1) {
       int wAddr = (data56 >> 12) & 0xFFFF;
       int wDat = data56 & 0x3FF;
-      Module_t *ram = &modules[wAddr >> 12];
+      Module_t *ram = &modules[PAGE(wAddr)];
       if (ram->flags & IMG_INSERTED && ram->flags & IMG_RAM) {
         // Page active and defined as ram - update!
         ram->image[wAddr & PAGE_MASK] = wDat;

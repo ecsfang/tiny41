@@ -15,14 +15,39 @@
 #define  ROTATE_LEFT(V) {uint64_t t = (V & (0xFLL << 44)); V <<= 4; V |= t>>44;}
 
 // #define EMBED_RAM
-#define RAM_SIZE 0x1000
-#define PAGE_SIZE 0x1000
-#define PAGE_MASK 0x0FFF
-#define FIRST_PAGE 0x04
-#define LAST_PAGE (0x10 - 1)
+#define RAM_SIZE    0x1000
+#define PAGE_SIZE   0x1000
+#define PAGE_MASK   0x0FFF
+#define FIRST_PAGE  0x04
+#define NR_PAGES    0x10
+#define LAST_PAGE   (NR_PAGES - 1)
+#define PAGE(p)     (p>>12)
+
+#define TRACE_ISA
+
+enum {
+    FI_NONE = -1,
+    FI_PBSY,    // Printer BuSY
+    FI_CRDR,    // CaRD Reader
+    FI_WNDB,    // WaND Byte available
+    FI_PF3,     // 3
+    FI_PF4,     // 4
+    FI_EDAV,    // Emitter Diode AVailable
+    FI_IFCR,    // InterFace Clear Received
+    FI_SRQR,    // Service ReQuest Received
+    FI_FRAV,    // FRame AVailable
+    FI_FRNS,    // Frame Received Not as Sent
+    FI_ORAV,    // Output Register AVailable
+    FI_TFAIL,   //
+    FI_ALM,     // ALarM
+    FI_SERV     // SERVice
+};
 
 typedef struct {
   uint64_t  data;
+#ifdef TRACE_ISA
+  uint64_t  isa;
+#endif
   uint16_t  addr;
   uint16_t  cmd;
   uint8_t   pa;
@@ -66,7 +91,7 @@ enum {
 };
 
 typedef struct {
-    uint16_t start;
+    //uint16_t start;
     //uint16_t end;
     uint16_t *image;
     uint16_t flags;

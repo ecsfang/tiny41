@@ -7,6 +7,7 @@
 #define INST_LDI                       00460
 #define INST_FETCH                     01460
 #define INST_WRITE                     00100
+#define INST_PBSY                      01654
 
 #define INST_DISPLAY_OFF               01340
 #define INST_DISPLAY_TOGGLE            01440

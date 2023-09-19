@@ -29,6 +29,9 @@
 #define NR_CHARS  12
 #define NR_ANNUN  12
 
+#define BUS_CYCLES 56
+#define LAST_CYCLE (BUS_CYCLES-1)
+
 extern void UpdateLCD(char *, bool *, bool);
 extern void UpdateAnnun(uint16_t ann);
 

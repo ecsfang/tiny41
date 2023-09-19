@@ -27,6 +27,21 @@ extern int peripheral_ce;
 static char disBuf[256];
 static int  pDis = 0;
 
+enum {
+	PER_NONE = 0,
+	PER_HPIL_0 = 0+1,
+	PER_HPIL_1 = 1+1,
+	PER_HPIL_2 = 2+1,
+	PER_HPIL_3 = 3+1,
+	PER_HPIL_4 = 4+1,
+	PER_HPIL_5 = 5+1,
+	PER_HPIL_6 = 6+1,
+	PER_HPIL_7 = 7+1,
+	PER_PRT = 9+1,
+};
+
+int selPer = PER_NONE;	// Selected peripheral (1-16)
+
 void prtCl2Cmd(int inst)
 {
 	pDis += sprintf(disBuf+pDis, "%-8s %s", cmd2[(inst>>5)&0x1F], cmd2param[(inst>>2)&0x07]);
@@ -111,6 +126,7 @@ void prtCl0Cmd(int inst, int data, int con)
 		case 0x9:
 			addDis("PERTCT ");
 			cl0mod(mod, true);
+			selPer = mod+1;
 			break;
 		case 0xA:
 			addDis("REG=C ");
@@ -227,6 +243,47 @@ char *disAsm(int inst, int addr, uint64_t data)
 
 	pDis = 0;
 
+	if( selPer ) {
+		// Execute specific peripheral instruction
+		switch( selPer ) {
+			case PER_PRT:	// Printer
+				switch( inst ) {
+				case 0x003: pDis = sprintf(disBuf, "BUSY?"); break;
+				case 0x005: pDis = sprintf(disBuf, "RTNCPU"); break;
+				case 0x007: pDis = sprintf(disBuf, "BUF=BUF+C"); break;
+				case 0x03A: pDis = sprintf(disBuf, "C=STATUS"); break;
+				case 0x043: pDis = sprintf(disBuf, "POWON?"); break;
+				case 0x083: pDis = sprintf(disBuf, "ERROR?"); break;
+				default:
+					if( inst & 0x3F == 0x03 )
+						pDis = sprintf(disBuf, "?PFSET %X", inst >> 6);
+				}
+				break;
+			default:
+				switch( inst & 0x3F ) {
+				case 0x03:	// Check peripheral flag N
+					pDis = sprintf(disBuf, "?PFSET %X", inst >> 6);
+					break;
+				case 0x3A:
+				case 0x3B:
+					// Read data line into C from reg N
+					pDis = sprintf(disBuf, "C=DATA[%X]", inst>>6);
+					if( inst & 0x1 )
+						pDis += sprintf(disBuf+pDis,"R");
+					break;
+				default:
+					if( inst & 0x2 ) {
+						// Load 8 bit character to peripheral
+						pDis = sprintf(disBuf, "LC %02X", inst>>2);
+						if( inst & 0x1 )
+							pDis += sprintf(disBuf+pDis,"R");
+					}
+				}
+		}
+		if( inst & 0x01 ) // Bit0? Return control to CPU
+			selPer = PER_NONE;
+		return disBuf;
+	}
 	// Second word of LDI instruction ...
 	if( bLDICON ) {
 		con = inst & 0x3FF;
@@ -271,8 +328,74 @@ char *disAsm(int inst, int addr, uint64_t data)
 				prev = (inst&0x1F8) >> 3;
 				ad = addr + prev;
 			}
-			pDis += sprintf(disBuf+pDis, "%-8s %c%02X [%04X]", inst&0x100?"JNC":"JC", dir, prev, ad);
+			pDis += sprintf(disBuf+pDis, "%-8s %c%02X [%04X]", inst&0b100?"JC":"JNC", dir, prev, ad);
 		}
 	}
 	return disBuf;
+}
+
+uint16_t fat[64];
+extern uint16_t readRom(int a);
+
+void dumpRom(int p)
+{
+	int xr = readRom(p<<12);
+	int nrf = readRom(p<<12 | 1);
+	int i, l;
+	printf("XROM %02X.xx - %d functions\n", xr, nrf);
+
+	for(i=0; i<64; i++) {
+		fat[i] = 0;
+	}
+
+	int x,y;
+	for(i=0; i<nrf; i++) {
+		x = readRom(p<<12 | (2+i*2));
+		y = readRom(p<<12 | (2+i*2+1));
+		printf("#%d - %03X %03X -> %04X - ", i, x, y, (p<<12)|(x&0xF)<<8|y&0xFF);
+		fat[i] = (x & 0x300)<<4|(x&0xF)<<8|y&0xFF;
+		int a = (fat[i]&0xFFF | p<<12) - 1;
+		printf("%04X ", a);
+		if( !(fat[i] & 0x3000) ) {
+			int n=0;
+			do {
+				l = readRom(a);
+				if( (l&0x7F) < 0x20) l += '@';
+				printf("%c", l&0x7F);
+				a--;
+				n++;
+			} while(!(l&0x80));
+			if( n>7 )
+				fat[i] |= 0x1000; // Rom label!
+		} else
+			printf("User code");
+		printf("\n");
+	}
+	x = readRom(p<<12 | (2+i*2));
+	y = readRom(p<<12 | (2+i*2+1));
+	if( x || y) {
+		printf("FAT not ending in 0 (%X:%X)!\n", x, y);
+	}
+	for(i=0; i<nrf; i++) {
+		if( fat[i] & 0x3000 )
+			continue;
+		uint16_t s = fat[i] | p<<12;
+		uint16_t e = fat[i+1] & 0xFFF;
+		if( !e )
+			e = 0xFF0;
+		e |= p<<12;
+		int a = s-1;
+		do {
+			l = readRom(a);
+			if( (l&0x7F) < 0x20) l += '@';
+			printf("%c", l&0x7F);
+			a--;
+		} while(!(l&0x80));
+		printf("\n===================\n");
+		for(uint16_t adr=s; adr<e; adr++) {
+			x = readRom(adr);
+			printf("%04X %03X - %s\n", a, x, disAsm(x, adr, 0));
+		}
+		printf("\n===================\n");
+	}
 }

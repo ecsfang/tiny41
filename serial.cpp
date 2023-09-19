@@ -69,6 +69,49 @@ void list_modules(void)
 extern void list_brks(void);
 extern void clrAllBrk(void);
 extern void power_on(void);
+extern void wand_on(void);
+
+static uint16_t sBrk = 0;
+static int nBrk = 0;
+
+typedef enum {
+  BRK_NONE,
+  BRK_START,
+  BRK_END,
+  BRK_CLR
+} BrkMode_e;
+
+BrkMode_e brk_mode = BRK_NONE;
+
+static void sbrkpt(BrkMode_e b)
+{
+  brk_mode = b;
+  switch(b) {
+  case BRK_START: printf("\nStart"); break;
+  case BRK_END:   printf("\nEnd"); break;
+  case BRK_CLR:   printf("\nClear"); break;
+  }
+  printf(" breakpoint: ----\b\b\b\b");
+  sBrk = 0;
+  nBrk = 1;
+}
+void set_brk(void)
+{
+  sbrkpt(BRK_START);
+}
+void end_brk(void)
+{
+  sbrkpt(BRK_END);
+}
+void clr_brk(void)
+{
+  sbrkpt(BRK_CLR);
+}
+
+
+extern void clrBrk(uint16_t addr);
+extern void setBrk(uint16_t addr);
+extern void stopBrk(uint16_t addr);
 
 SERIAL_COMMAND serial_cmds[] = {
   {
@@ -92,6 +135,21 @@ SERIAL_COMMAND serial_cmds[] = {
     list_brks,
   },
   {
+    'B',
+    "Set breakpoint",
+    set_brk,
+  },
+  {
+    'E',
+    "End breakpoint",
+    end_brk,
+  },
+  {
+    'C',
+    "Clear breakpoint",
+    clr_brk,
+  },
+  {
     'x',
     "Clear breakpoints",
     clrAllBrk,
@@ -105,6 +163,11 @@ SERIAL_COMMAND serial_cmds[] = {
     'o',
     "Power On",
     power_on,
+  },
+  {
+    'w',
+    "Wand On",
+    wand_on,
   },
 };
 
@@ -140,18 +203,41 @@ void serial_loop(void)
       periodic_key = 0;
     }
 
-    //printf("%c", key);
-
-    // char buf[15];
-    // sprintf(buf, "(Ard) In: 0x%02x", byte(key)); // print input character
-    // printf(buf);
-
-    for (int i = 0; i < sizeof(serial_cmds) / sizeof(SERIAL_COMMAND); i++)
-    {
-      if (serial_cmds[i].key == key)
+    if( nBrk && ((key >= '0' && key <= '9') || (key >= 'a' && key <= 'f'))) {
+      int x = key - '0';
+      if( key >= 'a' )
+        x = key -'a' + 0xa;
+      sBrk <<= 4;
+      sBrk |= x;
+      nBrk++;
+      printf("%X", x);
+      if( nBrk > 4 ) {
+        switch(brk_mode) {
+        case BRK_START:
+          printf("\rStart breakpoint @ %04X\n", sBrk);
+          setBrk(sBrk);
+          break;
+        case BRK_END:
+          printf("\rEnd breakpoint @ %04X\n", sBrk);
+          stopBrk(sBrk);
+          break;
+        case BRK_CLR:
+          printf("\rClear breakpoint @ %04X\n", sBrk);
+          clrBrk(sBrk);
+          break;
+        }
+        brk_mode = BRK_NONE;
+        nBrk = 0;
+        sBrk = 0;
+      }
+    } else {
+      for (int i = 0; i < sizeof(serial_cmds) / sizeof(SERIAL_COMMAND); i++)
       {
-        (*serial_cmds[i].fn)();
-        break;
+        if (serial_cmds[i].key == key)
+        {
+          (*serial_cmds[i].fn)();
+          break;
+        }
       }
     }
   }
