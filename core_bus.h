@@ -23,7 +23,8 @@
 #define LAST_PAGE   (NR_PAGES - 1)
 #define PAGE(p)     (p>>12)
 
-#define TRACE_ISA
+//#define TRACE_ISA
+#define QUEUE_STATUS
 
 enum {
     FI_NONE = -1,

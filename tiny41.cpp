@@ -258,8 +258,8 @@ void UpdateAnnun(uint16_t ann)
     }
     sBuf[pa] = 0;
 
-//    if( bTrace )
-//        printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
+    if( bTrace )
+        printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
 
     WriteString(buf, 0, 32, sBuf);
     //render(buf, &frame_area);

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "pico/multicore.h"
@@ -15,7 +16,7 @@
 
 //#define RESET_FLASH
 //#define RESET_RAM
-//#define DRIVE_CARRY
+#define DRIVE_CARRY
 #define DRIVE_ISA
 
 // We're going to erase and reprogram a region 256k from the start of flash.
@@ -32,6 +33,11 @@ uint32_t getFreeHeap(void)
 {
   struct mallinfo m = mallinfo();
   return getTotalHeap() - m.uordblks;
+}
+
+clock_t clock()
+{
+    return (clock_t) time_us_64() / 10000;
 }
 
 inline uint16_t swap16(uint16_t b)
@@ -112,10 +118,13 @@ void power_on(void)
   gpio_put(P_ISA_OE, 1); // Disable ISA driver
 }
 
+volatile int carry_fi_t0 = 0;
+
 void fi(int flag)
 {
-
+  carry_fi_t0 = 1;
 }
+
 void wand_on(void)
 {
   printf("Simulate Wand to turn on the calculator ...\n");
@@ -365,7 +374,6 @@ void core1_main_3(void)
 {
   static int bIsaEn = 0;
   static int bIsa = 0;
-  static int carry_fi_t0 = 0;
   static int bit_no = 0;
   static uint64_t isa = 0LL;
   static uint64_t bit = 0LL;
@@ -384,6 +392,7 @@ void core1_main_3(void)
   while (1) {
     // Wait for CLK2 to have a falling edge
     WAIT_FALLING(P_CLK2);
+    uint64_t tm = time_us_64();
 
     // NOTE! Bit numbers are out by one as bit_no hasn't been incremented yet.
 
@@ -398,7 +407,7 @@ void core1_main_3(void)
       case (4-1):       // Bit 3 - end of T0
         // Don't drive carry any more ...
         gpio_put(P_FI_OE, 1);
-        carry_fi_t0 = 0;
+        //carry_fi_t0 = 0;
         break;
       }
     }
@@ -480,7 +489,7 @@ void core1_main_3(void)
     case 30:
 #ifdef DRIVE_ISA
       // Check if we should emulate any modules ...
-      if (romAddr) {
+      if (mp->flags & IMG_INSERTED) {
         embed_seen++;
         pBus->cmd = drive_data = mp->image[romAddr];
         drive_data_flag = 1;
@@ -513,11 +522,14 @@ void core1_main_3(void)
 #endif
 
 #ifdef DRIVE_CARRY
-        if( pBus->cmd == INST_PBSY && sync ) {
+        if( pBus->cmd == INST_PBSY && pBus->sync ) {
           // Drive FI T0 low 
-          carry_fi_t0 = 1;
+          //carry_fi_t0 = 0;
         }
 #endif
+
+        if( (time_us_64() - tm) < 2 )
+          break;
 
         isa = data56 = 0LL;
   
@@ -636,8 +648,8 @@ void dump_dregs(void)
 
 #if CF_DISPLAY_LCD
   UpdateLCD(dtext, bPunct, display_on);
-//  if( bTrace )
-//    printf("\n[%s] (%s)", dtext, display_on ? "ON" : "OFF");
+  if( bTrace )
+    printf("\n[%s] (%s)", dtext, display_on ? "ON" : "OFF");
 #endif
 }
 
@@ -771,12 +783,15 @@ void handle_bus(volatile Bus_t *pBus)
     }
   }
 
-  //nCpu2 = sprintf(cpu2buf, "\n");
+#ifdef QUEUE_STATUS
   int remaining = (data_in - data_out) + (-((int) (data_in <= data_out)) & NUM_BUS_MASK);
   if( queue_overflow )
     nCpu2 = sprintf(cpu2buf, "\n[****]");
   else
     nCpu2 = sprintf(cpu2buf, "\n[%4d]", remaining);
+#else
+  nCpu2 = sprintf(cpu2buf, "\n");
+#endif
 
   switch (peripheral_ce) {
   case PH_DISPLAY:
@@ -797,9 +812,15 @@ void handle_bus(volatile Bus_t *pBus)
 
   //  printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
   //  printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
+  uint8_t q = (addr >> 10) & 0b1111;
   #ifdef TRACE_ISA
-  nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX %c | %04X (%X:%d %04o) %03X",
-            data56, isa, sync ? '*':' ', addr, PAGE(addr), (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  if( PAGE(addr) < 3 ) {
+    nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X (Q%2d:%03X) %03X",
+            data56, isa, addr, q, addr & 0x3FF, inst);
+  } else {
+    nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X           %03X",
+            data56, isa, addr, inst);
+  }
   #else
   nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %c| %04X (%X:%d %04o) %03X",
             data56, sync ? '*':' ', addr, PAGE(addr), (addr >> 10) & 0b11, addr & 0x3FF, inst);
@@ -826,6 +847,9 @@ void handle_bus(volatile Bus_t *pBus)
       }
     }
     break;
+  case INST_PBSY:
+    carry_fi_t0 = 0;  // We have read the flag - clear it ...
+    // Fall through!
   default:
     if( bTrace ) {
       char *dp = disAsm(inst, addr, data56);
@@ -904,6 +928,7 @@ void handle_bus(volatile Bus_t *pBus)
       // Falls through
     case INST_WRITE:
     case INST_FETCH:
+    case INST_PBSY:
       pending_data_inst = inst;
       break;
     case INST_POWOFF:
