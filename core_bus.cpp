@@ -17,6 +17,7 @@
 //#define RESET_FLASH
 //#define RESET_RAM
 #define DRIVE_CARRY
+#define DRIVE_DATA
 #define DRIVE_ISA
 
 // We're going to erase and reprogram a region 256k from the start of flash.
@@ -119,6 +120,7 @@ void power_on(void)
 }
 
 volatile int carry_fi_t0 = 0;
+volatile int carry_fi_t2 = 0;
 
 void fi(int flag)
 {
@@ -322,7 +324,8 @@ char *disAsm(int inst, int addr, uint64_t data);
 
 // Do we drive ROM data?
 int drive_data_flag = 0;
-int output_isa = 0; // Output ongoing ...
+int output_isa = 0;  // Output ongoing on ISA...
+int output_data = 0; // Output ongoing on DATA...
 
 // The data we drive
 int drive_data = 0;
@@ -354,8 +357,10 @@ void handle_bus(volatile Bus_t *pBus);
 
 int queue_overflow = 0;
 
-volatile int data_in = 0;
-volatile int data_out = 0;
+volatile int data_wr = 0;
+volatile int data_rd = 0;
+
+volatile uint64_t data56_out = 0;
 
 volatile Bus_t bus[NUM_BUS_T];
 
@@ -380,10 +385,10 @@ void core1_main_3(void)
   int sync = 0;
   static uint64_t data56 = 0;
   //static uint16_t inst = 0;
-  int last_data_in;
+  int last_data_wr;
   static uint16_t romAddr = 0;
   Module_t *mp = NULL;
-  volatile Bus_t *pBus = &bus[data_in];
+  volatile Bus_t *pBus = &bus[data_wr];
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -398,20 +403,41 @@ void core1_main_3(void)
 
 #ifdef DRIVE_CARRY
     // Do we drive the carry bit on FI line?
-    if (carry_fi_t0) {
+    if (carry_fi_t0) { // ?PBSY
       switch(bit_no) {
       case LAST_CYCLE:  // Bit 0 - start of T0
         // Enable FI (input tied low)
         gpio_put(P_FI_OE, 0);
         break;
-      case (4-1):       // Bit 3 - end of T0
+      case 3:       // Bit 3 - end of T0
         // Don't drive carry any more ...
         gpio_put(P_FI_OE, 1);
-        //carry_fi_t0 = 0;
+        break;
+      }
+    }
+    if (carry_fi_t2) {  // ?WNDB
+      switch(bit_no) {
+      case 8-1:  // Bit 8 - start of T2
+        // Enable FI (input tied low)
+        gpio_put(P_FI_OE, 0);
+        break;
+      case 11:   // Bit 11 - end of T2
+        // Don't drive carry any more ...
+        gpio_put(P_FI_OE, 1);
         break;
       }
     }
 #endif
+
+#ifdef DRIVE_DATA
+    // Do we drive the DATA line (bit 0-55)?
+    if (output_data) {
+      // Expose the next bit on the data line ...
+      gpio_put(P_DTA_DRV, data56_out & 1);
+      data56_out >>= 1;
+    }
+#endif
+
     // Do we drive the ISA line (bit 43-53)?
     if (output_isa) {
       // Drive the ISA line for theses data bit
@@ -467,7 +493,7 @@ void core1_main_3(void)
 
     switch (bit_no) {
     case 0:
-      pBus = &bus[data_in];
+      pBus = &bus[data_wr];
       pBus->sync = 0;
       pBus->cmd = 0;
       romAddr = 0;
@@ -512,6 +538,10 @@ void core1_main_3(void)
       // If bitno = LAST_CYCLE then we have another frame, store the transaction
       // A 56 bit frame has completed, we send some information to core0 so it can update
       // the display and anything else it needs to
+
+      // Don't drive data any more ...
+      gpio_put(P_DTA_OE, 1);
+
       if( pBus->addr || isa || pBus->cmd ) {
         // Is instruction fetched from flash?
         if( !pBus->cmd )
@@ -522,9 +552,12 @@ void core1_main_3(void)
 #endif
 
 #ifdef DRIVE_CARRY
-        if( pBus->cmd == INST_PBSY && pBus->sync ) {
-          // Drive FI T0 low 
-          //carry_fi_t0 = 0;
+        if( pBus->pa == WAND_ADDR && pBus->cmd == INST_WANDRD && pBus->sync  ) {
+          output_data = 1;
+          // Enable data driver ...
+          gpio_put(P_DTA_OE, 0);
+          // TBD! Should be data from wand-buffer!
+          data56_out = 0x123456789LL;
         }
 #endif
 
@@ -533,14 +566,14 @@ void core1_main_3(void)
 
         isa = data56 = 0LL;
   
-        last_data_in = data_in;
+        last_data_wr = data_wr;
   
-        INC_BUS_PTR(data_in);
+        INC_BUS_PTR(data_wr);
   
-        if (data_out == data_in) {
+        if (data_rd == data_wr) {
           // No space left in ring-buffer ...
           queue_overflow = 1;
-          data_in = last_data_in;
+          data_wr = last_data_wr;
           gpio_put(LED_PIN_R, LED_ON);
         }
         gpio_put(LED_PIN_B, LED_OFF);
@@ -556,36 +589,36 @@ void process_bus(void)
   int br; // Breakpoint
 
   // Process data coming in from the bus via core 1
-  while (data_in != data_out) {
+  while (data_wr != data_rd) {
 #if 0
     /*printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%014llX ISA:%014llX",
-     data_out,
-     bus[data_out].addr,
-     bus[data_out].addr,
-     bus[data_out].cmd,
-     bus[data_out].pa,
-     bus[data_out].data,
-     bus[data_out].isa);
+     data_rd,
+     bus[data_rd].addr,
+     bus[data_rd].addr,
+     bus[data_rd].cmd,
+     bus[data_rd].pa,
+     bus[data_rd].data,
+     bus[data_rd].isa);
      */
     printf("\n%4d: Addr:%04X Inst: %03X PeriAd:%02X Data56:%014llX ISA:%014llX",
-     data_out,
-     bus[data_out].addr,
-     bus[data_out].cmd,
-     bus[data_out].pa,
-     bus[data_out].data,
-     bus[data_out].isa);
-    ISA_t *s = (ISA_t*)&bus[data_out].isa;
+     data_rd,
+     bus[data_rd].addr,
+     bus[data_rd].cmd,
+     bus[data_rd].pa,
+     bus[data_rd].data,
+     bus[data_rd].isa);
+    ISA_t *s = (ISA_t*)&bus[data_rd].isa;
     printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
 #else
     // Handle the bus traffic
-    br = isBrk(bus[data_out].addr);
+    br = isBrk(bus[data_rd].addr);
     if( br == BRK_START )
       bTrace = true;
-    handle_bus(&bus[data_out]);
+    handle_bus(&bus[data_rd]);
     if( br == BRK_STOP )
       bTrace = false;
 #endif
-    INC_BUS_PTR(data_out);
+    INC_BUS_PTR(data_rd);
   }
 }
 
@@ -784,7 +817,7 @@ void handle_bus(volatile Bus_t *pBus)
   }
 
 #ifdef QUEUE_STATUS
-  int remaining = (data_in - data_out) + (-((int) (data_in <= data_out)) & NUM_BUS_MASK);
+  int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
   if( queue_overflow )
     nCpu2 = sprintf(cpu2buf, "\n[****]");
   else
@@ -827,6 +860,22 @@ void handle_bus(volatile Bus_t *pBus)
   #endif
   //nCpu2 += sprintf(cpu2buf + nCpu2, "| %04X (%X:%d %04o) %03X", addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
 
+  // Handle any special instructions ...
+  switch (pending_data_inst) {
+  case INST_PBSY:
+    carry_fi_t0 = 0;  // We have read the flag - clear it ...
+    break;
+  case INST_WNDB:
+    carry_fi_t2 = 0;  // We have read the flag - clear it ...
+    break;
+  case INST_WANDRD:
+    if( peripheral_ce == PH_WAND ) {
+
+    }
+    break;
+  }
+
+  // Handle special output - or just disassemble the instruction ...
   switch (pending_data_inst) {
   case INST_FETCH:
     if( bTrace )
@@ -847,9 +896,6 @@ void handle_bus(volatile Bus_t *pBus)
       }
     }
     break;
-  case INST_PBSY:
-    carry_fi_t0 = 0;  // We have read the flag - clear it ...
-    // Fall through!
   default:
     if( bTrace ) {
       char *dp = disAsm(inst, addr, data56);

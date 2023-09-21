@@ -33,12 +33,14 @@ void bus_init(void)
     INIT_PIN(P_SYNC, GPIO_IN, 0);
     INIT_PIN(P_ISA, GPIO_IN, 0);
     INIT_PIN(P_DATA, GPIO_IN, 0);
-    INIT_PIN(P_POW, GPIO_IN, 0);
     // Init the ISA driver ...
     INIT_PIN(P_ISA_OE, GPIO_OUT, 1);
     INIT_PIN(P_ISA_DRV, GPIO_OUT, 0);
     // Init the FI driver ...
     INIT_PIN(P_FI_OE, GPIO_OUT, 1);
+    // Init the DATA driver ...
+    INIT_PIN(P_DTA_OE, GPIO_OUT, 1);
+    INIT_PIN(P_DTA_DRV, GPIO_OUT, 0);
     // Init leds ...
     INIT_PIN(LED_PIN_R, GPIO_OUT, LED_OFF);
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);

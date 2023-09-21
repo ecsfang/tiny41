@@ -125,8 +125,8 @@ extern void capture_bus_transactions(void);
 extern volatile int sync_count;
 extern volatile int embed_seen;
 
-extern volatile int data_in;
-extern volatile int data_out;
+extern volatile int data_wr;
+extern volatile int data_rd;
 
 // Set breakpoint on given address
 void setBrk(uint16_t addr);

@@ -13,11 +13,14 @@
 #define P_SYNC    4
 #define P_CLK2    5
 #define P_CLK1    6
-#define P_POW     28
 
 #define P_FI_OE   1
+
 #define P_ISA_OE  29
 #define P_ISA_DRV 7
+
+#define P_DTA_DRV 0
+#define P_DTA_OE  28
 
 #define LED_ON    0
 #define LED_OFF   1
