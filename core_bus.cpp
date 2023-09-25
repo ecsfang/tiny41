@@ -140,7 +140,9 @@ void power_on(void)
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
 }
 
-uint8_t wdata[2] = { 0x91, 0x80 };
+//uint8_t wdata[2] = { 0x91, 0x80 };
+uint8_t wdata[16] = { 0x7B, 0x10, 0x07, 0xC0, 0x00, 0xF3, 0x00, 0x44,
+                     0x49, 0xF7, 0xF8, 0x00, 0x00, 0x10, 0x00, 0x21 };
 //uint8_t wdata[2] = { 0x80808080808191LL, 0x42424242425480LL };
 
 void wand_on(void)
@@ -150,7 +152,7 @@ void wand_on(void)
   // Expose the next bit on the ISA line ...
   gpio_put(P_ISA_DRV, 1);
   fi(FI_PBSY);
-  sendWand(wdata,2);
+  sendWand(wdata,16);
   sleep_us(10);
   gpio_put(P_ISA_DRV, 0);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
