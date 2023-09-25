@@ -234,7 +234,7 @@ bool disAsmPeripheral(int inst)
 	return false;
 }
 
-char *disAsm(int inst, int addr, uint64_t data)
+char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 {
 	static int prev;
 	static bool bClass1 = false;
@@ -283,6 +283,10 @@ char *disAsm(int inst, int addr, uint64_t data)
 		if( inst & 0x01 ) // Bit0? Return control to CPU
 			selPer = PER_NONE;
 		return disBuf;
+	}
+	if( sync ) {
+		bLDICON = false;
+		bClass1 = false;
 	}
 	// Second word of LDI instruction ...
 	if( bLDICON ) {
@@ -394,7 +398,7 @@ void dumpRom(int p)
 		printf("\n===================\n");
 		for(uint16_t adr=s; adr<e; adr++) {
 			x = readRom(adr);
-			printf("%04X %03X - %s\n", a, x, disAsm(x, adr, 0));
+			printf("%04X %03X - %s\n", a, x, disAsm(x, adr, 0, 0));
 		}
 		printf("\n===================\n");
 	}

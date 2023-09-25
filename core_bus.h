@@ -51,6 +51,7 @@ typedef struct {
 #endif
   uint16_t  addr;
   uint16_t  cmd;
+  uint16_t  flag;
   uint8_t   pa;
   uint8_t   sync;
 } Bus_t;

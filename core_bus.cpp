@@ -46,6 +46,17 @@ inline uint16_t swap16(uint16_t b)
   return __builtin_bswap16(b);
 }
 
+volatile uint8_t wandBuf[32];
+volatile uint8_t nWBuf = 0;
+volatile uint8_t pWBuf = 0;
+void sendWand(uint8_t *w, uint8_t n)
+{
+  for(int i=0; i<n; i++)
+    wandBuf[i] = w[i];
+  nWBuf = n;
+  pWBuf = 0;
+}
+
 #define BRK_SIZE (0x10000/(32/2)) // 2 bits per brkpt
 uint32_t brkpt[BRK_SIZE];
 enum {
@@ -108,17 +119,6 @@ void list_brks(void)
 }
 void swapRam(uint16_t *dta, int n);
 
-void power_on(void)
-{
-  printf("Try to power on the calculator ...\n");
-  gpio_put(P_ISA_OE, 0); // Enable ISA driver
-  // Expose the next bit on the ISA line ...
-  gpio_put(P_ISA_DRV, 1);
-  sleep_ms(1);
-  gpio_put(P_ISA_DRV, 0);
-  gpio_put(P_ISA_OE, 1); // Disable ISA driver
-}
-
 volatile int carry_fi_t0 = 0;
 volatile int carry_fi_t2 = 0;
 
@@ -127,16 +127,33 @@ void fi(int flag)
   carry_fi_t0 = 1;
 }
 
+void power_on(void)
+{
+  printf("Try to power on the calculator ...\n");
+  gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
+  // Expose the next bit on the ISA line ...
+  gpio_put(P_ISA_DRV, 1);
+  //sleep_ms(1);
+  fi(FI_PBSY);
+  sleep_us(10);
+  gpio_put(P_ISA_DRV, 0);
+  gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
+}
+
+uint8_t wdata[2] = { 0x91, 0x80 };
+//uint8_t wdata[2] = { 0x80808080808191LL, 0x42424242425480LL };
+
 void wand_on(void)
 {
   printf("Simulate Wand to turn on the calculator ...\n");
-  gpio_put(P_ISA_OE, 0); // Enable ISA driver
+  gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
   // Expose the next bit on the ISA line ...
   gpio_put(P_ISA_DRV, 1);
   fi(FI_PBSY);
-  sleep_ms(1);
+  sendWand(wdata,2);
+  sleep_us(10);
   gpio_put(P_ISA_DRV, 0);
-  gpio_put(P_ISA_OE, 1); // Disable ISA driver
+  gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
 }
 
 extern const char *inst50disp[16];
@@ -298,7 +315,7 @@ void initRoms()
   }
 }
 
-char *disAsm(int inst, int addr, uint64_t data);
+char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 
 #define CF_DUMP_DBG_DREGS 0
 #define CF_DISPLAY_LCD 1
@@ -323,9 +340,9 @@ char *disAsm(int inst, int addr, uint64_t data);
 #define FALLING_EDGE(SIGNAL) ((last_##SIGNAL == 1) && (SIGNAL == 0))
 
 // Do we drive ROM data?
-int drive_data_flag = 0;
-int output_isa = 0;  // Output ongoing on ISA...
-int output_data = 0; // Output ongoing on DATA...
+volatile int drive_data_flag = 0;
+volatile int output_isa = 0;  // Output ongoing on ISA...
+volatile int output_data = 0; // Output ongoing on DATA...
 
 // The data we drive
 int drive_data = 0;
@@ -373,6 +390,8 @@ bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
+char cpu3buf[256];
+int nCpu3 = 0;
 
 // void __not_in_flash_func(core1_main_3)(void)
 void core1_main_3(void)
@@ -389,6 +408,8 @@ void core1_main_3(void)
   static uint16_t romAddr = 0;
   Module_t *mp = NULL;
   volatile Bus_t *pBus = &bus[data_wr];
+  static uint8_t perph = 0;
+  static bool bSelPa = false;
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -407,11 +428,11 @@ void core1_main_3(void)
       switch(bit_no) {
       case LAST_CYCLE:  // Bit 0 - start of T0
         // Enable FI (input tied low)
-        gpio_put(P_FI_OE, 0);
+        gpio_put(P_FI_OE, ENABLE_OE);
         break;
       case 3:       // Bit 3 - end of T0
         // Don't drive carry any more ...
-        gpio_put(P_FI_OE, 1);
+        gpio_put(P_FI_OE, DISABLE_OE);
         break;
       }
     }
@@ -419,11 +440,11 @@ void core1_main_3(void)
       switch(bit_no) {
       case 8-1:  // Bit 8 - start of T2
         // Enable FI (input tied low)
-        gpio_put(P_FI_OE, 0);
+        gpio_put(P_FI_OE, ENABLE_OE);
         break;
       case 11:   // Bit 11 - end of T2
         // Don't drive carry any more ...
-        gpio_put(P_FI_OE, 1);
+        gpio_put(P_FI_OE, DISABLE_OE);
         break;
       }
     }
@@ -433,7 +454,7 @@ void core1_main_3(void)
     // Do we drive the DATA line (bit 0-55)?
     if (output_data) {
       // Expose the next bit on the data line ...
-      gpio_put(P_DTA_DRV, data56_out & 1);
+      gpio_put(P_DATA_DRV, data56_out & 1);
       data56_out >>= 1;
     }
 #endif
@@ -450,14 +471,14 @@ void core1_main_3(void)
         break;
       case 54-1:
         // Don't drive data any more
-        gpio_put(P_ISA_OE, 1);
+        gpio_put(P_ISA_OE, DISABLE_OE);
         bIsaEn = 0;
         // ... so no more data after this ...
         output_isa = drive_data_flag = 0;
         break;
       default: // Drive during bit 43->52
         if (!bIsaEn) {
-          gpio_put(P_ISA_OE, 0); // Enable ISA driver
+          gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
           bIsaEn = 1;
         }
         // Expose the next bit on the ISA line ...
@@ -496,6 +517,7 @@ void core1_main_3(void)
       pBus = &bus[data_wr];
       pBus->sync = 0;
       pBus->cmd = 0;
+      pBus->flag = 0;
       romAddr = 0;
       break;
 
@@ -540,7 +562,7 @@ void core1_main_3(void)
       // the display and anything else it needs to
 
       // Don't drive data any more ...
-      gpio_put(P_DTA_OE, 1);
+      gpio_put(P_DATA_OE, DISABLE_OE);
 
       if( pBus->addr || isa || pBus->cmd ) {
         // Is instruction fetched from flash?
@@ -551,13 +573,25 @@ void core1_main_3(void)
         pBus->isa = isa;
 #endif
 
+        if( bSelPa ) {
+          perph = pBus->pa;
+          bSelPa = false;
+        }
+        if( pBus->cmd == INST_PRPH_SLCT )
+          bSelPa = true;
+
 #ifdef DRIVE_CARRY
-        if( pBus->pa == WAND_ADDR && pBus->cmd == INST_WANDRD && pBus->sync  ) {
+        output_data = 0;
+        carry_fi_t0 = carry_fi_t2 = nWBuf > 0 ? 1 : 0;
+
+        if( perph == WAND_ADDR && pBus->cmd == INST_WANDRD && nWBuf && pBus->sync  ) {
           output_data = 1;
           // Enable data driver ...
-          gpio_put(P_DTA_OE, 0);
+          gpio_put(P_DATA_OE, ENABLE_OE);
           // TBD! Should be data from wand-buffer!
-          data56_out = 0x123456789LL;
+          data56_out = wandBuf[pWBuf++];
+          nWBuf--;
+          pBus->flag |= 1;
         }
 #endif
 
@@ -778,6 +812,7 @@ void handle_bus(volatile Bus_t *pBus)
   int inst = pBus->cmd;
   int pa = pBus->pa;
   int sync = pBus->sync;
+  int flag = pBus->flag;
   uint64_t data56 = pBus->data;
 #ifdef TRACE_ISA
   uint64_t isa = pBus->isa;
@@ -793,6 +828,10 @@ void handle_bus(volatile Bus_t *pBus)
     cpu2buf[0] = 0;
   }
 #endif
+  if (nCpu3) {
+    printf("\n[%s]", cpu3buf);
+    nCpu3 = 0;
+  }
 
   if (pending_data_inst == INST_PRPH_SLCT) {
 #if CF_DBG_SLCT
@@ -855,23 +894,37 @@ void handle_bus(volatile Bus_t *pBus)
             data56, isa, addr, inst);
   }
   #else
-  nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %c| %04X (%X:%d %04o) %03X",
-            data56, sync ? '*':' ', addr, PAGE(addr), (addr >> 10) & 0b11, addr & 0x3FF, inst);
+  if( PAGE(addr) < 3 ) {
+    nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X (Q%2d:%03X) %03X",
+            data56, flag, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+  } else {
+    nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X           %03X",
+            data56, flag, sync ? '*':' ', addr, inst);
+  }
   #endif
   //nCpu2 += sprintf(cpu2buf + nCpu2, "| %04X (%X:%d %04o) %03X", addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
 
   // Handle any special instructions ...
   switch (pending_data_inst) {
   case INST_PBSY:
-    carry_fi_t0 = 0;  // We have read the flag - clear it ...
+    //carry_fi_t2 = nWBuf ? 1 : 0;  // Set carry if data in buffere
+    //printf("@[%d:%d]%d %d@", carry_fi_t0, carry_fi_t2, pWBuf, nWBuf);
     break;
   case INST_WNDB:
-    carry_fi_t2 = 0;  // We have read the flag - clear it ...
+    //carry_fi_t2 = nWBuf ? 1 : 0;  // We have read the flag - clear it ...
+    //printf("@[%d:%d]%d %d@", carry_fi_t0, carry_fi_t2, pWBuf, nWBuf);
     break;
   case INST_WANDRD:
-    if( peripheral_ce == PH_WAND ) {
-
-    }
+    printf("#%d %d#", pWBuf, nWBuf);
+/*    if( peripheral_ce == PH_WAND ) {
+      if( nWBuf ) {
+        data56_out = wandBuf[pWBuf++];
+        nWBuf--;
+        drive_data_flag = 1;
+        output_data = 1;
+      } else
+        drive_data_flag = 0;
+    }*/
     break;
   }
 
@@ -898,7 +951,7 @@ void handle_bus(volatile Bus_t *pBus)
     break;
   default:
     if( bTrace ) {
-      char *dp = disAsm(inst, addr, data56);
+      char *dp = disAsm(inst, addr, data56, sync);
       if( oAddr != addr )
         printf("\n%s", cpu2buf);
       else
