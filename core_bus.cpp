@@ -36,19 +36,15 @@ uint32_t getFreeHeap(void)
   return getTotalHeap() - m.uordblks;
 }
 
-clock_t clock()
-{
-    return (clock_t) time_us_64() / 10000;
-}
-
 inline uint16_t swap16(uint16_t b)
 {
   return __builtin_bswap16(b);
 }
 
-volatile uint8_t wandBuf[32];
+volatile uint8_t wandBuf[16]; // Max size of a barcode
 volatile uint8_t nWBuf = 0;
 volatile uint8_t pWBuf = 0;
+
 void sendWand(uint8_t *w, uint8_t n)
 {
   for(int i=0; i<n; i++)
@@ -140,19 +136,27 @@ void power_on(void)
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
 }
 
-//uint8_t wdata[2] = { 0x91, 0x80 };
-uint8_t wdata[16] = { 0x7B, 0x10, 0x07, 0xC0, 0x00, 0xF3, 0x00, 0x44,
-                     0x49, 0xF7, 0xF8, 0x00, 0x00, 0x10, 0x00, 0x21 };
-//uint8_t wdata[2] = { 0x80808080808191LL, 0x42424242425480LL };
+uint8_t wdata[] = {
+  16, 0x50, 0x10, 0x02, 0xC0, 0x00, 0xF3, 0x00, 0x44, 0x43, 0x6F, 0x1B, 0x13, 0x00, 0x43, 0x11, 0x10,
+  16, 0x9D, 0x11, 0x11, 0x00, 0x40, 0xCE, 0x7E, 0xAA, 0x13, 0xA8, 0x14, 0xAA, 0x12, 0xA8, 0x13, 0xAA,
+  16, 0xBD, 0x12, 0x10, 0x11, 0xA8, 0x12, 0xAA, 0x0F, 0xA8, 0x11, 0xAA, 0x0E, 0xA8, 0x10, 0xCE, 0x7E,
+  16, 0x4E, 0x13, 0x01, 0x91, 0x75, 0xF3, 0x7F, 0x00, 0x00, 0x77, 0x91, 0x76, 0xF2, 0x7F, 0x41, 0xCE,
+  11, 0x23, 0x14, 0x10, 0x76, 0x87, 0xCE, 0x75, 0x7E, 0xC0, 0x00, 0x2F,
+   0
+};
 
 void wand_on(void)
 {
+  static int wp = 0;
   printf("Simulate Wand to turn on the calculator ...\n");
   gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
   // Expose the next bit on the ISA line ...
   gpio_put(P_ISA_DRV, 1);
   fi(FI_PBSY);
-  sendWand(wdata,16);
+  sendWand(wdata+wp+1,*(wdata+wp));
+  wp += *(wdata+wp)+1;
+  if( *(wdata+wp) == 0 )
+    wp = 0;
   sleep_us(10);
   gpio_put(P_ISA_DRV, 0);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
@@ -216,23 +220,23 @@ uint16_t readRom(int a) {
 
 // Make space for information about all flash images
 Module_t modules[NR_PAGES];
+
+// Add image to the list of modules
+// A pointer to the image and which port to attatch it to
 void addRom(int port, uint16_t *image)
 {
 	if( image ) {
-    //modules[port].start = port * PAGE_SIZE;
     modules[port].image = image;
     modules[port].flags = IMG_INSERTED;
-    //printf("Add ROM @ %04X - %04X\n", modules[port].start, modules[port].start|PAGE_MASK);
     printf("Add ROM @ %04X - %04X\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK);
 	} else {
-//    modules[port].start = 0;
     modules[port].image = NULL;
     modules[port].flags = IMG_NONE;
 	}
 }
 
 #ifdef USE_FLASH
-//int dirty = 0;
+// Save a ram image to flash (emulate Q-RAM)
 void saveRam(int port, int ovr = 0)
 {
   if (ovr | (modules[port].flags & IMG_DIRTY)) {
@@ -252,6 +256,14 @@ void swapRam(uint16_t *dta, int n)
   }
 }
 
+void qRam(int page)
+{
+  if (modules[page].flags & IMG_INSERTED) {
+    modules[page].flags |= IMG_RAM;
+    printf("Add QRAM[%X] @ %04X - %04X\n", page, page*PAGE_SIZE, (page*PAGE_SIZE)|PAGE_MASK);
+  }
+}
+
 void initRoms()
 {
 #ifdef USE_FLASH
@@ -268,7 +280,8 @@ void initRoms()
   saveRam(0xC, 1);
 #endif
 #ifdef RESET_FLASH
-  for (int p = 0; p < 16; p++)
+  // Erase all images from flash
+  for (int p = 0; p < NR_PAGES; p++)
     erasePort(p);
 #endif
   // Remove all modules ...
@@ -310,11 +323,7 @@ void initRoms()
     }
   }
   // TBD - Now RAM-page is hardcoded to port C
-  int port = 0xC;
-  if (modules[port].flags & IMG_INSERTED) {
-    modules[port].flags |= IMG_RAM;
-    printf("Add RAM[%X] @ %04X - %04X\n", port, port*PAGE_SIZE, (port*PAGE_SIZE)|PAGE_MASK);
-  }
+  qRam(0xC);
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
@@ -392,8 +401,6 @@ bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
-char cpu3buf[256];
-int nCpu3 = 0;
 
 // void __not_in_flash_func(core1_main_3)(void)
 void core1_main_3(void)
@@ -830,10 +837,6 @@ void handle_bus(volatile Bus_t *pBus)
     cpu2buf[0] = 0;
   }
 #endif
-  if (nCpu3) {
-    printf("\n[%s]", cpu3buf);
-    nCpu3 = 0;
-  }
 
   if (pending_data_inst == INST_PRPH_SLCT) {
 #if CF_DBG_SLCT
@@ -884,57 +887,34 @@ void handle_bus(volatile Bus_t *pBus)
     nCpu2 += sprintf(cpu2buf + nCpu2, "    ");
   }
 
-  //  printf("- DCE:%d ADDR:%04X (%02o %04o) INST=%04X (%04o) PA=%02X (%03o) sync=%d DATA=%016llX", display_ce, addr, addr>>10, addr&0x3FF, inst, inst, pa, pa, sync, data56);
-  //  printf(" (%02o %04o) sync=%d DATA=%016llX", addr>>10, addr&0x3FF, sync, data56);
   uint8_t q = (addr >> 10) & 0b1111;
   #ifdef TRACE_ISA
   if( PAGE(addr) < 3 ) {
+    // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X (Q%2d:%03X) %03X",
             data56, isa, addr, q, addr & 0x3FF, inst);
   } else {
+    // No need in an external rom
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X           %03X",
             data56, isa, addr, inst);
   }
   #else
   if( PAGE(addr) < 3 ) {
+    // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X (Q%2d:%03X) %03X",
             data56, flag, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
   } else {
+    // No need in an external rom
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X           %03X",
             data56, flag, sync ? '*':' ', addr, inst);
   }
   #endif
-  //nCpu2 += sprintf(cpu2buf + nCpu2, "| %04X (%X:%d %04o) %03X", addr, addr >> 12, (addr >> 10) & 0b11, addr & 0x3FF, inst);
-
-  // Handle any special instructions ...
-  switch (pending_data_inst) {
-  case INST_PBSY:
-    //carry_fi_t2 = nWBuf ? 1 : 0;  // Set carry if data in buffere
-    //printf("@[%d:%d]%d %d@", carry_fi_t0, carry_fi_t2, pWBuf, nWBuf);
-    break;
-  case INST_WNDB:
-    //carry_fi_t2 = nWBuf ? 1 : 0;  // We have read the flag - clear it ...
-    //printf("@[%d:%d]%d %d@", carry_fi_t0, carry_fi_t2, pWBuf, nWBuf);
-    break;
-  case INST_WANDRD:
-    printf("#%d %d#", pWBuf, nWBuf);
-/*    if( peripheral_ce == PH_WAND ) {
-      if( nWBuf ) {
-        data56_out = wandBuf[pWBuf++];
-        nWBuf--;
-        drive_data_flag = 1;
-        output_data = 1;
-      } else
-        drive_data_flag = 0;
-    }*/
-    break;
-  }
 
   // Handle special output - or just disassemble the instruction ...
   switch (pending_data_inst) {
   case INST_FETCH:
     if( bTrace )
-      printf("%s   > @%04X --> %03X (%04o)", cpu2buf, addr, inst, inst);
+      nCpu2 += sprintf(cpu2buf+nCpu2, "   > @%04X --> %03X (%04o)", addr, inst, inst);
     break;
   case INST_WRITE:
     if (1) {
@@ -945,26 +925,26 @@ void handle_bus(volatile Bus_t *pBus)
         // Page active and defined as ram - update!
         ram->image[wAddr & PAGE_MASK] = wDat;
         ram->flags |= IMG_DIRTY;
-        printf("   W> %03X -> @%04X !!\n", wDat, wAddr);
+        nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X !!\n", wDat, wAddr);
       } else {
-        printf("   W> %03X -> @%04X (Not RAM!)\n", wDat, wAddr);
+        nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X (Not RAM!)\n", wDat, wAddr);
       }
     }
     break;
   default:
-    if( bTrace ) {
+    if( bTrace && bDisasm ) {
       char *dp = disAsm(inst, addr, data56, sync);
-      if( oAddr != addr )
-        printf("\n%s", cpu2buf);
-      else
-        printf("%s", cpu2buf);
+      if( bTrace && oAddr != addr )
+        printf("\n");
       if( dp )
-        printf(" - %s", dp);
+        nCpu2 += sprintf(cpu2buf + nCpu2, " - %s", dp);
       oAddr = addr + 1;
     }
     break;
   }
 
+  if( bTrace )
+    printf("%s", cpu2buf);
   cpu2buf[0] = 0;
   nCpu2 = 0;
 

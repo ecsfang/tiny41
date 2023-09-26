@@ -23,6 +23,7 @@
 
 int bRend = 0;
 bool bTrace = false;
+bool bDisasm = false;
 
 void bus_init(void)
 {
@@ -174,7 +175,7 @@ int main()
         extern int queue_overflow;
         if( queue_overflow ) {
             WriteString(buf, 5, 56, (char *)"Buffer overflow!");
-            bTrace = false;
+            bDisasm = false;
         }
 
 #ifdef DEBUG_ANALYZER

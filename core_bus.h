@@ -56,6 +56,7 @@ typedef struct {
   uint8_t   sync;
 } Bus_t;
 
+/*
 typedef struct {
     uint8_t sign    : 4;
     uint8_t d1      : 4;
@@ -84,7 +85,7 @@ typedef union {
     ISA_t    x;
     uint64_t data;
 } ISA_u;
-
+*/
 enum {
     IMG_NONE = 0x00,
     IMG_INSERTED = 0x01,

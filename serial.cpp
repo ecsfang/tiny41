@@ -33,7 +33,12 @@ void serial_help(void);
 void toggle_trace(void)
 {
   bTrace = !bTrace;
-  printf("Turn disassemble %s\n", bTrace ? "on":"off");
+  printf("Turn trace %s\n", bTrace ? "on":"off");
+}
+void toggle_disasm(void)
+{
+  bDisasm = !bDisasm;
+  printf("Turn disassemble %s\n", bDisasm ? "on":"off");
 }
 #define BAR() printf("+------+------+------+-----+\n")
 
@@ -127,6 +132,11 @@ SERIAL_COMMAND serial_cmds[] = {
   {
     'd',
     "Toggle disassembler",
+    toggle_disasm,
+  },
+  {
+    't',
+    "Toggle trace",
     toggle_trace,
   },
   {
