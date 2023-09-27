@@ -126,14 +126,13 @@ void fi(int flag)
 void power_on(void)
 {
   printf("Try to power on the calculator ...\n");
-  gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
-  // Expose the next bit on the ISA line ...
   gpio_put(P_ISA_DRV, 1);
-  //sleep_ms(1);
+  gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
+  // Drive ISA high to turn on the calculator ...
   fi(FI_PBSY);
   sleep_us(10);
-  gpio_put(P_ISA_DRV, 0);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
+  gpio_put(P_ISA_DRV, 0);
 }
 
 uint8_t wdata[] = {
@@ -148,25 +147,26 @@ uint8_t wdata[] = {
 void wand_on(void)
 {
   static int wp = 0;
-  printf("Simulate Wand to turn on the calculator ...\n");
-  gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
-  // Expose the next bit on the ISA line ...
-  gpio_put(P_ISA_DRV, 1);
+  printf("Simulate Wand wake up - ");
+  power_on();
+  // Set carry to service the wand
   fi(FI_PBSY);
+  // Fill buffer with next batch of bytes ...
   sendWand(wdata+wp+1,*(wdata+wp));
+  // Update pointer to next batch ...
   wp += *(wdata+wp)+1;
   if( *(wdata+wp) == 0 )
     wp = 0;
-  sleep_us(10);
-  gpio_put(P_ISA_DRV, 0);
-  gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
 }
 
+#if CF_DBG_DISP_INST
 extern const char *inst50disp[16];
 extern const char *inst70disp[16];
+#endif
 
-#define PAGE1(n) (FLASH_TARGET_OFFSET + 2 * n * FLASH_SECTOR_SIZE)
-#define PAGE2(n) (FLASH_TARGET_OFFSET + (2 * n + 1) * FLASH_SECTOR_SIZE)
+#define PAGEn(n,i) (FLASH_TARGET_OFFSET + (2 * n + i) * FLASH_SECTOR_SIZE)
+#define PAGE1(n) PAGEn(n,0)
+#define PAGE2(n) PAGEn(n,1)
 
 #ifdef USE_FLASH
 void erasePort(int n)
@@ -212,9 +212,9 @@ void readPort(int n, uint16_t *data)
 // Allocate memory for all flash images ...
 static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
 
-uint16_t readRom(int a) {
-  if( PAGE(a) >= FIRST_PAGE )
-    return rom_pages[PAGE(a)-FIRST_PAGE][a&PAGE_MASK];
+uint16_t readRom(int addr) {
+  if( PAGE(addr) >= FIRST_PAGE )
+    return rom_pages[PAGE(addr)-FIRST_PAGE][addr&PAGE_MASK];
   return 0;
 }
 
@@ -239,11 +239,15 @@ void addRom(int port, uint16_t *image)
 // Save a ram image to flash (emulate Q-RAM)
 void saveRam(int port, int ovr = 0)
 {
-  if (ovr | (modules[port].flags & IMG_DIRTY)) {
-    modules[port].flags &= ~IMG_DIRTY;
-    erasePort(port);
-    writePort(port, rom_pages[port - FIRST_PAGE]);
-    printf("Wrote RAM[%C] to flash\n", port);
+  if( port >= FIRST_PAGE && port < NR_PAGES ) {
+    if (ovr | (modules[port].flags & IMG_DIRTY)) {
+      modules[port].flags &= ~IMG_DIRTY;
+      erasePort(port);
+      writePort(port, rom_pages[port - FIRST_PAGE]);
+      printf("Wrote RAM[%X] to flash\n", port);
+    }
+  } else {
+      printf("Invalid page! [%X]\n", port);
   }
 }
 #endif
@@ -375,11 +379,13 @@ void handle_bus(volatile Bus_t *pBus);
 
 // Data transfer to core 0
 
+// Size of trace buffer should be a power of 2 (for the mask)
 #ifdef TRACE_ISA
-#define NUM_BUS_T 0x400 //Shoudl be power of 2! 3000 // 7000
+#define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T 0x1000 //Shoudl be power of 2! 3000 // 7000
+#define NUM_BUS_T 0x1000
 #endif
+
 #define NUM_BUS_MASK (NUM_BUS_T-1)
 #define INC_BUS_PTR(d) d = (d+1) & NUM_BUS_MASK
 
@@ -402,17 +408,26 @@ bool bPunct[2 * NR_CHARS + 1];
 char cpu2buf[256];
 int nCpu2 = 0;
 
-// void __not_in_flash_func(core1_main_3)(void)
+void reset_bus_buffer(void)
+{
+  // Reset buffer if overflow has occured ...
+  if( queue_overflow ) {
+    queue_overflow = 0;
+    data_rd = data_wr = 0;
+    gpio_put(LED_PIN_R, LED_OFF);
+  }
+}
+
 void core1_main_3(void)
 {
   static int bIsaEn = 0;
+  static int bDataEn = 0;
   static int bIsa = 0;
   static int bit_no = 0;
   static uint64_t isa = 0LL;
   static uint64_t bit = 0LL;
   int sync = 0;
   static uint64_t data56 = 0;
-  //static uint16_t inst = 0;
   int last_data_wr;
   static uint16_t romAddr = 0;
   Module_t *mp = NULL;
@@ -456,6 +471,23 @@ void core1_main_3(void)
         gpio_put(P_FI_OE, DISABLE_OE);
         break;
       }
+    }
+    switch(bit_no) {
+    case LAST_CYCLE:  // T0
+    case 1*4-1:       // T1
+    case 2*4-1:       // T
+    case 3*4-1:       // T
+    case 4*4-1:       // T
+    case 5*4-1:       // T
+    case 6*4-1:       // T
+    case 7*4-1:       // T
+    case 8*4-1:       // T
+    case 9*4-1:       // T
+    case 10*4-1:      // T
+    case 11*4-1:      // T
+    case 12*4-1:      // T
+    case 13*4-1:      // T
+      break;
     }
 #endif
 
@@ -565,13 +597,19 @@ void core1_main_3(void)
       if( drive_data_flag )
         output_isa = 1;
       break;
+    case LAST_CYCLE-1:
+      break;
     case LAST_CYCLE:
       // If bitno = LAST_CYCLE then we have another frame, store the transaction
       // A 56 bit frame has completed, we send some information to core0 so it can update
       // the display and anything else it needs to
 
       // Don't drive data any more ...
-      gpio_put(P_DATA_OE, DISABLE_OE);
+      if( bDataEn ) {
+        gpio_put(P_DATA_OE, DISABLE_OE);
+        bDataEn = 0;
+      }
+      output_data = 0;
 
       if( pBus->addr || isa || pBus->cmd ) {
         // Is instruction fetched from flash?
@@ -582,27 +620,34 @@ void core1_main_3(void)
         pBus->isa = isa;
 #endif
 
+        // Check if more data to be read from the wand ...
+        carry_fi_t0 = carry_fi_t2 = nWBuf > 0 ? 1 : 0;
+
         if( bSelPa ) {
+          // Get the selected peripheral
           perph = pBus->pa;
           bSelPa = false;
         }
-        if( pBus->cmd == INST_PRPH_SLCT )
+        switch( pBus->cmd ) {
+        case INST_PRPH_SLCT:
+          // Fetch selected peripheral in the next run ...
           bSelPa = true;
-
+          break;
 #ifdef DRIVE_CARRY
-        output_data = 0;
-        carry_fi_t0 = carry_fi_t2 = nWBuf > 0 ? 1 : 0;
-
-        if( perph == WAND_ADDR && pBus->cmd == INST_WANDRD && nWBuf && pBus->sync  ) {
-          output_data = 1;
-          // Enable data driver ...
-          gpio_put(P_DATA_OE, ENABLE_OE);
-          // TBD! Should be data from wand-buffer!
-          data56_out = wandBuf[pWBuf++];
-          nWBuf--;
-          pBus->flag |= 1;
-        }
+        case INST_WANDRD:
+          if( perph == WAND_ADDR && nWBuf && pBus->sync  ) {
+            // Enable data driver ...
+            gpio_put(P_DATA_OE, ENABLE_OE);
+            output_data = bDataEn = 1;
+            // Get next byte from the wand-buffer!
+            data56_out = wandBuf[pWBuf++];
+            nWBuf--;
+            // Debug indication that we were here ...
+            pBus->flag |= 1;
+          }
+          break;
 #endif
+        }
 
         if( (time_us_64() - tm) < 2 )
           break;

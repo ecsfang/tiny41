@@ -25,8 +25,8 @@ typedef void (*CMD_FPTR)(char *cmd);
 typedef struct
 {
   char key;
-  const char *desc;
   FPTR fn;
+  const char *desc;
 } SERIAL_COMMAND;
 
 void serial_help(void);
@@ -44,7 +44,7 @@ void toggle_disasm(void)
 
 void list_modules(void)
 {
-  extern Module_t modules[LAST_PAGE + 1];
+  extern Module_t modules[NR_PAGES];
 
   printf("\nLoaded modules\n");
   BAR();
@@ -77,7 +77,7 @@ extern void power_on(void);
 extern void wand_on(void);
 
 static uint16_t sBrk = 0;
-static int nBrk = 0;
+static uint16_t nBrk = 0;
 
 typedef enum {
   BRK_NONE,
@@ -117,106 +117,57 @@ void clr_brk(void)
 extern void clrBrk(uint16_t addr);
 extern void setBrk(uint16_t addr);
 extern void stopBrk(uint16_t addr);
+extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
-  {
-    'h',
-    "Serial command help",
-    serial_help,
-  },
-  {
-    '?',
-    "Serial command help",
-    serial_help,
-  },
-  {
-    'd',
-    "Toggle disassembler",
-    toggle_disasm,
-  },
-  {
-    't',
-    "Toggle trace",
-    toggle_trace,
-  },
-  {
-    'b',
-    "List breakpoints",
-    list_brks,
-  },
-  {
-    'B',
-    "Set breakpoint",
-    set_brk,
-  },
-  {
-    'E',
-    "End breakpoint",
-    end_brk,
-  },
-  {
-    'C',
-    "Clear breakpoint",
-    clr_brk,
-  },
-  {
-    'x',
-    "Clear breakpoints",
-    clrAllBrk,
-  },
-  {
-    'l',
-    "List modules",
-    list_modules,
-  },
-  {
-    'o',
-    "Power On",
-    power_on,
-  },
-  {
-    'w',
-    "Wand On",
-    wand_on,
-  },
+  { 'h', serial_help,       "Serial command help"  },
+  { '?', serial_help,       "Serial command help"  },
+  { 'd', toggle_disasm,     "Toggle disassembler"  },
+  { 't', toggle_trace,      "Toggle trace"  },
+  { 'b', list_brks,         "List breakpoints"  },
+  { 'B', set_brk,           "Set breakpoint"  },
+  { 'E', end_brk,           "End breakpoint"  },
+  { 'C', clr_brk,           "Clear breakpoint"  },
+  { 'x', clrAllBrk,         "Clear all breakpoints"  },
+  { 'l', list_modules,      "List modules"  },
+  { 'r', reset_bus_buffer,  "Reset trace buffer"  },
+  { 'o', power_on,          "Power On"  },
+  { 'w', wand_on,           "Wand On"  },
 };
+
+const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
 
 void serial_help(void)
 {
-  for (int i = 0; i < sizeof(serial_cmds) / sizeof(SERIAL_COMMAND); i++)
-  {
-    printf("\n%c: %s", serial_cmds[i].key, serial_cmds[i].desc);
-  }
+  printf("\nCmd | Description");
+  printf("\n----+-----------------");
+  for (int i = 0; i < helpSize; i++)
+    printf("\n  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
+  printf("\n----+-----------------");
   printf("\n");
 }
+
 void serial_loop(void)
 {
   int key;
   int periodic_key = 0;
 
   if (periodic_read)
-  {
     pcount++;
-  }
 
-  if (pcount >= 500)
-  {
+  if (pcount >= 500) {
     periodic_key = '0';
     pcount = 0;
   }
 
-  if (((key = getchar_timeout_us(1000)) != PICO_ERROR_TIMEOUT) || (periodic_key != 0))
-  {
-    if (periodic_key != 0)
-    {
+  if (((key = getchar_timeout_us(1000)) != PICO_ERROR_TIMEOUT) || (periodic_key != 0)) {
+    if (periodic_key != 0) {
       key = periodic_key;
       periodic_key = 0;
     }
-
+    // Input of 4 digit hex-address ... ?
     if( nBrk && ((key >= '0' && key <= '9') || (key >= 'a' && key <= 'f'))) {
-      int x = key - '0';
-      if( key >= 'a' )
-        x = key -'a' + 0xa;
+      int x = key - (key>='a') ? ('a'-0xa) : '0';
       sBrk <<= 4;
       sBrk |= x;
       nBrk++;
@@ -237,14 +188,11 @@ void serial_loop(void)
           break;
         }
         brk_mode = BRK_NONE;
-        nBrk = 0;
-        sBrk = 0;
+        sBrk = nBrk = 0;
       }
     } else {
-      for (int i = 0; i < sizeof(serial_cmds) / sizeof(SERIAL_COMMAND); i++)
-      {
-        if (serial_cmds[i].key == key)
-        {
+      for (int i = 0; i < helpSize; i++) {
+        if (serial_cmds[i].key == key) {
           (*serial_cmds[i].fn)();
           break;
         }
@@ -255,7 +203,7 @@ void serial_loop(void)
   {
     // I have found that I need to send something if the serial USB times out
     // otherwise I get lockups on the serial communications.
-    // So, if we get a timeout we send a spoace and backspace it. And
+    // So, if we get a timeout we send a space and backspace it. And
     // flush the stdio, but that didn't fix the problem but seems like a good idea.
     stdio_flush();
     printf(" \b");
