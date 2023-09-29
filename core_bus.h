@@ -44,6 +44,23 @@ enum {
     FI_SERV     // SERVice
 };
 
+enum {
+    T0 = 1 << 0,
+    T1 = 1 << 1,
+    T2 = 1 << 2,
+    T3 = 1 << 3,
+    T4 = 1 << 4,
+    T5 = 1 << 5,
+    T6 = 1 << 6,
+    T7 = 1 << 7,
+    T8 = 1 << 8,
+    T9 = 1 << 9,
+    T10 = 1 << 10 ,
+    T11 = 1 << 11,
+    T12 = 1 << 12,
+    T13 = 1 << 13
+};
+
 typedef struct {
   uint64_t  data;
 #ifdef TRACE_ISA
@@ -51,7 +68,8 @@ typedef struct {
 #endif
   uint16_t  addr;
   uint16_t  cmd;
-  uint16_t  flag;
+  //uint16_t  flag;
+  uint16_t  fi;
   uint8_t   pa;
   uint8_t   sync;
 } Bus_t;

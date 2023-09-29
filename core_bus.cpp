@@ -115,26 +115,48 @@ void list_brks(void)
 }
 void swapRam(uint16_t *dta, int n);
 
-volatile int carry_fi_t0 = 0;
-volatile int carry_fi_t2 = 0;
+//volatile int carry_fi_t0 = 0;
+//volatile int carry_fi_t2 = 0;
+volatile uint16_t carry_fi = 0;
 
-void fi(int flag)
+void setFI(int flag)
 {
-  carry_fi_t0 = 1;
+  carry_fi |= flag;
+}
+void clrFI(void)
+{
+  carry_fi = 0;
+}
+void clrFI(int flag)
+{
+  carry_fi &= ~flag;
+}
+uint16_t getFI(void)
+{
+  return carry_fi;
 }
 
-void power_on(void)
+volatile int wDelay = 0;
+volatile int wDelayBuf = 0;
+
+void _power_on()
 {
-  printf("Try to power on the calculator ...\n");
   gpio_put(P_ISA_DRV, 1);
   gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
   // Drive ISA high to turn on the calculator ...
-  fi(FI_PBSY);
+  setFI(T0);
+  wDelay = 2;
   sleep_us(10);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
 }
+void power_on(void)
+{
+  printf("Try to power on the calculator ...\n");
+  _power_on();
+}
 
+#if 0
 uint8_t wdata[] = {
   16, 0x50, 0x10, 0x02, 0xC0, 0x00, 0xF3, 0x00, 0x44, 0x43, 0x6F, 0x1B, 0x13, 0x00, 0x43, 0x11, 0x10,
   16, 0x9D, 0x11, 0x11, 0x00, 0x40, 0xCE, 0x7E, 0xAA, 0x13, 0xA8, 0x14, 0xAA, 0x12, 0xA8, 0x13, 0xAA,
@@ -143,20 +165,50 @@ uint8_t wdata[] = {
   11, 0x23, 0x14, 0x10, 0x76, 0x87, 0xCE, 0x75, 0x7E, 0xC0, 0x00, 0x2F,
    0
 };
+#endif
+
+uint8_t wdata[] = {
+  16, 0x01, 0x10, 0x05, 0xC6, 0x00, 0xF5, 0x00, 0x43, 0x4F, 0x44, 0x45, 0xF6, 0x43, 0x4F, 0x44, 0x45,
+  16, 0x17, 0x11, 0x22, 0x3D, 0x3F, 0x8C, 0x84, 0x8B, 0xC8, 0x02, 0xF3, 0x00, 0x43, 0x4F, 0xF8, 0x7F,
+  16, 0xCD, 0x12, 0x70, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x1A, 0x10, 0x10, 0x16, 0x91, 0x74,
+  16, 0xA5, 0x13, 0x01, 0xC0, 0x03, 0xF3, 0x00, 0x48, 0x42, 0x11, 0x90, 0x77, 0xCE, 0x7E, 0x71, 0xA9,
+  16, 0xDF, 0x14, 0x10, 0x00, 0xA9, 0x01, 0xA9, 0x02, 0xAA, 0x03, 0xB2, 0x00, 0xA8, 0x04, 0xAB, 0x07,
+  16, 0x78, 0x15, 0x00, 0xA8, 0x07, 0xAC, 0x07, 0x54, 0xAC, 0x06, 0x54, 0xA8, 0x06, 0x66, 0xA9, 0x06,
+  16, 0x5D, 0x16, 0x01, 0x66, 0xA8, 0x05, 0x02, 0x94, 0x73, 0xAA, 0x04, 0xA8, 0x00, 0xAA, 0x05, 0xA8,
+  16, 0xA6, 0x17, 0x10, 0x01, 0xAA, 0x06, 0xA8, 0x02, 0xAA, 0x07, 0xA8, 0x03, 0xAA, 0x0B, 0xB2, 0x00,
+  16, 0xAE, 0x18, 0x01, 0xA8, 0x0C, 0xAB, 0x0F, 0xA8, 0x0F, 0xAC, 0x0F, 0x54, 0xAC, 0x0E, 0x54, 0xA8,
+  16, 0x31, 0x19, 0x11, 0x0E, 0x66, 0xA9, 0x0E, 0x66, 0xA8, 0x0D, 0x02, 0xAA, 0x0C, 0xA8, 0x04, 0xAA,
+  16, 0x2C, 0x1A, 0x11, 0x0D, 0xA8, 0x05, 0xAA, 0x0E, 0xA8, 0x06, 0xAA, 0x0F, 0xA8, 0x07, 0x75, 0xCE,
+  16, 0x62, 0x1B, 0x11, 0x7E, 0x90, 0x77, 0x90, 0x76, 0x90, 0x75, 0x91, 0x76, 0x74, 0x91, 0x75, 0xF2,
+  16, 0x28, 0x1C, 0x23, 0x7F, 0x2A, 0xCE, 0x76, 0x74, 0x91, 0x77, 0x74, 0x91, 0x76, 0xF3, 0x7F, 0x2A,
+  16, 0x34, 0x1D, 0x10, 0x2A, 0x90, 0x71, 0x91, 0x75, 0x96, 0x74, 0x1D, 0xF2, 0x48, 0x42, 0x90, 0x75,
+  12, 0x11, 0x1E, 0x00, 0x87, 0x91, 0x75, 0x7E, 0x9F, 0x09, 0xC4, 0x15, 0x2F,
+  0
+};
+
+static int row = -1;
+static int wp = 0;
 
 void wand_on(void)
 {
-  static int wp = 0;
-  printf("Simulate Wand wake up - ");
-  power_on();
+  if( wp == 0 )
+    row=1;
+  printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
+  _power_on();
   // Set carry to service the wand
-  fi(FI_PBSY);
+  setFI(T0);
+  wDelay = 20;
   // Fill buffer with next batch of bytes ...
   sendWand(wdata+wp+1,*(wdata+wp));
   // Update pointer to next batch ...
   wp += *(wdata+wp)+1;
   if( *(wdata+wp) == 0 )
     wp = 0;
+  if( !wp ) {
+    printf("Done!");
+    row = -1;
+  }
+  printf("\n");
 }
 
 #if CF_DBG_DISP_INST
@@ -407,6 +459,8 @@ bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
+char cpu3buf[256];
+int nCpu3 = 0;
 
 void reset_bus_buffer(void)
 {
@@ -417,6 +471,11 @@ void reset_bus_buffer(void)
     gpio_put(LED_PIN_R, LED_OFF);
   }
 }
+
+#define CHECK_FI(t0,t1)                                         \
+      if( carry_fi & t1 )       gpio_put(P_FI_OE, ENABLE_OE);   \
+      else if( carry_fi & t0 )  gpio_put(P_FI_OE, DISABLE_OE);  \
+      break
 
 void core1_main_3(void)
 {
@@ -448,7 +507,7 @@ void core1_main_3(void)
 
 #ifdef DRIVE_CARRY
     // Do we drive the carry bit on FI line?
-    if (carry_fi_t0) { // ?PBSY
+/*    if (carry_fi & T0) { // ?PBSY
       switch(bit_no) {
       case LAST_CYCLE:  // Bit 0 - start of T0
         // Enable FI (input tied low)
@@ -472,23 +531,26 @@ void core1_main_3(void)
         break;
       }
     }
+*/
+#if 1
+    // Handle FI carry signal
     switch(bit_no) {
-    case LAST_CYCLE:  // T0
-    case 1*4-1:       // T1
-    case 2*4-1:       // T
-    case 3*4-1:       // T
-    case 4*4-1:       // T
-    case 5*4-1:       // T
-    case 6*4-1:       // T
-    case 7*4-1:       // T
-    case 8*4-1:       // T
-    case 9*4-1:       // T
-    case 10*4-1:      // T
-    case 11*4-1:      // T
-    case 12*4-1:      // T
-    case 13*4-1:      // T
-      break;
+    case LAST_CYCLE: CHECK_FI(T13, T0);   // T0
+    case 1*4-1:      CHECK_FI(T0,  T1);   // T1
+    case 2*4-1:      CHECK_FI(T1,  T2);   // T2
+    case 3*4-1:      CHECK_FI(T2,  T3);   // T3
+    case 4*4-1:      CHECK_FI(T3,  T4);   // T4
+    case 5*4-1:      CHECK_FI(T4,  T5);   // T5
+    case 6*4-1:      CHECK_FI(T5,  T6);   // T6
+    case 7*4-1:      CHECK_FI(T6,  T7);   // T7
+    case 8*4-1:      CHECK_FI(T7,  T8);   // T8
+    case 9*4-1:      CHECK_FI(T8,  T9);   // T9
+    case 10*4-1:     CHECK_FI(T9,  T10);  // T10
+    case 11*4-1:     CHECK_FI(T10, T11);  // T11
+    case 12*4-1:     CHECK_FI(T11, T12);  // T12
+    case 13*4-1:     CHECK_FI(T12, T13);  // T13
     }
+#endif
 #endif
 
 #ifdef DRIVE_DATA
@@ -558,12 +620,17 @@ void core1_main_3(void)
       pBus = &bus[data_wr];
       pBus->sync = 0;
       pBus->cmd = 0;
-      pBus->flag = 0;
+      pBus->fi = 0;
       romAddr = 0;
       break;
 
     case 7:
       pBus->pa = data56 & 0xFF;
+      if( bSelPa ) {
+        // Get the selected peripheral
+        perph = pBus->pa;
+        bSelPa = false;
+      }
       break;
 
     case 29:
@@ -598,6 +665,12 @@ void core1_main_3(void)
         output_isa = 1;
       break;
     case LAST_CYCLE-1:
+      pBus->fi = getFI();
+      last_data_wr = data_wr;
+      if( queue_overflow == 1 ) {
+          gpio_put(LED_PIN_R, LED_ON);
+      }
+      gpio_put(LED_PIN_B, LED_OFF);
       break;
     case LAST_CYCLE:
       // If bitno = LAST_CYCLE then we have another frame, store the transaction
@@ -621,13 +694,22 @@ void core1_main_3(void)
 #endif
 
         // Check if more data to be read from the wand ...
-        carry_fi_t0 = carry_fi_t2 = nWBuf > 0 ? 1 : 0;
+        if( nWBuf ) {
+          setFI(T0);
+          setFI(T2);  
+          wDelayBuf = 20; //20;
+        } else {
+          //printf("\nBuffer empty!\n");
+          clrFI(T2);
+        }
 
-        if( bSelPa ) {
+        //carry_fi_t0 = carry_fi_t2 = nWBuf > 0 ? 1 : 0;
+
+/*        if( bSelPa ) {
           // Get the selected peripheral
           perph = pBus->pa;
           bSelPa = false;
-        }
+        }*/
         switch( pBus->cmd ) {
         case INST_PRPH_SLCT:
           // Fetch selected peripheral in the next run ...
@@ -643,7 +725,7 @@ void core1_main_3(void)
             data56_out = wandBuf[pWBuf++];
             nWBuf--;
             // Debug indication that we were here ...
-            pBus->flag |= 1;
+            //pBus->flag |= 1;
           }
           break;
 #endif
@@ -654,17 +736,13 @@ void core1_main_3(void)
 
         isa = data56 = 0LL;
   
-        last_data_wr = data_wr;
-  
         INC_BUS_PTR(data_wr);
   
         if (data_rd == data_wr) {
           // No space left in ring-buffer ...
-          queue_overflow = 1;
+          queue_overflow++;
           data_wr = last_data_wr;
-          gpio_put(LED_PIN_R, LED_ON);
         }
-        gpio_put(LED_PIN_B, LED_OFF);
       }
       break;
     }
@@ -866,7 +944,7 @@ void handle_bus(volatile Bus_t *pBus)
   int inst = pBus->cmd;
   int pa = pBus->pa;
   int sync = pBus->sync;
-  int flag = pBus->flag;
+  int fi = pBus->fi;
   uint64_t data56 = pBus->data;
 #ifdef TRACE_ISA
   uint64_t isa = pBus->isa;
@@ -904,7 +982,31 @@ void handle_bus(volatile Bus_t *pBus)
       peripheral_ce = PH_NONE;
     }
   }
+#if 1
+#ifdef QUEUE_STATUS
+  int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
+  nCpu2 = sprintf(cpu2buf, "\n%c", queue_overflow ? '#' : ' ');
+#else
+  nCpu2 = sprintf(cpu2buf, "\n");
+#endif
 
+  switch (peripheral_ce) {
+  case PH_DISPLAY:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "D");
+    break;
+  case PH_WAND:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "W");
+    break;
+  case PH_TIMER:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "T");
+    break;
+  case PH_CRDR:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "C");
+    break;
+  default:
+    nCpu2 += sprintf(cpu2buf + nCpu2, " ");
+  }
+#else
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
   if( queue_overflow )
@@ -931,9 +1033,10 @@ void handle_bus(volatile Bus_t *pBus)
   default:
     nCpu2 += sprintf(cpu2buf + nCpu2, "    ");
   }
+#endif
 
   uint8_t q = (addr >> 10) & 0b1111;
-  #ifdef TRACE_ISA
+#ifdef TRACE_ISA
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X (Q%2d:%03X) %03X",
@@ -943,17 +1046,29 @@ void handle_bus(volatile Bus_t *pBus)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X           %03X",
             data56, isa, addr, inst);
   }
-  #else
+#else
+#if 1
+  if( PAGE(addr) < 3 ) {
+    // Dump information about which quad rom (easy find in VASM)
+    nCpu2 += sprintf(cpu2buf + nCpu2, " %02X|%c %04X (Q%2d:%03X) %03X",
+            fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+  } else {
+    // No need in an external rom
+    nCpu2 += sprintf(cpu2buf + nCpu2, " %02X|%c %04X           %03X",
+            fi, sync ? '*':' ', addr, inst);
+  }
+#else
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X (Q%2d:%03X) %03X",
-            data56, flag, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+            data56, fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X           %03X",
-            data56, flag, sync ? '*':' ', addr, inst);
+            data56, fi, sync ? '*':' ', addr, inst);
   }
-  #endif
+#endif
+#endif
 
   // Handle special output - or just disassemble the instruction ...
   switch (pending_data_inst) {
@@ -995,6 +1110,23 @@ void handle_bus(volatile Bus_t *pBus)
 
   // Check for a pending instruction from the previous cycle
   switch (pending_data_inst) {
+  case INST_WNDB:
+    if( wDelayBuf > 0 ) wDelayBuf--;
+//    if( bTrace ) {
+//      printf("Row %d nWBuf %d carry_fi %03X delatyBuf %d\n",
+//          row, nWBuf, carry_fi, wDelayBuf);
+//    }
+    if( row > 0 && nWBuf == 0 && (carry_fi & T2) == 0 && wDelayBuf == 0)
+      wand_on();
+    break;
+  case INST_PBSY:
+    if( !nWBuf && wDelay ) {
+      wDelay--;
+      if( !wDelay )
+        clrFI(T0);
+      printf(" - Dec wDelay %d! [%04X] ", wDelay, carry_fi);
+    }
+    break;
   case INST_LDI:
     bLdi = true;
     break;
@@ -1025,7 +1157,8 @@ void handle_bus(volatile Bus_t *pBus)
     updateDispReg(data56, pending_data_inst >> 6);
     break;
   case INST_WANDRD:
-    printf("\n%s %03llX", "WAND BUF", data56 & 0xFFF);
+    if( bTrace )
+      printf(" WB -> %03X:%d", (int)(data56 & 0xFFF), nWBuf);
   }
   // Clear pending flag ...
   pending_data_inst = 0;
@@ -1055,6 +1188,7 @@ void handle_bus(volatile Bus_t *pBus)
     case INST_WRITE:
     case INST_FETCH:
     case INST_PBSY:
+    case INST_WNDB:
       pending_data_inst = inst;
       break;
     case INST_POWOFF:
