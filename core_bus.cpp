@@ -60,14 +60,15 @@ enum {
   BRK_START,
   BRK_STOP,
 };
-#define BRK_MASK(a,w) ((brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0x3)
+#define BRK_MASK(a,w) ((brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0b11)
 #define BRK_SHFT(a) ((a & 0xF)<<1)
 #define BRK_WORD(a) (a >> 4)
 
 // Check if breakpoint is set for given address
 inline int isBrk(uint16_t addr)
 {
-  return (brkpt[BRK_WORD(addr)] >> BRK_SHFT(addr)) & 0b11;
+  uint32_t w = brkpt[BRK_WORD(addr)];
+  return w ? (w >> BRK_SHFT(addr)) & 0b11 : 0;
 }
 // Clear breakpoint on given address
 void clrBrk(uint16_t addr)
@@ -76,21 +77,21 @@ void clrBrk(uint16_t addr)
 }
 void clrAllBrk(void)
 {
-  for(int a=0; a<BRK_SIZE; a++)
-    brkpt[a] = 0x0;
   printf("Clear all breakpoints\n");
+  memset(brkpt, 0, sizeof(uint32_t) * BRK_SIZE);
 }
 // Set breakpoint on given address
 void setBrk(uint16_t addr)
 {
-  clrBrk(addr);
+  clrBrk(addr); // Remove previous settings
   brkpt[BRK_WORD(addr)] |= BRK_START << BRK_SHFT(addr);
 }
 void stopBrk(uint16_t addr)
 {
-  clrBrk(addr);
+  clrBrk(addr); // Remove previous settings
   brkpt[BRK_WORD(addr)] |= BRK_STOP << BRK_SHFT(addr);
 }
+
 void list_brks(void)
 {
   int n = 0;
@@ -115,37 +116,35 @@ void list_brks(void)
 }
 void swapRam(uint16_t *dta, int n);
 
-//volatile int carry_fi_t0 = 0;
-//volatile int carry_fi_t2 = 0;
+// Keep track of FI flags (0-13)
 volatile uint16_t carry_fi = 0;
 
-void setFI(int flag)
+// Set FI flag (T0-T13)
+inline void setFI(int flag)
 {
   carry_fi |= flag;
 }
-void clrFI(void)
+inline void clrFI(int flag = 0)
 {
-  carry_fi = 0;
+  carry_fi &= (flag ? ~flag : 0);
 }
-void clrFI(int flag)
+inline uint16_t getFI(int flag = 0)
 {
-  carry_fi &= ~flag;
-}
-uint16_t getFI(void)
-{
-  return carry_fi;
+  return carry_fi & (flag ? flag : FI_MASK);
 }
 
 volatile int wDelay = 0;
 volatile int wDelayBuf = 0;
+volatile bool bSendWndData = false;
 
 void _power_on()
 {
+  // Drive ISA high to turn on the calculator ...
   gpio_put(P_ISA_DRV, 1);
   gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
-  // Drive ISA high to turn on the calculator ...
-  setFI(T0);
-  wDelay = 2;
+  // Set PBSY-flag on to indicate someone needs service ...
+  setFI(FI_PBSY);
+  wDelay = 2000;  // Instructions delay until flag off ...
   sleep_us(10);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
@@ -196,8 +195,8 @@ void wand_on(void)
   printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
   _power_on();
   // Set carry to service the wand
-  setFI(T0);
-  wDelay = 20;
+  setFI(FI_PBSY);
+  wDelay = 2000;
   // Fill buffer with next batch of bytes ...
   sendWand(wdata+wp+1,*(wdata+wp));
   // Update pointer to next batch ...
@@ -264,11 +263,12 @@ void readPort(int n, uint16_t *data)
 // Allocate memory for all flash images ...
 static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
 
-uint16_t readRom(int addr) {
-  if( PAGE(addr) >= FIRST_PAGE )
-    return rom_pages[PAGE(addr)-FIRST_PAGE][addr&PAGE_MASK];
+/*uint16_t readRom(int addr) {
+  int page = PAGE(addr)-FIRST_PAGE;
+  if( page >= 0 )
+    return rom_pages[page][addr&PAGE_MASK];
   return 0;
-}
+}*/
 
 // Make space for information about all flash images
 Module_t modules[NR_PAGES];
@@ -341,8 +341,9 @@ void initRoms()
     erasePort(p);
 #endif
   // Remove all modules ...
-  for (int p = 0; p <= LAST_PAGE; p++)
-		addRom(p, NULL);
+  memset(modules, 0, sizeof(Module_t) * NR_PAGES);
+  //for (int p = 0; p <= LAST_PAGE; p++)
+	//	addRom(p, NULL);
 
   // Check for existing images and load them ...
   for (int port = FIRST_PAGE; port <= LAST_PAGE; port++) {
@@ -472,9 +473,9 @@ void reset_bus_buffer(void)
   }
 }
 
-#define CHECK_FI(t0,t1)                                         \
-      if( carry_fi & t1 )       gpio_put(P_FI_OE, ENABLE_OE);   \
-      else if( carry_fi & t0 )  gpio_put(P_FI_OE, DISABLE_OE);  \
+#define CHECK_FI(t0,t1)                                       \
+      if( getFI( t1 ) )       gpio_put(P_FI_OE, ENABLE_OE);   \
+      else if( getFI( t0 ) )  gpio_put(P_FI_OE, DISABLE_OE);  \
       break
 
 void core1_main_3(void)
@@ -695,21 +696,12 @@ void core1_main_3(void)
 
         // Check if more data to be read from the wand ...
         if( nWBuf ) {
-          setFI(T0);
-          setFI(T2);  
-          wDelayBuf = 20; //20;
+          setFI(FI_PBSY);
+          setFI(FI_WNDB);
         } else {
-          //printf("\nBuffer empty!\n");
-          clrFI(T2);
+          clrFI(FI_WNDB);
         }
 
-        //carry_fi_t0 = carry_fi_t2 = nWBuf > 0 ? 1 : 0;
-
-/*        if( bSelPa ) {
-          // Get the selected peripheral
-          perph = pBus->pa;
-          bSelPa = false;
-        }*/
         switch( pBus->cmd ) {
         case INST_PRPH_SLCT:
           // Fetch selected peripheral in the next run ...
@@ -724,6 +716,12 @@ void core1_main_3(void)
             // Get next byte from the wand-buffer!
             data56_out = wandBuf[pWBuf++];
             nWBuf--;
+            if( !nWBuf ) {
+              // Ready to receive next batch of data
+              bSendWndData = true;
+              // Number of instructions delay after buffer is emptied ...
+              wDelayBuf = 200;
+            }
             // Debug indication that we were here ...
             //pBus->flag |= 1;
           }
@@ -747,6 +745,29 @@ void core1_main_3(void)
       break;
     }
     last_sync = sync;
+  }
+}
+
+void post_handling(void)
+{
+  if( bSendWndData ) {
+    // Make a delay between the old and new batch of data ...
+    if( wDelayBuf == 0 ) {
+      // Check if we have more data to send and buffer is empty ...
+      // row > 0 if we have more data to send
+      // nWBuf == 0 if all data in buffer have been read
+      // FI_WNDB (T2) is low if buffer is empty
+      if( row > 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 ) {
+        // Update buffer with next batch of data ...
+        wand_on();
+        bSendWndData = false;
+      }
+    } else
+      wDelayBuf--;
+  } else if( !nWBuf && wDelay ) {
+    // If no data to send - turn off FI flag T0 after some polls of PBSY
+    if( !(--wDelay) )
+      clrFI(FI_PBSY);
   }
 }
 
@@ -779,12 +800,17 @@ void process_bus(void)
     // Handle the bus traffic
     br = isBrk(bus[data_rd].addr);
     if( br == BRK_START )
-      bTrace = true;
+      bTrace |= 0b010;
     handle_bus(&bus[data_rd]);
     if( br == BRK_STOP )
-      bTrace = false;
+      bTrace &= 0b101;
 #endif
     INC_BUS_PTR(data_rd);
+
+    // Any handling outside bus traceing
+    // Note that instructions can be missed if the buffer is overflowed!
+    // Better handle these cases here ...
+    post_handling();
   }
 }
 
@@ -847,7 +873,7 @@ void dump_dregs(void)
 
 #if CF_DISPLAY_LCD
   UpdateLCD(dtext, bPunct, display_on);
-  if( bTrace )
+  if( IS_TRACE() )
     printf("\n[%s] (%s)", dtext, display_on ? "ON" : "OFF");
 #endif
 }
@@ -1073,7 +1099,7 @@ void handle_bus(volatile Bus_t *pBus)
   // Handle special output - or just disassemble the instruction ...
   switch (pending_data_inst) {
   case INST_FETCH:
-    if( bTrace )
+    if( IS_TRACE() )
       nCpu2 += sprintf(cpu2buf+nCpu2, "   > @%04X --> %03X (%04o)", addr, inst, inst);
     break;
   case INST_WRITE:
@@ -1092,9 +1118,9 @@ void handle_bus(volatile Bus_t *pBus)
     }
     break;
   default:
-    if( bTrace && bDisasm ) {
+    if( IS_FULLTRACE() ) {
       char *dp = disAsm(inst, addr, data56, sync);
-      if( bTrace && oAddr != addr )
+      if( oAddr != addr )
         printf("\n");
       if( dp )
         nCpu2 += sprintf(cpu2buf + nCpu2, " - %s", dp);
@@ -1103,7 +1129,7 @@ void handle_bus(volatile Bus_t *pBus)
     break;
   }
 
-  if( bTrace )
+  if( IS_TRACE() )
     printf("%s", cpu2buf);
   cpu2buf[0] = 0;
   nCpu2 = 0;
@@ -1111,21 +1137,8 @@ void handle_bus(volatile Bus_t *pBus)
   // Check for a pending instruction from the previous cycle
   switch (pending_data_inst) {
   case INST_WNDB:
-    if( wDelayBuf > 0 ) wDelayBuf--;
-//    if( bTrace ) {
-//      printf("Row %d nWBuf %d carry_fi %03X delatyBuf %d\n",
-//          row, nWBuf, carry_fi, wDelayBuf);
-//    }
-    if( row > 0 && nWBuf == 0 && (carry_fi & T2) == 0 && wDelayBuf == 0)
-      wand_on();
     break;
   case INST_PBSY:
-    if( !nWBuf && wDelay ) {
-      wDelay--;
-      if( !wDelay )
-        clrFI(T0);
-      printf(" - Dec wDelay %d! [%04X] ", wDelay, carry_fi);
-    }
     break;
   case INST_LDI:
     bLdi = true;
@@ -1157,7 +1170,7 @@ void handle_bus(volatile Bus_t *pBus)
     updateDispReg(data56, pending_data_inst >> 6);
     break;
   case INST_WANDRD:
-    if( bTrace )
+    if( IS_TRACE() )
       printf(" WB -> %03X:%d", (int)(data56 & 0xFFF), nWBuf);
   }
   // Clear pending flag ...

@@ -30,15 +30,18 @@ typedef struct
 } SERIAL_COMMAND;
 
 void serial_help(void);
+// Toggle over-all trace (off -> no trace at all)
 void toggle_trace(void)
 {
-  bTrace = !bTrace;
-  printf("Turn trace %s\n", bTrace ? "on":"off");
+  bTrace ^= 0b001;
+  if( bTrace & 0b001 ) bTrace |= 0b010;
+  printf("Turn trace %s\n", bTrace & 0b001 ? "on":"off");
 }
+// Toggle disassembler (on -> call disassembler if trace is on)
 void toggle_disasm(void)
 {
-  bDisasm = !bDisasm;
-  printf("Turn disassemble %s\n", bDisasm ? "on":"off");
+  bTrace ^= 0b100;
+  printf("Turn disassemble %s\n", IS_DISASM() ? "on":"off");
 }
 #define BAR() printf("+------+------+------+-----+\n")
 

@@ -22,8 +22,9 @@
 // #define DEBUG_ANALYZER
 
 int bRend = 0;
-bool bTrace = false;
-bool bDisasm = false;
+
+// Init trace - no trace/no disassembler
+uint8_t bTrace = 0;
 
 void bus_init(void)
 {
@@ -156,15 +157,28 @@ int main()
 #ifdef DEBUG_ANALYZER
     char sBuf[32];
     int oSync, oEmbed, oDin, oDout;
-    int bRend;
 
     oSync = oEmbed = oDin = oDout = -1;
     bRend = 0;
 #endif
 
-    setBrk(0x018A);
-    stopBrk(0x0);
-    
+    // Remove some loops from trace ...
+    // Reset keyboard (RST10)
+    stopBrk(0x00A0);
+    setBrk(0x00A1);
+
+    // Ignore key at DISOFF
+    stopBrk(0x089D);
+    setBrk(0x089E);
+
+    // Tone in wand
+    stopBrk(0xF3D4);
+    setBrk(0xF3D5);
+
+    // FOR DEBOUNCE (DRSY30)
+    stopBrk(0x0178);
+    setBrk(0x0179);
+
     while (1)
     {
         // capture_bus_transactions();
@@ -175,7 +189,7 @@ int main()
         extern int queue_overflow;
         if( queue_overflow ) {
             WriteString(buf, 5, 56, (char *)"Buffer overflow!");
-            bDisasm = false;
+            bTrace &= 0b011; // Turn disasm off ...
         }
 
 #ifdef DEBUG_ANALYZER
@@ -197,8 +211,7 @@ int main()
             bRend++;
         }
 #endif // DEBUG_ANALYZER
-        if (bRend)
-        {
+        if (bRend) {
             render(buf, &frame_area);
             bRend = 0;
         }
@@ -256,12 +269,12 @@ void UpdateAnnun(uint16_t ann)
             for (int i = 0; i < annu[a].len; i++)
                 sBuf[pa + i] = annu[a].ann[i];
         }
-        // Add space is needed ...
+        // Add space if needed ...
         pa += annu[a].len + (annu[a].sp ? 1 : 0);
     }
     sBuf[pa] = 0;
 
-    if( bTrace )
+    if( IS_TRACE() )
         printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
 
     WriteString(buf, 0, 32, sBuf);

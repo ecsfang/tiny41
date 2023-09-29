@@ -27,24 +27,6 @@
 #define QUEUE_STATUS
 
 enum {
-    FI_NONE = -1,
-    FI_PBSY,    // Printer BuSY
-    FI_CRDR,    // CaRD Reader
-    FI_WNDB,    // WaND Byte available
-    FI_PF3,     // 3
-    FI_PF4,     // 4
-    FI_EDAV,    // Emitter Diode AVailable
-    FI_IFCR,    // InterFace Clear Received
-    FI_SRQR,    // Service ReQuest Received
-    FI_FRAV,    // FRame AVailable
-    FI_FRNS,    // Frame Received Not as Sent
-    FI_ORAV,    // Output Register AVailable
-    FI_TFAIL,   //
-    FI_ALM,     // ALarM
-    FI_SERV     // SERVice
-};
-
-enum {
     T0 = 1 << 0,
     T1 = 1 << 1,
     T2 = 1 << 2,
@@ -58,7 +40,26 @@ enum {
     T10 = 1 << 10 ,
     T11 = 1 << 11,
     T12 = 1 << 12,
-    T13 = 1 << 13
+    T13 = 1 << 13,
+    FI_MASK = (1 << 14)-1
+};
+
+enum {
+    FI_NONE  = 0,
+    FI_PBSY  = T0,  // Printer BuSY
+    FI_CRDR  = T1,  // CaRD Reader
+    FI_WNDB  = T2,  // WaND Byte available
+    FI_PF3   = T3,  // 3 - not used
+    FI_PF4   = T4,  // 4 - not used
+    FI_EDAV  = T5,  // Emitter Diode AVailable
+    FI_IFCR  = T6,  // InterFace Clear Received
+    FI_SRQR  = T7,  // Service ReQuest Received
+    FI_FRAV  = T8,  // FRame AVailable
+    FI_FRNS  = T9,  // Frame Received Not as Sent
+    FI_ORAV  = T10, // Output Register AVailable
+    FI_TFAIL = T11, //
+    FI_ALM   = T12, // ALarM
+    FI_SERV  = T13  // SERVice
 };
 
 typedef struct {

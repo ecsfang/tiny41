@@ -74,6 +74,10 @@
 extern void UpdateLCD(char *, bool *, bool);
 extern void UpdateAnnun(uint16_t ann);
 
+#define IS_TRACE() ((bTrace & 0b011) == 0b011)
+#define IS_FULLTRACE() ((bTrace & 0b111) == 0b111)
+#define IS_DISASM() (bTrace & 0b100)
+
 //#define TRACE
 #define USE_FLASH
 
