@@ -196,6 +196,7 @@ int main()
 
         extern int queue_overflow;
         if( queue_overflow ) {
+            gpio_put(LED_PIN_R, LED_ON);
             WriteString(buf, 5, 56, (char *)"Buffer overflow!");
             bTrace &= 0b011; // Turn disasm off ...
         }

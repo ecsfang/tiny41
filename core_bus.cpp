@@ -137,7 +137,6 @@ inline uint16_t getFI(void)
   return carry_fi & FI_MASK;
 }
 
-volatile int wDelay = 0;
 volatile int wDelayBuf = 0;
 volatile bool bSendWndData = false;
 
@@ -148,7 +147,6 @@ void _power_on()
   gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
   // Set PBSY-flag on to indicate someone needs service ...
   setFI(FI_PBSY);
-  wDelay = 500;  // Instructions delay until flag off ...
   sleep_us(10);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
@@ -200,7 +198,6 @@ void wand_on(void)
   _power_on();
   // Set carry to service the wand
   setFI(FI_PBSY);
-  wDelay = 2000;
   // Fill buffer with next batch of bytes ...
   sendWand(wdata+wp+1,*(wdata+wp));
   // Update pointer to next batch ...
@@ -266,13 +263,6 @@ void readPort(int n, uint16_t *data)
 
 // Allocate memory for all flash images ...
 static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
-
-/*uint16_t readRom(int addr) {
-  int page = PAGE(addr)-FIRST_PAGE;
-  if( page >= 0 )
-    return rom_pages[page][addr&PAGE_MASK];
-  return 0;
-}*/
 
 // Make space for information about all flash images
 Module_t modules[NR_PAGES];
@@ -446,7 +436,7 @@ void handle_bus(volatile Bus_t *pBus);
 #define NUM_BUS_MASK (NUM_BUS_T-1)
 #define INC_BUS_PTR(d) d = (d+1) & NUM_BUS_MASK
 
-int queue_overflow = 0;
+volatile int queue_overflow = 0;
 
 volatile int data_wr = 0;
 volatile int data_rd = 0;
@@ -477,14 +467,6 @@ void reset_bus_buffer(void)
   }
 }
 
-static int nfi[14+2] = { T0,T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,T13,T0,T0 };
-
-#define CHECK_FI(t0,t1)                                       \
-      if( getFI( t1 ) )       gpio_put(P_FI_OE, ENABLE_OE);   \
-      else if( getFI( t0 ) )  gpio_put(P_FI_OE, DISABLE_OE)
-      //  \
-      //break
-
 void core1_main_3(void)
 {
   static int bIsaEn = 0;
@@ -503,12 +485,16 @@ void core1_main_3(void)
   volatile Bus_t *pBus = &bus[data_wr];
   static uint8_t perph = 0;
   static bool bSelPa = false;
+  static bool bErr = false;
+  static uint8_t cnt = 0;
 
   irq_set_mask_enabled(0xffffffff, false);
 
   last_sync = GPIO_PIN(P_SYNC);
 
+#ifdef MEASURE_TIME
   uint64_t tm = time_us_64();
+#endif
 
   while (1) {
     // Wait for CLK2 to have a falling edge
@@ -516,20 +502,11 @@ void core1_main_3(void)
 
     // NOTE! Bit numbers are out by one as bit_no hasn't been incremented yet.
 
-/*    if( (bit_no & 0b11) == 0b11 ) {
-      int t = bit_no >> 2;
-      if( getFI( nfi[t+1] ) )
-        gpio_put(P_FI_OE, ENABLE_OE);
-      else if( getFI( nfi[t] ) )
-         gpio_put(P_FI_OE, DISABLE_OE);
-    }*/
-
-#if 1
+    // Drive the FI carry flags (if any ...)
     if( (bit_no & 0b11) == 0b11 ) {
       gpio_put(P_FI_OE, dataFI & 1);
       dataFI >>= 1;
     }
-#endif
 
 #ifdef DRIVE_DATA
     // Do we drive the DATA line (bit 0-55)?
@@ -539,14 +516,15 @@ void core1_main_3(void)
       data56_out >>= 1;
     }
 #endif
-#if 1
+
     // Do we drive the ISA line (bit 43-53)?
     if (output_isa) {
       // Drive the ISA line for theses data bit
       switch (bit_no) {
       case 43-1:
         // Blue led indicates external rom-reading ...
-        gpio_put(LED_PIN_B, LED_ON);
+        if( !bErr )
+          gpio_put(LED_PIN_B, LED_ON);
         // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_data & 1);
         break;
@@ -568,59 +546,6 @@ void core1_main_3(void)
         driven_isa++;
       }
     }
-#endif
-
-#ifdef DRIVE_CARRY
-/*  switch(bit_no) {
-    // Should we drive the carry bit on FI line?
-    case 1*4-1:      CHECK_FI(T0,  T1);   // T1  -  3 0000 11
-    case 2*4-1:      CHECK_FI(T1,  T2);   // T2  -  7 0001 11
-    case 3*4-1:      CHECK_FI(T2,  T3);   // T3  - 11 0010 11
-    case 4*4-1:      CHECK_FI(T3,  T4);   // T4  - 15 0011 11
-    case 5*4-1:      CHECK_FI(T4,  T5);   // T5  - 19 0100 11
-    case 6*4-1:      CHECK_FI(T5,  T6);   // T6  - 23 0101 11
-    case 7*4-1:      CHECK_FI(T6,  T7);   // T7  - 27 0110 11
-    case 8*4-1:      CHECK_FI(T7,  T8);   // T8  - 31 0111 11
-    case 9*4-1:      CHECK_FI(T8,  T9);   // T9  - 35 1000 11
-    case 10*4-1:     CHECK_FI(T9,  T10);  // T10 - 39 1001 11
-    case 11*4-1:     CHECK_FI(T10, T11);  // T11 - 43 1010 11
-    case 12*4-1:     CHECK_FI(T11, T12);  // T12 - 47 1011 11
-    case 13*4-1:     CHECK_FI(T12, T13);  // T13 - 51 1100 11
-    case LAST_CYCLE: CHECK_FI(T13, T0);   // T0  - 55 1101 11
-*/
-#if 0
-    // Should we drive the ISA line (bit 43-53)?
-    case 43-1:
-      if( output_isa) {
-        // Blue led indicates external rom-reading ...
-        gpio_put(LED_PIN_B, LED_ON);
-        // Prepare data for next round ...
-        gpio_put(P_ISA_DRV, drive_data & 1);
-      }
-      break;
-    case 54-1:
-      if( output_isa) {
-        // Don't drive data any more
-        gpio_put(P_ISA_OE, DISABLE_OE);
-        bIsaEn = 0;
-        // ... so no more data after this ...
-        output_isa = drive_data_flag = 0;
-      }
-      break;
-    default: // Drive during bit 43->52
-      if( output_isa) {
-        if (!bIsaEn) {
-          gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
-          bIsaEn = 1;
-        }
-        // Expose the next bit on the ISA line ...
-        gpio_put(P_ISA_DRV, drive_data & 1);
-        drive_data >>= 1;
-        driven_isa++;
-      }
-#endif
-    //}
-#endif
 
     // Wait for CLK1 to have a falling edge
     WAIT_FALLING(P_CLK1);
@@ -648,7 +573,9 @@ void core1_main_3(void)
 
     switch (bit_no) {
     case 0:
+#ifdef MEASURE_TIME
       tm = time_us_64();
+#endif
       pBus = &bus[data_wr];
       pBus->sync = 0;
       pBus->cmd = 0;
@@ -657,10 +584,9 @@ void core1_main_3(void)
       break;
 
     case 7:
-      pBus->pa = data56 & 0xFF;
       if( bSelPa ) {
         // Get the selected peripheral
-        perph = pBus->pa;
+        perph = data56 & 0xFF;
         bSelPa = false;
       }
       break;
@@ -681,14 +607,6 @@ void core1_main_3(void)
         embed_seen++;
         pBus->cmd = drive_data = mp->image[romAddr];
         drive_data_flag = 1;
-#if 0 // Test to change instruction in system ROM
-      } else {
-        if( pBus->addr == 016066 ) {
-          inst = drive_data = 001;
-          drive_data_flag = 1;
-        } else
-          drive_data_flag = 0;
-#endif
       }
 #endif
       break;
@@ -699,9 +617,9 @@ void core1_main_3(void)
     case LAST_CYCLE-1:
       pBus->fi = getFI();
       last_data_wr = data_wr;
-      if( queue_overflow == 1 ) {
-          gpio_put(LED_PIN_R, LED_ON);
-      }
+      //if( queue_overflow == 1 ) {
+      //    gpio_put(LED_PIN_R, LED_ON);
+      //}
       gpio_put(LED_PIN_B, LED_OFF);
       break;
     case LAST_CYCLE:
@@ -721,7 +639,6 @@ void core1_main_3(void)
 #ifdef TRACE_ISA
         pBus->isa = isa;
 #endif
-
         // Check if more data to be read from the wand ...
         if( nWBuf ) {
           setFI(FI_PBSY);
@@ -751,15 +668,28 @@ void core1_main_3(void)
               // Ready to receive next batch of data
               bSendWndData = true;
               // Number of instructions delay after buffer is emptied ...
-              wDelayBuf = 2000;
+              wDelayBuf = 5000;
             }
           }
           break;
 #endif
         }
-        // Floating input-pin ... ?
-        if( (uint16_t)(time_us_64() - tm) < 0x40)
-          break;
+#ifdef MEASURE_TIME
+        {
+          uint16_t dt = (uint16_t)(time_us_64() - tm);
+          pBus->fi = dt;
+          // Floating input-pin ... ?
+          if( dt < 0x40 || dt > 0x100 ) {
+            bErr = true;
+            break;
+          }
+        }
+        bErr = false;
+#endif
+#ifdef MEASURE_COUNT
+        pBus->fi |= cnt++ << 8;
+#endif
+        pBus->pa = perph;
 
         isa = data56 = 0LL;
 
@@ -806,13 +736,6 @@ void post_handling(void)
     } else
       wDelayBuf--;
   } 
-/*  else if( !nWBuf && wDelay ) {
-    // If no data to send - turn off FI flag T0 after some polls of PBSY
-    if( !(--wDelay) ) {
-      printf("End wand busy flasg ...\n");
-      clrFI(FI_PBSY);
-    }
-  } */
 }
 
 void process_bus(void)
@@ -1120,11 +1043,11 @@ void handle_bus(volatile Bus_t *pBus)
 #if 1
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %02X|%c %04X (Q%2d:%03X) %03X",
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %04X|%c %04X (Q%2d:%03X) %03X",
             data56, fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %02X|%c %04X           %03X",
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %04X|%c %04X           %03X",
             data56, fi, sync ? '*':' ', addr, inst);
   }
 #else

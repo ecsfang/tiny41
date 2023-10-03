@@ -9,6 +9,8 @@
 #include "ssd1306.h"
 
 #define USE_40190
+//#define MEASURE_TIME
+#define MEASURE_COUNT
 
 #ifdef USE_40190
 #define ENABLE_OE   1
