@@ -169,10 +169,10 @@ int getHexKey(int ky)
 {
   int x = -1;
   if( (ky >= '0' && ky <= '9') || (ky >= 'a' && ky <= 'f') || (ky >= 'A' && ky <= 'F') ) {
-    if( ky >= 'A')
+    if( ky >= 'A' && ky <= 'F' )
       x = ky - ('A'-0xa);
     else
-      x = ky - (ky>='a') ? ('a'-0xa) : '0';
+      x = ky - ((ky>='a') ? ('a'-0xa) : '0');
   }
   return x;
 }
@@ -200,54 +200,60 @@ void serial_loop(void)
     }
     if( nBrk || bQram || bPlug ) {
       // Input of hex-digit ... ?
-      int x = getHexKey(key);
-      if( x >= 0 ) {
-        if( bQram ) {
-          if( modules[x].image ) {
-            modules[x].flags ^= IMG_RAM;
-            if( modules[x].flags & IMG_RAM )
-              printf("\rModule in page #X marked as QRAM\n", x);
-            else
-              printf("\rModule in page #X marked as ROM\n", x);
-          } else {
-            printf("\rNo image at page #X!!\n", x);
-          }
-          bQram = false;
-        }
-        if( bPlug ) {
-          if( modules[x].image ) {
-            modules[x].flags ^= IMG_INSERTED;
-            if( modules[x].flags & IMG_INSERTED )
-              printf("\rModule in page #X inserted\n", x);
-            else
-              printf("\rModule in page #X removed\n", x);
-          } else {
-            printf("\rNo image at page #X!!\n", x);
-          }
-          bPlug = false;
-        }
-        if( nBrk ) {
-          sBrk <<= 4;
-          sBrk |= x;
-          nBrk++;
-          printf("%X", x);
-          if( nBrk > 4 ) {
-            switch(brk_mode) {
-            case BRK_START:
-              printf("\rStart breakpoint @ %04X\n", sBrk);
-              setBrk(sBrk);
-              break;
-            case BRK_END:
-              printf("\rEnd breakpoint @ %04X\n", sBrk);
-              stopBrk(sBrk);
-              break;
-            case BRK_CLR:
-              printf("\rClear breakpoint @ %04X\n", sBrk);
-              clrBrk(sBrk);
-              break;
+      if( key == 0x1b ) { // ESC - abort any key sequence ...
+        bQram = bPlug = false;
+        nBrk = sBrk = 0;
+        printf("\nAbort ...\n");
+      } else {
+        int x = getHexKey(key);
+        if( x >= 0 && x <= 0xF ) {
+          if( bQram ) {
+            if( modules[x].image ) {
+              modules[x].flags ^= IMG_RAM;
+              if( modules[x].flags & IMG_RAM )
+                printf("\rModule in page #%X marked as QRAM    \n", x);
+              else
+                printf("\rModule in page #%X marked as ROM     \n", x);
+            } else {
+              printf("\rNo image at page #%X!!               \n", x);
             }
-            brk_mode = BRK_NONE;
-            sBrk = nBrk = 0;
+            bQram = false;
+          }
+          if( bPlug ) {
+            if( modules[x].image ) {
+              modules[x].flags ^= IMG_INSERTED;
+              if( modules[x].flags & IMG_INSERTED )
+                printf("\rModule in page #%X inserted          \n", x);
+              else
+                printf("\rModule in page #%X removed           \n", x);
+            } else {
+              printf("\rNo image at page #%X!!               \n", x);
+            }
+            bPlug = false;
+          }
+          if( nBrk ) {
+            sBrk <<= 4;
+            sBrk |= x;
+            nBrk++;
+            printf("%X", x);
+            if( nBrk > 4 ) {
+              switch(brk_mode) {
+              case BRK_START:
+                printf("\rStart breakpoint @ %04X\n", sBrk);
+                setBrk(sBrk);
+                break;
+              case BRK_END:
+                printf("\rEnd breakpoint @ %04X\n", sBrk);
+                stopBrk(sBrk);
+                break;
+              case BRK_CLR:
+                printf("\rClear breakpoint @ %04X\n", sBrk);
+                clrBrk(sBrk);
+                break;
+              }
+              brk_mode = BRK_NONE;
+              sBrk = nBrk = 0;
+            }
           }
         }
       }

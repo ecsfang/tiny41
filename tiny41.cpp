@@ -171,13 +171,21 @@ int main()
     stopBrk(0x089D);
     setBrk(0x089E);
 
-    // Tone in wand
-    stopBrk(0xF3D4);
-    setBrk(0xF3D5);
+    // Ignore key
+    stopBrk(0x009A);
+    setBrk(0x009B);
 
     // FOR DEBOUNCE (DRSY30)
     stopBrk(0x0178);
     setBrk(0x0179);
+
+    // Tone in wand
+    stopBrk(0xF3D4);
+    setBrk(0xF3D5);
+
+    // Tone in Wand
+    stopBrk(0xF3E0);
+    setBrk(0xF3E1);
 
     while (1)
     {

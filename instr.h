@@ -7,8 +7,13 @@
 #define INST_LDI                       00460
 #define INST_FETCH                     01460
 #define INST_WRITE                     00100
-#define INST_PBSY                      01654
+
+// FI flag instructions
+#define INST_TFAIL                     00654
 #define INST_WNDB                      01054
+#define INST_ALM                       01554
+#define INST_PBSY                      01654
+
 #define INST_WANDRD                    00070
 
 #define INST_DISPLAY_OFF               01340
@@ -34,8 +39,8 @@
 #define INST_SLSDAB                    01550
 #define INST_SRSABC                    01650
 #define INST_SLSABC                    01750
-#define INST_PRPH_SLCT                 01760
-#define INST_RAM_SLCT                  01160
+#define INST_PRPH_SLCT                 01760 // CPFAD
+#define INST_RAM_SLCT                  01160 // CDADD
 #define INST_POWOFF                    00140
 
 #define INST_FLLDA                     00070

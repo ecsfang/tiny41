@@ -128,9 +128,13 @@ inline void clrFI(int flag = 0)
 {
   carry_fi &= (flag ? ~flag : 0);
 }
-inline uint16_t getFI(int flag = 0)
+inline uint16_t getFI(int flag)
 {
-  return carry_fi & (flag ? flag : FI_MASK);
+  return carry_fi & flag;
+}
+inline uint16_t getFI(void)
+{
+  return carry_fi & FI_MASK;
 }
 
 volatile int wDelay = 0;
@@ -144,7 +148,7 @@ void _power_on()
   gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
   // Set PBSY-flag on to indicate someone needs service ...
   setFI(FI_PBSY);
-  wDelay = 2000;  // Instructions delay until flag off ...
+  wDelay = 500;  // Instructions delay until flag off ...
   sleep_us(10);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
@@ -473,21 +477,26 @@ void reset_bus_buffer(void)
   }
 }
 
+static int nfi[14+2] = { T0,T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,T13,T0,T0 };
+
 #define CHECK_FI(t0,t1)                                       \
       if( getFI( t1 ) )       gpio_put(P_FI_OE, ENABLE_OE);   \
-      else if( getFI( t0 ) )  gpio_put(P_FI_OE, DISABLE_OE);  \
-      break
+      else if( getFI( t0 ) )  gpio_put(P_FI_OE, DISABLE_OE)
+      //  \
+      //break
 
 void core1_main_3(void)
 {
   static int bIsaEn = 0;
   static int bDataEn = 0;
+  static int isDataEn = 0;
   static int bIsa = 0;
   static int bit_no = 0;
   static uint64_t isa = 0LL;
   static uint64_t bit = 0LL;
   int sync = 0;
   static uint64_t data56 = 0;
+  static uint16_t dataFI = 0;
   int last_data_wr;
   static uint16_t romAddr = 0;
   Module_t *mp = NULL;
@@ -499,59 +508,27 @@ void core1_main_3(void)
 
   last_sync = GPIO_PIN(P_SYNC);
 
+  uint64_t tm = time_us_64();
+
   while (1) {
     // Wait for CLK2 to have a falling edge
     WAIT_FALLING(P_CLK2);
-    uint64_t tm = time_us_64();
 
     // NOTE! Bit numbers are out by one as bit_no hasn't been incremented yet.
 
-#ifdef DRIVE_CARRY
-    // Do we drive the carry bit on FI line?
-/*    if (carry_fi & T0) { // ?PBSY
-      switch(bit_no) {
-      case LAST_CYCLE:  // Bit 0 - start of T0
-        // Enable FI (input tied low)
+/*    if( (bit_no & 0b11) == 0b11 ) {
+      int t = bit_no >> 2;
+      if( getFI( nfi[t+1] ) )
         gpio_put(P_FI_OE, ENABLE_OE);
-        break;
-      case 3:       // Bit 3 - end of T0
-        // Don't drive carry any more ...
-        gpio_put(P_FI_OE, DISABLE_OE);
-        break;
-      }
-    }
-    if (carry_fi_t2) {  // ?WNDB
-      switch(bit_no) {
-      case 8-1:  // Bit 8 - start of T2
-        // Enable FI (input tied low)
-        gpio_put(P_FI_OE, ENABLE_OE);
-        break;
-      case 11:   // Bit 11 - end of T2
-        // Don't drive carry any more ...
-        gpio_put(P_FI_OE, DISABLE_OE);
-        break;
-      }
-    }
-*/
+      else if( getFI( nfi[t] ) )
+         gpio_put(P_FI_OE, DISABLE_OE);
+    }*/
+
 #if 1
-    // Handle FI carry signal
-    switch(bit_no) {
-    case LAST_CYCLE: CHECK_FI(T13, T0);   // T0
-    case 1*4-1:      CHECK_FI(T0,  T1);   // T1
-    case 2*4-1:      CHECK_FI(T1,  T2);   // T2
-    case 3*4-1:      CHECK_FI(T2,  T3);   // T3
-    case 4*4-1:      CHECK_FI(T3,  T4);   // T4
-    case 5*4-1:      CHECK_FI(T4,  T5);   // T5
-    case 6*4-1:      CHECK_FI(T5,  T6);   // T6
-    case 7*4-1:      CHECK_FI(T6,  T7);   // T7
-    case 8*4-1:      CHECK_FI(T7,  T8);   // T8
-    case 9*4-1:      CHECK_FI(T8,  T9);   // T9
-    case 10*4-1:     CHECK_FI(T9,  T10);  // T10
-    case 11*4-1:     CHECK_FI(T10, T11);  // T11
-    case 12*4-1:     CHECK_FI(T11, T12);  // T12
-    case 13*4-1:     CHECK_FI(T12, T13);  // T13
+    if( (bit_no & 0b11) == 0b11 ) {
+      gpio_put(P_FI_OE, dataFI & 1);
+      dataFI >>= 1;
     }
-#endif
 #endif
 
 #ifdef DRIVE_DATA
@@ -562,7 +539,7 @@ void core1_main_3(void)
       data56_out >>= 1;
     }
 #endif
-
+#if 1
     // Do we drive the ISA line (bit 43-53)?
     if (output_isa) {
       // Drive the ISA line for theses data bit
@@ -591,6 +568,59 @@ void core1_main_3(void)
         driven_isa++;
       }
     }
+#endif
+
+#ifdef DRIVE_CARRY
+/*  switch(bit_no) {
+    // Should we drive the carry bit on FI line?
+    case 1*4-1:      CHECK_FI(T0,  T1);   // T1  -  3 0000 11
+    case 2*4-1:      CHECK_FI(T1,  T2);   // T2  -  7 0001 11
+    case 3*4-1:      CHECK_FI(T2,  T3);   // T3  - 11 0010 11
+    case 4*4-1:      CHECK_FI(T3,  T4);   // T4  - 15 0011 11
+    case 5*4-1:      CHECK_FI(T4,  T5);   // T5  - 19 0100 11
+    case 6*4-1:      CHECK_FI(T5,  T6);   // T6  - 23 0101 11
+    case 7*4-1:      CHECK_FI(T6,  T7);   // T7  - 27 0110 11
+    case 8*4-1:      CHECK_FI(T7,  T8);   // T8  - 31 0111 11
+    case 9*4-1:      CHECK_FI(T8,  T9);   // T9  - 35 1000 11
+    case 10*4-1:     CHECK_FI(T9,  T10);  // T10 - 39 1001 11
+    case 11*4-1:     CHECK_FI(T10, T11);  // T11 - 43 1010 11
+    case 12*4-1:     CHECK_FI(T11, T12);  // T12 - 47 1011 11
+    case 13*4-1:     CHECK_FI(T12, T13);  // T13 - 51 1100 11
+    case LAST_CYCLE: CHECK_FI(T13, T0);   // T0  - 55 1101 11
+*/
+#if 0
+    // Should we drive the ISA line (bit 43-53)?
+    case 43-1:
+      if( output_isa) {
+        // Blue led indicates external rom-reading ...
+        gpio_put(LED_PIN_B, LED_ON);
+        // Prepare data for next round ...
+        gpio_put(P_ISA_DRV, drive_data & 1);
+      }
+      break;
+    case 54-1:
+      if( output_isa) {
+        // Don't drive data any more
+        gpio_put(P_ISA_OE, DISABLE_OE);
+        bIsaEn = 0;
+        // ... so no more data after this ...
+        output_isa = drive_data_flag = 0;
+      }
+      break;
+    default: // Drive during bit 43->52
+      if( output_isa) {
+        if (!bIsaEn) {
+          gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
+          bIsaEn = 1;
+        }
+        // Expose the next bit on the ISA line ...
+        gpio_put(P_ISA_DRV, drive_data & 1);
+        drive_data >>= 1;
+        driven_isa++;
+      }
+#endif
+    //}
+#endif
 
     // Wait for CLK1 to have a falling edge
     WAIT_FALLING(P_CLK1);
@@ -618,6 +648,7 @@ void core1_main_3(void)
 
     switch (bit_no) {
     case 0:
+      tm = time_us_64();
       pBus = &bus[data_wr];
       pBus->sync = 0;
       pBus->cmd = 0;
@@ -678,11 +709,8 @@ void core1_main_3(void)
       // A 56 bit frame has completed, we send some information to core0 so it can update
       // the display and anything else it needs to
 
-      // Don't drive data any more ...
-      if( bDataEn ) {
-        gpio_put(P_DATA_OE, DISABLE_OE);
-        bDataEn = 0;
-      }
+      // Assume no data drive any more ...
+      bDataEn = 0;
       output_data = 0;
 
       if( pBus->addr || isa || pBus->cmd ) {
@@ -703,6 +731,10 @@ void core1_main_3(void)
         }
 
         switch( pBus->cmd ) {
+        case INST_RAM_SLCT:
+          // Reset any chip enabled ...
+          perph = 0;
+          break;
         case INST_PRPH_SLCT:
           // Fetch selected peripheral in the next run ...
           bSelPa = true;
@@ -711,7 +743,6 @@ void core1_main_3(void)
         case INST_WANDRD:
           if( perph == WAND_ADDR && nWBuf && pBus->sync  ) {
             // Enable data driver ...
-            gpio_put(P_DATA_OE, ENABLE_OE);
             output_data = bDataEn = 1;
             // Get next byte from the wand-buffer!
             data56_out = wandBuf[pWBuf++];
@@ -720,20 +751,20 @@ void core1_main_3(void)
               // Ready to receive next batch of data
               bSendWndData = true;
               // Number of instructions delay after buffer is emptied ...
-              wDelayBuf = 200;
+              wDelayBuf = 2000;
             }
-            // Debug indication that we were here ...
-            //pBus->flag |= 1;
           }
           break;
 #endif
         }
-
-        if( (time_us_64() - tm) < 2 )
+        // Floating input-pin ... ?
+        if( (uint16_t)(time_us_64() - tm) < 0x40)
           break;
 
         isa = data56 = 0LL;
-  
+
+        dataFI = getFI();
+
         INC_BUS_PTR(data_wr);
   
         if (data_rd == data_wr) {
@@ -741,6 +772,11 @@ void core1_main_3(void)
           queue_overflow++;
           data_wr = last_data_wr;
         }
+      }
+      // Enable DATA for next cycle ... ?
+      if( bDataEn != isDataEn ) {
+        isDataEn = bDataEn;
+        gpio_put(P_DATA_OE, isDataEn);
       }
       break;
     }
@@ -757,6 +793,11 @@ void post_handling(void)
       // row > 0 if we have more data to send
       // nWBuf == 0 if all data in buffer have been read
       // FI_WNDB (T2) is low if buffer is empty
+      if( row < 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 ) {
+        printf("End wand busy flag ...\n");
+        clrFI(FI_PBSY);
+        bSendWndData = false;
+      } else
       if( row > 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 ) {
         // Update buffer with next batch of data ...
         wand_on();
@@ -764,11 +805,14 @@ void post_handling(void)
       }
     } else
       wDelayBuf--;
-  } else if( !nWBuf && wDelay ) {
+  } 
+/*  else if( !nWBuf && wDelay ) {
     // If no data to send - turn off FI flag T0 after some polls of PBSY
-    if( !(--wDelay) )
+    if( !(--wDelay) ) {
+      printf("End wand busy flasg ...\n");
       clrFI(FI_PBSY);
-  }
+    }
+  } */
 }
 
 void process_bus(void)
@@ -1076,12 +1120,12 @@ void handle_bus(volatile Bus_t *pBus)
 #if 1
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
-    nCpu2 += sprintf(cpu2buf + nCpu2, " %02X|%c %04X (Q%2d:%03X) %03X",
-            fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %02X|%c %04X (Q%2d:%03X) %03X",
+            data56, fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
-    nCpu2 += sprintf(cpu2buf + nCpu2, " %02X|%c %04X           %03X",
-            fi, sync ? '*':' ', addr, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %02X|%c %04X           %03X",
+            data56, fi, sync ? '*':' ', addr, inst);
   }
 #else
   if( PAGE(addr) < 3 ) {

@@ -24,6 +24,7 @@
 
 extern int peripheral_ce;
 
+// Buffer for the disassembled string
 static char disBuf[256];
 static int  pDis = 0;
 
@@ -211,20 +212,20 @@ bool disAsmPeripheral(int inst)
     	case 000073: dBuf = "RDPTRR"; break;
     	case 000005: dBuf = "RTNCPU"; break;
     	}
-		break;
+			break;
 	case PH_WAND:
   		if( inst == INST_WANDRD )
 	  		dBuf = "WANDRD";
-    break;
+    	break;
 	case PH_TIMER:
-	    switch( inst ) {
-		case 000654: dBuf = "FAIL?"; break;
-    	case 001554: dBuf = "ALARM?"; break;
-    	}
-    	if( cmd == 0050 )
-      		dBuf = inst50timer[mod];
-    	else if( cmd == 0070 )
-      		dBuf = inst70timer[mod];
+		if( inst == INST_TFAIL )
+			dBuf = "?TFAIL";
+		else if( inst == INST_ALM )
+			dBuf = "?ALM";
+		else if( cmd == 0050 )
+			dBuf = inst50disp[mod];
+		else if( cmd == 0070 )
+			dBuf = inst70disp[mod];
 		break;
 	}
 	if( dBuf ) {
@@ -284,6 +285,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 			selPer = PER_NONE;
 		return disBuf;
 	}
+
 	if( sync ) {
 		bLDICON = false;
 		bClass1 = false;
