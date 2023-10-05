@@ -149,10 +149,10 @@ void prtCl0Cmd(int inst, int data, int con)
 				break;
 			case 0xB:	// 001360
 				switch( peripheral_ce ) {
-				case PH_DISPLAY:
+				case DISP_ADDR:
 					addDis(" (WRTEN - writes annunciators)");
 					break;
-				case PH_CRDR:
+				case CRDR_ADDR:
 					addDis(" (write to cardreader)");
 					break;
 				}
@@ -166,7 +166,7 @@ void prtCl0Cmd(int inst, int data, int con)
 			if( mod == 0x0 )
 				addDis("READ DATA");	// copy active user memory register to C
 			else {
-				if ( mod == 5 && peripheral_ce == PH_DISPLAY)
+				if ( mod == 5 && peripheral_ce == DISP_ADDR)
 					addDis("READEN");
 				else {
 					addDis("C=REG ");
@@ -191,7 +191,7 @@ bool disAsmPeripheral(int inst)
   int cmd = inst & 0077;
   int mod = inst >> 6;
 	switch (peripheral_ce) {
-	case PH_DISPLAY:
+	case DISP_ADDR:
 		if( inst == INST_WRITE_ANNUNCIATORS )
 			dBuf = "WRTEN";
 		else if( inst == INST_READ_ANNUNCIATORS )
@@ -201,10 +201,11 @@ bool disAsmPeripheral(int inst)
 		else if( cmd == 0070 )
 			dBuf = inst70disp[mod];
 		break;
-	case PH_CRDR:
+	case CRDR_ADDR:
 		if( cmd == 0050 )
 			dBuf = inst50crd[mod];
 		break;
+/*
 	case PH_PRINTER:
     	switch( inst ) {
     	case 000007: dBuf = "PRINTC"; break;
@@ -213,11 +214,12 @@ bool disAsmPeripheral(int inst)
     	case 000005: dBuf = "RTNCPU"; break;
     	}
 			break;
-	case PH_WAND:
+*/
+	case WAND_ADDR:
   		if( inst == INST_WANDRD )
 	  		dBuf = "WANDRD";
     	break;
-	case PH_TIMER:
+	case TIMR_ADDR:
 		if( inst == INST_TFAIL )
 			dBuf = "?TFAIL";
 		else if( inst == INST_ALM )

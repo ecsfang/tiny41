@@ -118,10 +118,22 @@ void swapRam(uint16_t *dta, int n);
 
 // Keep track of FI flags (0-13)
 volatile uint16_t carry_fi = 0;
+volatile bool bPBusy = false;
+
+void _setFI_PBSY(void)
+{
+  bPBusy = true;
+}
+void _clrFI_PBSY(void)
+{
+  bPBusy = true;
+}
 
 // Set FI flag (T0-T13)
 inline void setFI(int flag)
 {
+  if( bPBusy )
+    flag |= FI_PBSY;
   carry_fi |= flag;
 }
 inline void clrFI(int flag = 0)
@@ -134,6 +146,8 @@ inline uint16_t getFI(int flag)
 }
 inline uint16_t getFI(void)
 {
+  if( bPBusy )
+    setFI(FI_PBSY);
   return carry_fi & FI_MASK;
 }
 
@@ -146,10 +160,12 @@ void _power_on()
   gpio_put(P_ISA_DRV, 1);
   gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
   // Set PBSY-flag on to indicate someone needs service ...
-  setFI(FI_PBSY);
+  _setFI_PBSY();
   sleep_us(10);
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
+  sleep_ms(10);
+  _clrFI_PBSY();
 }
 void power_on(void)
 {
@@ -169,21 +185,21 @@ uint8_t wdata[] = {
 #endif
 
 uint8_t wdata[] = {
-  16, 0x01, 0x10, 0x05, 0xC6, 0x00, 0xF5, 0x00, 0x43, 0x4F, 0x44, 0x45, 0xF6, 0x43, 0x4F, 0x44, 0x45,
-  16, 0x17, 0x11, 0x22, 0x3D, 0x3F, 0x8C, 0x84, 0x8B, 0xC8, 0x02, 0xF3, 0x00, 0x43, 0x4F, 0xF8, 0x7F,
-  16, 0xCD, 0x12, 0x70, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x1A, 0x10, 0x10, 0x16, 0x91, 0x74,
-  16, 0xA5, 0x13, 0x01, 0xC0, 0x03, 0xF3, 0x00, 0x48, 0x42, 0x11, 0x90, 0x77, 0xCE, 0x7E, 0x71, 0xA9,
-  16, 0xDF, 0x14, 0x10, 0x00, 0xA9, 0x01, 0xA9, 0x02, 0xAA, 0x03, 0xB2, 0x00, 0xA8, 0x04, 0xAB, 0x07,
-  16, 0x78, 0x15, 0x00, 0xA8, 0x07, 0xAC, 0x07, 0x54, 0xAC, 0x06, 0x54, 0xA8, 0x06, 0x66, 0xA9, 0x06,
-  16, 0x5D, 0x16, 0x01, 0x66, 0xA8, 0x05, 0x02, 0x94, 0x73, 0xAA, 0x04, 0xA8, 0x00, 0xAA, 0x05, 0xA8,
-  16, 0xA6, 0x17, 0x10, 0x01, 0xAA, 0x06, 0xA8, 0x02, 0xAA, 0x07, 0xA8, 0x03, 0xAA, 0x0B, 0xB2, 0x00,
-  16, 0xAE, 0x18, 0x01, 0xA8, 0x0C, 0xAB, 0x0F, 0xA8, 0x0F, 0xAC, 0x0F, 0x54, 0xAC, 0x0E, 0x54, 0xA8,
-  16, 0x31, 0x19, 0x11, 0x0E, 0x66, 0xA9, 0x0E, 0x66, 0xA8, 0x0D, 0x02, 0xAA, 0x0C, 0xA8, 0x04, 0xAA,
-  16, 0x2C, 0x1A, 0x11, 0x0D, 0xA8, 0x05, 0xAA, 0x0E, 0xA8, 0x06, 0xAA, 0x0F, 0xA8, 0x07, 0x75, 0xCE,
-  16, 0x62, 0x1B, 0x11, 0x7E, 0x90, 0x77, 0x90, 0x76, 0x90, 0x75, 0x91, 0x76, 0x74, 0x91, 0x75, 0xF2,
-  16, 0x28, 0x1C, 0x23, 0x7F, 0x2A, 0xCE, 0x76, 0x74, 0x91, 0x77, 0x74, 0x91, 0x76, 0xF3, 0x7F, 0x2A,
-  16, 0x34, 0x1D, 0x10, 0x2A, 0x90, 0x71, 0x91, 0x75, 0x96, 0x74, 0x1D, 0xF2, 0x48, 0x42, 0x90, 0x75,
-  12, 0x11, 0x1E, 0x00, 0x87, 0x91, 0x75, 0x7E, 0x9F, 0x09, 0xC4, 0x15, 0x2F,
+/* ROW:  1 */  16, 0x01, 0x10, 0x05, 0xC6, 0x00, 0xF5, 0x00, 0x43, 0x4F, 0x44, 0x45, 0xF6, 0x43, 0x4F, 0x44, 0x45,
+/* ROW:  2 */  16, 0x17, 0x11, 0x22, 0x3D, 0x3F, 0x8C, 0x84, 0x8B, 0xC8, 0x02, 0xF3, 0x00, 0x43, 0x4F, 0xF8, 0x7F,
+/* ROW:  3 */  16, 0xCD, 0x12, 0x70, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x1A, 0x10, 0x10, 0x16, 0x91, 0x74,
+/* ROW:  4 */  16, 0xA5, 0x13, 0x01, 0xC0, 0x03, 0xF3, 0x00, 0x48, 0x42, 0x11, 0x90, 0x77, 0xCE, 0x7E, 0x71, 0xA9,
+/* ROW:  5 */  16, 0xDF, 0x14, 0x10, 0x00, 0xA9, 0x01, 0xA9, 0x02, 0xAA, 0x03, 0xB2, 0x00, 0xA8, 0x04, 0xAB, 0x07,
+/* ROW:  6 */  16, 0x78, 0x15, 0x00, 0xA8, 0x07, 0xAC, 0x07, 0x54, 0xAC, 0x06, 0x54, 0xA8, 0x06, 0x66, 0xA9, 0x06,
+/* ROW:  7 */  16, 0x5D, 0x16, 0x01, 0x66, 0xA8, 0x05, 0x02, 0x94, 0x73, 0xAA, 0x04, 0xA8, 0x00, 0xAA, 0x05, 0xA8,
+/* ROW:  8 */  16, 0xA6, 0x17, 0x10, 0x01, 0xAA, 0x06, 0xA8, 0x02, 0xAA, 0x07, 0xA8, 0x03, 0xAA, 0x0B, 0xB2, 0x00,
+/* ROW:  9 */  16, 0xAE, 0x18, 0x01, 0xA8, 0x0C, 0xAB, 0x0F, 0xA8, 0x0F, 0xAC, 0x0F, 0x54, 0xAC, 0x0E, 0x54, 0xA8,
+/* ROW: 10 */  16, 0x31, 0x19, 0x11, 0x0E, 0x66, 0xA9, 0x0E, 0x66, 0xA8, 0x0D, 0x02, 0xAA, 0x0C, 0xA8, 0x04, 0xAA,
+/* ROW: 11 */  16, 0x2C, 0x1A, 0x11, 0x0D, 0xA8, 0x05, 0xAA, 0x0E, 0xA8, 0x06, 0xAA, 0x0F, 0xA8, 0x07, 0x75, 0xCE,
+/* ROW: 12 */  16, 0x62, 0x1B, 0x11, 0x7E, 0x90, 0x77, 0x90, 0x76, 0x90, 0x75, 0x91, 0x76, 0x74, 0x91, 0x75, 0xF2,
+/* ROW: 13 */  16, 0x28, 0x1C, 0x23, 0x7F, 0x2A, 0xCE, 0x76, 0x74, 0x91, 0x77, 0x74, 0x91, 0x76, 0xF3, 0x7F, 0x2A,
+/* ROW: 14 */  16, 0x34, 0x1D, 0x10, 0x2A, 0x90, 0x71, 0x91, 0x75, 0x96, 0x74, 0x1D, 0xF2, 0x48, 0x42, 0x90, 0x75,
+/* ROW: 15 */  12, 0x11, 0x1E, 0x00, 0x87, 0x91, 0x75, 0x7E, 0x9F, 0x09, 0xC4, 0x15, 0x2F,
   0
 };
 
@@ -197,7 +213,7 @@ void wand_on(void)
   printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
   _power_on();
   // Set carry to service the wand
-  setFI(FI_PBSY);
+  _setFI_PBSY();
   // Fill buffer with next batch of bytes ...
   sendWand(wdata+wp+1,*(wdata+wp));
   // Update pointer to next batch ...
@@ -208,6 +224,8 @@ void wand_on(void)
     printf("Done!");
     row = -1;
   }
+  sleep_ms(10);
+  _clrFI_PBSY();
   printf("\n");
 }
 
@@ -348,9 +366,9 @@ void initRoms()
 		int nClr = 0; // Nr of erased words
     // Check that image is valid (10 bits)
 		for(int i=0; i<PAGE_SIZE; i++) {
-			if( rom_pages[pIdx][i] > 0x3FF ) {
+			if( rom_pages[pIdx][i] > INST_MASK ) {
 				nErr++;
-        if( rom_pages[pIdx][i] == 0xFFFF )
+        if( rom_pages[pIdx][i] == ADDR_MASK )
           nClr++;
       }
     }
@@ -409,8 +427,6 @@ volatile int output_data = 0; // Output ongoing on DATA...
 // The data we drive
 int drive_data = 0;
 
-// How many times have we driven ISA?
-volatile int driven_isa = 0;
 volatile int embed_seen = 0;
 volatile int sync_count = 0;
 
@@ -484,7 +500,9 @@ void core1_main_3(void)
   Module_t *mp = NULL;
   volatile Bus_t *pBus = &bus[data_wr];
   static uint8_t perph = 0;
+  static uint8_t ramad = 0;
   static bool bSelPa = false;
+  static bool bSelRam = false;
   static bool bErr = false;
   static uint8_t cnt = 0;
 
@@ -543,7 +561,6 @@ void core1_main_3(void)
         // Expose the next bit on the ISA line ...
         gpio_put(P_ISA_DRV, drive_data & 1);
         drive_data >>= 1;
-        driven_isa++;
       }
     }
 
@@ -588,13 +605,17 @@ void core1_main_3(void)
         // Get the selected peripheral
         perph = data56 & 0xFF;
         bSelPa = false;
+      } else if( bSelRam ) {
+        // Get the selected peripheral
+        ramad = data56 & 0xFF;
+        bSelRam = false;
       }
       break;
 
     case 29:
       // Got address. If the address is that of the embedded ROM then we flag that we have
       // to put an instruction on the bus later
-      pBus->addr = (isa >> 14) & 0xFFFF;
+      pBus->addr = (isa >> 14) & ADDR_MASK;
       mp = &modules[PAGE(pBus->addr)];
       if (mp->flags & IMG_INSERTED)
         romAddr = pBus->addr & PAGE_MASK; // - mp->start;
@@ -614,12 +635,20 @@ void core1_main_3(void)
       if( drive_data_flag )
         output_isa = 1;
       break;
+    case LAST_CYCLE-2:
+      // Check if more data to be read from the wand ...
+      if( nWBuf ) {
+        setFI(FI_PBSY | FI_WNDB);
+      } else {
+        clrFI(FI_WNDB);
+      }
+      break;
     case LAST_CYCLE-1:
+      // Report next FI signal to trace ...
       pBus->fi = getFI();
+      // Remember last queue write pointer ...
       last_data_wr = data_wr;
-      //if( queue_overflow == 1 ) {
-      //    gpio_put(LED_PIN_R, LED_ON);
-      //}
+      // Turn off MLDL-led ...
       gpio_put(LED_PIN_B, LED_OFF);
       break;
     case LAST_CYCLE:
@@ -634,22 +663,17 @@ void core1_main_3(void)
       if( pBus->addr || isa || pBus->cmd ) {
         // Is instruction fetched from flash?
         if( !pBus->cmd )
-          pBus->cmd = (isa >> 44) & 0x3FF;
+          pBus->cmd = (isa >> 44) & INST_MASK;
         pBus->data = data56;
 #ifdef TRACE_ISA
         pBus->isa = isa;
 #endif
-        // Check if more data to be read from the wand ...
-        if( nWBuf ) {
-          setFI(FI_PBSY);
-          setFI(FI_WNDB);
-        } else {
-          clrFI(FI_WNDB);
-        }
 
         switch( pBus->cmd ) {
         case INST_RAM_SLCT:
-          // Reset any chip enabled ...
+          // Fetch selected RAM in the next run ...
+          bSelRam = true;
+          // ... and reset any chip enabled ...
           perph = 0;
           break;
         case INST_PRPH_SLCT:
@@ -668,7 +692,7 @@ void core1_main_3(void)
               // Ready to receive next batch of data
               bSendWndData = true;
               // Number of instructions delay after buffer is emptied ...
-              wDelayBuf = 5000;
+              wDelayBuf = 0;
             }
           }
           break;
@@ -687,19 +711,25 @@ void core1_main_3(void)
         bErr = false;
 #endif
 #ifdef MEASURE_COUNT
+        // Report FI-status to trace ...
         pBus->fi |= cnt++ << 8;
 #endif
+        // Report selected peripheral to trace ...
         pBus->pa = perph;
 
-        isa = data56 = 0LL;
-
+        // Setup FI-signal for next round ...
         dataFI = getFI();
 
+        // Cleanup, fix trace buffer pointer and
+        // check for overflow ...
+        isa = data56 = 0LL;
+        bit = 1LL;
+
         INC_BUS_PTR(data_wr);
-  
         if (data_rd == data_wr) {
           // No space left in ring-buffer ...
           queue_overflow++;
+          // Restore last pointer (overwriting this cycle)
           data_wr = last_data_wr;
         }
       }
@@ -714,11 +744,12 @@ void core1_main_3(void)
   }
 }
 
-void post_handling(void)
+void post_handling(uint16_t addr)
 {
   if( bSendWndData ) {
     // Make a delay between the old and new batch of data ...
-    if( wDelayBuf == 0 ) {
+    //if( wDelayBuf > 3 )
+    {
       // Check if we have more data to send and buffer is empty ...
       // row > 0 if we have more data to send
       // nWBuf == 0 if all data in buffer have been read
@@ -728,13 +759,17 @@ void post_handling(void)
         clrFI(FI_PBSY);
         bSendWndData = false;
       } else
-      if( row > 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 ) {
+      if( row > 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 && (addr& 0x0FFF) == 0xA23) {
         // Update buffer with next batch of data ...
-        wand_on();
-        bSendWndData = false;
+        if( wDelayBuf > 3 ) {
+          wand_on();
+          bSendWndData = false;
+        }
+        wDelayBuf++;
       }
-    } else
-      wDelayBuf--;
+    }
+    // else
+//      wDelayBuf--;
   } 
 }
 
@@ -777,7 +812,7 @@ void process_bus(void)
     // Any handling outside bus traceing
     // Note that instructions can be missed if the buffer is overflowed!
     // Better handle these cases here ...
-    post_handling();
+    post_handling(bus[data_rd].addr);
   }
 }
 
@@ -938,13 +973,22 @@ void handle_bus(volatile Bus_t *pBus)
   int pa = pBus->pa;
   int sync = pBus->sync;
   int fi = pBus->fi;
+  static int oCnt = 0xFF;
+  int cnt = (pBus->fi>>8) & 0xFF;
   uint64_t data56 = pBus->data;
 #ifdef TRACE_ISA
   uint64_t isa = pBus->isa;
 #endif
   bool bLdi = false;
   static int pending_data_inst = 0;
-  static int oAddr = 0xFFFF;
+  static int oAddr = ADDR_MASK;
+
+#ifdef MEASURE_COUNT
+  if( ((++oCnt) & 0xFF) != cnt ) {
+    printf("\n\n ###### LOST TRACE CYCLES (%d-%d) #########################\n\n", oCnt, cnt);
+    oCnt = cnt;
+  }
+#endif
 
 #ifdef CPU2_PRT
   // Any printouts from the other CPU ... ?
@@ -954,27 +998,17 @@ void handle_bus(volatile Bus_t *pBus)
   }
 #endif
 
-  if (pending_data_inst == INST_PRPH_SLCT) {
-#if CF_DBG_SLCT
-    printf("\nPF AD:%02X", pa);
-#endif
-    switch (pa) {
-    case DISP_ADDR:
-      peripheral_ce = PH_DISPLAY;
-      break;
-    case WAND_ADDR:
-      peripheral_ce = PH_WAND;
-      break;
-    case TIMR_ADDR:
-      peripheral_ce = PH_TIMER;
-      break;
-    case CRDR_ADDR:
-      peripheral_ce = PH_CRDR;
-      break;
-    default:
-      peripheral_ce = PH_NONE;
-    }
+  switch (pa) {
+  case DISP_ADDR:
+  case WAND_ADDR:
+  case TIMR_ADDR:
+  case CRDR_ADDR:
+    peripheral_ce = pa;
+    break;
+  default:
+    peripheral_ce = NONE_ADDR;
   }
+
 #if 1
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
@@ -982,23 +1016,6 @@ void handle_bus(volatile Bus_t *pBus)
 #else
   nCpu2 = sprintf(cpu2buf, "\n");
 #endif
-
-  switch (peripheral_ce) {
-  case PH_DISPLAY:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "D");
-    break;
-  case PH_WAND:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "W");
-    break;
-  case PH_TIMER:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "T");
-    break;
-  case PH_CRDR:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "C");
-    break;
-  default:
-    nCpu2 += sprintf(cpu2buf + nCpu2, " ");
-  }
 #else
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
@@ -1009,24 +1026,18 @@ void handle_bus(volatile Bus_t *pBus)
 #else
   nCpu2 = sprintf(cpu2buf, "\n");
 #endif
+#endif
 
   switch (peripheral_ce) {
-  case PH_DISPLAY:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "DISP");
-    break;
-  case PH_WAND:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "WAND");
-    break;
-  case PH_TIMER:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "TIMR");
-    break;
-  case PH_CRDR:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "CRDR");
+  case DISP_ADDR:
+  case WAND_ADDR:
+  case TIMR_ADDR:
+  case CRDR_ADDR:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%c", "TCDW"[peripheral_ce - TIMR_ADDR]);
     break;
   default:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "    ");
+    nCpu2 += sprintf(cpu2buf + nCpu2, " ");
   }
-#endif
 
   uint8_t q = (addr >> 10) & 0b1111;
 #ifdef TRACE_ISA
@@ -1071,9 +1082,10 @@ void handle_bus(volatile Bus_t *pBus)
     break;
   case INST_WRITE:
     if (1) {
-      int wAddr = (data56 >> 12) & 0xFFFF;
-      int wDat = data56 & 0x3FF;
+      int wAddr = (data56 >> 12) & ADDR_MASK;
+      int wDat = data56 & INST_MASK;
       Module_t *ram = &modules[PAGE(wAddr)];
+      // TBD - Should we allow writes to images not inserted?
       if (ram->flags & IMG_INSERTED && ram->flags & IMG_RAM) {
         // Page active and defined as ram - update!
         ram->image[wAddr & PAGE_MASK] = wDat;
@@ -1137,8 +1149,9 @@ void handle_bus(volatile Bus_t *pBus)
     updateDispReg(data56, pending_data_inst >> 6);
     break;
   case INST_WANDRD:
-    if( IS_TRACE() )
-      printf(" WB -> %03X:%d", (int)(data56 & 0xFFF), nWBuf);
+    if( IS_TRACE() && peripheral_ce == WAND_ADDR )
+      printf(" WB -> %03X", (int)(data56 & 0xFFF));
+    break;
   }
   // Clear pending flag ...
   pending_data_inst = 0;
@@ -1147,7 +1160,7 @@ void handle_bus(volatile Bus_t *pBus)
   if (sync) {
     switch (inst) {
     case INST_DISPLAY_OFF:
-      display_on = true; // Turns fff below ...:P
+      display_on = !false; // Toggles to false below ...:P
     case INST_DISPLAY_TOGGLE:
       display_on = !display_on;
 #if CF_DBG_DISP_ON
@@ -1155,13 +1168,12 @@ void handle_bus(volatile Bus_t *pBus)
 #endif
       dump_dregs();
       break;
+#if CF_DBG_SLCT
     case INST_PRPH_SLCT:
     case INST_RAM_SLCT:
-#if CF_DBG_SLCT
       printf("\n%s_SLCT: PA=%02X", inst == INST_PRPH_SLCT ? "PRPH" : "RAM", pa);
-#endif
-      pending_data_inst = inst;
       break;
+#endif
     case INST_LDI:
       bLdi = true;
       // Falls through
@@ -1180,12 +1192,12 @@ void handle_bus(volatile Bus_t *pBus)
 
   if( peripheral_ce && !bLdi ) {
     switch(peripheral_ce) {
-    case PH_WAND:
+    case WAND_ADDR:
       // Check for Wand transactions
       if (inst == INST_WANDRD)
         pending_data_inst = inst;
       break;
-    case PH_DISPLAY:
+    case DISP_ADDR:
       // Check for display transactions
       if (inst == INST_WRITE_ANNUNCIATORS)
         pending_data_inst = inst;

@@ -101,7 +101,7 @@ int main()
     int a = 0xF000;
     int pi = 0;
     extern uint16_t readRom(int a);
-    while(a < 0xFFFF ) {
+    while(a < ADDR_MASK ) {
         pi = readRom(a);
         DIS_ASM(pi);
     }*/
@@ -189,6 +189,7 @@ int main()
 
     while (1)
     {
+        bool bErr = false;
         // capture_bus_transactions();
         process_bus();
         // Update the USB CLI
@@ -196,9 +197,18 @@ int main()
 
         extern int queue_overflow;
         if( queue_overflow ) {
-            gpio_put(LED_PIN_R, LED_ON);
-            WriteString(buf, 5, 56, (char *)"Buffer overflow!");
-            bTrace &= 0b011; // Turn disasm off ...
+            if( !bErr ) {
+                gpio_put(LED_PIN_R, LED_ON);
+                WriteString(buf, 5, 56, (char *)"Buffer overflow!");
+                bTrace &= 0b011; // Turn disasm off ...
+                bErr = true;
+            }
+        } else {
+            if( bErr ) {
+                gpio_put(LED_PIN_R, LED_OFF);
+                WriteString(buf, 5, 56, (char *)"                ");
+                bErr = false;
+            }
         }
 
 #ifdef DEBUG_ANALYZER

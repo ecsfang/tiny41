@@ -18,6 +18,8 @@
 #define RAM_SIZE    0x1000
 #define PAGE_SIZE   0x1000
 #define PAGE_MASK   0x0FFF
+#define ADDR_MASK   0xFFFF
+#define INST_MASK   0x3FF
 #define FIRST_PAGE  0x04
 #define NR_PAGES    0x10
 #define LAST_PAGE   (NR_PAGES - 1)
@@ -27,39 +29,22 @@
 #define QUEUE_STATUS
 
 enum {
-    T0 = 1 << 0,
-    T1 = 1 << 1,
-    T2 = 1 << 2,
-    T3 = 1 << 3,
-    T4 = 1 << 4,
-    T5 = 1 << 5,
-    T6 = 1 << 6,
-    T7 = 1 << 7,
-    T8 = 1 << 8,
-    T9 = 1 << 9,
-    T10 = 1 << 10 ,
-    T11 = 1 << 11,
-    T12 = 1 << 12,
-    T13 = 1 << 13,
-    FI_MASK = (1 << 14)-1
-};
-
-enum {
     FI_NONE  = 0,
-    FI_PBSY  = T0,  // Printer BuSY
-    FI_CRDR  = T1,  // CaRD Reader
-    FI_WNDB  = T2,  // WaND Byte available
-    FI_PF3   = T3,  // 3 - not used
-    FI_PF4   = T4,  // 4 - not used
-    FI_EDAV  = T5,  // Emitter Diode AVailable
-    FI_IFCR  = T6,  // InterFace Clear Received
-    FI_SRQR  = T7,  // Service ReQuest Received
-    FI_FRAV  = T8,  // FRame AVailable
-    FI_FRNS  = T9,  // Frame Received Not as Sent
-    FI_ORAV  = T10, // Output Register AVailable
-    FI_TFAIL = T11, //
-    FI_ALM   = T12, // ALarM
-    FI_SERV  = T13  // SERVice
+    FI_PBSY  = 1 << 0,  // Printer BuSY
+    FI_CRDR  = 1 << 1,  // CaRD Reader
+    FI_WNDB  = 1 << 2,  // WaND Byte available
+    FI_PF3   = 1 << 3,  // 3 - not used
+    FI_PF4   = 1 << 4,  // 4 - not used
+    FI_EDAV  = 1 << 5,  // Emitter Diode AVailable
+    FI_IFCR  = 1 << 6,  // InterFace Clear Received
+    FI_SRQR  = 1 << 7,  // Service ReQuest Received
+    FI_FRAV  = 1 << 8,  // FRame AVailable
+    FI_FRNS  = 1 << 9,  // Frame Received Not as Sent
+    FI_ORAV  = 1 << 10, // Output Register AVailable
+    FI_TFAIL = 1 << 11, //
+    FI_ALM   = 1 << 12, // ALarM
+    FI_SERV  = 1 << 13, // SERVice
+    FI_MASK = (1 << 14)-1
 };
 
 typedef struct {
@@ -75,36 +60,6 @@ typedef struct {
   uint8_t   sync;
 } Bus_t;
 
-/*
-typedef struct {
-    uint8_t sign    : 4;
-    uint8_t d1      : 4;
-    uint8_t d2      : 4;
-    uint8_t d3      : 4;
-    uint8_t d4      : 4;
-    uint8_t d5      : 4;
-    uint8_t d6      : 4;
-    uint8_t d7      : 4;
-    uint8_t d8      : 4;
-    uint8_t d9      : 4;
-    uint8_t d10     : 4;
-    uint8_t esgn    : 4;
-    uint8_t exp     : 8;
-} Data_t;
-
-typedef struct __attribute__ ((__packed__)) {
-    uint16_t        : 14;
-    uint16_t addr   : 16;
-    uint32_t        : 14;
-    uint16_t inst   : 10;
-    uint8_t         : 2;
-} ISA_t;
-
-typedef union {
-    ISA_t    x;
-    uint64_t data;
-} ISA_u;
-*/
 enum {
     IMG_NONE = 0x00,
     IMG_INSERTED = 0x01,
@@ -113,8 +68,6 @@ enum {
 };
 
 typedef struct {
-    //uint16_t start;
-    //uint16_t end;
     uint16_t *image;
     uint16_t flags;
 } Module_t;
@@ -138,7 +91,6 @@ typedef struct {
 #define HIGH 1
 
 extern void core1_main_3(void);
-//extern void __not_in_flash_func(core1_main_3)(void);
 
 extern void process_bus(void);
 extern void capture_bus_transactions(void);
@@ -150,8 +102,8 @@ extern volatile int data_wr;
 extern volatile int data_rd;
 
 // Set breakpoint on given address
-void setBrk(uint16_t addr);
-void stopBrk(uint16_t addr);
+void setBrk(uint16_t addr);     // Start trace
+void stopBrk(uint16_t addr);    // Stop trace
 // Clear breakpoint on given address
 void clrBrk(uint16_t addr);
 

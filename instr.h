@@ -76,5 +76,6 @@
 #define CRDR_ADDR                      0xFC   // The Card Reader
 #define DISP_ADDR                      0xFD   // The display
 #define WAND_ADDR                      0xFE   // The Wand
+#define NONE_ADDR                      0x00   // None ...
 
 #endif//__INSTR_H__

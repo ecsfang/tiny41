@@ -23,14 +23,14 @@
 #define D_LONG	1
 #define D_SHORT	0
 
-enum {
+/*enum {
   PH_NONE     = 0b00000,
   PH_TIMER    = 0b00001,
   PH_CRDR     = 0b00010,
   PH_DISPLAY  = 0b00100,
   PH_WAND     = 0b01000,
   PH_PRINTER  = 0b10000
-};
+};*/
 
 typedef struct {
 	uint8_t shft;
