@@ -120,11 +120,8 @@ void swapRam(uint16_t *dta, int n);
 volatile uint16_t carry_fi = 0;
 volatile bool bPBusy = false;
 
+// Indicate to set PBSY next time ...
 void _setFI_PBSY(void)
-{
-  bPBusy = true;
-}
-void _clrFI_PBSY(void)
 {
   bPBusy = true;
 }
@@ -132,13 +129,15 @@ void _clrFI_PBSY(void)
 // Set FI flag (T0-T13)
 inline void setFI(int flag)
 {
-  if( bPBusy )
+  if( bPBusy ) {
     flag |= FI_PBSY;
+    bPBusy = false;
+  }
   carry_fi |= flag;
 }
-inline void clrFI(int flag = 0)
+inline void clrFI(int flag = FI_MASK)
 {
-  carry_fi &= (flag ? ~flag : 0);
+  carry_fi &= ~flag;
 }
 inline uint16_t getFI(int flag)
 {
@@ -152,7 +151,7 @@ inline uint16_t getFI(void)
 }
 
 volatile int wDelayBuf = 0;
-volatile bool bSendWndData = false;
+volatile bool bSendNextWndData = false;
 
 void _power_on()
 {
@@ -165,7 +164,6 @@ void _power_on()
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
   sleep_ms(10);
-  _clrFI_PBSY();
 }
 void power_on(void)
 {
@@ -208,10 +206,11 @@ static int wp = 0;
 
 void wand_on(void)
 {
-  if( wp == 0 )
-    row=1;
   printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
-  _power_on();
+  if( wp == 0 ) {
+    _power_on();
+    row=1;
+  }
   // Set carry to service the wand
   _setFI_PBSY();
   // Fill buffer with next batch of bytes ...
@@ -225,7 +224,6 @@ void wand_on(void)
     row = -1;
   }
   sleep_ms(10);
-  _clrFI_PBSY();
   printf("\n");
 }
 
@@ -690,7 +688,7 @@ void core1_main_3(void)
             nWBuf--;
             if( !nWBuf ) {
               // Ready to receive next batch of data
-              bSendWndData = true;
+              bSendNextWndData = true;
               // Number of instructions delay after buffer is emptied ...
               wDelayBuf = 0;
             }
@@ -746,31 +744,29 @@ void core1_main_3(void)
 
 void post_handling(uint16_t addr)
 {
-  if( bSendWndData ) {
-    // Make a delay between the old and new batch of data ...
-    //if( wDelayBuf > 3 )
-    {
-      // Check if we have more data to send and buffer is empty ...
-      // row > 0 if we have more data to send
-      // nWBuf == 0 if all data in buffer have been read
-      // FI_WNDB (T2) is low if buffer is empty
-      if( row < 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 ) {
-        printf("End wand busy flag ...\n");
-        clrFI(FI_PBSY);
-        bSendWndData = false;
-      } else
-      if( row > 0 && nWBuf == 0 && getFI(FI_WNDB) == 0 && (addr& 0x0FFF) == 0xA23) {
-        // Update buffer with next batch of data ...
-        if( wDelayBuf > 3 ) {
-          wand_on();
-          bSendWndData = false;
-        }
-        wDelayBuf++;
-      }
+  // Check if we have more data to send and that the buffer is empty ...
+  // nWBuf == 0 if all data in buffer have been read
+  // FI_WNDB (T2) is low if buffer is empty
+  if( bSendNextWndData && !nWBuf && !getFI(FI_WNDB) ) {
+    // row < 0 if we are done with all data
+    if( row < 0 ) {
+      printf("End wand busy flag ...\n");
+      clrFI(FI_PBSY);
+      bSendNextWndData = false;
+      return;
     }
-    // else
-//      wDelayBuf--;
-  } 
+    // ... else we have more data to send!
+    if( (addr & 0x0FFF) == 0xA23) {
+      // Address xA23 is where the Wand checks the buffer status
+      // Update buffer with next batch of data ...
+      // Make a small delay between the old and new batch of data ...
+      if( wDelayBuf > 3 ) {
+        wand_on();
+        bSendNextWndData = false;
+      }
+      wDelayBuf++;
+    }
+  }
 }
 
 void process_bus(void)
