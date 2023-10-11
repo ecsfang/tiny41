@@ -83,3 +83,10 @@ extern void UpdateAnnun(uint16_t ann);
 //#define TRACE
 #define USE_FLASH
 
+enum {
+    REND_NONE,
+    REND_LCD = 0b001,
+    REND_ANNUN = 0b010,
+    REND_ALL = 0b111
+};
+

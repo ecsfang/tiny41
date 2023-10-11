@@ -21,10 +21,10 @@
 
 // #define DEBUG_ANALYZER
 
-int bRend = 0;
+int bRend = REND_NONE;
 
 // Init trace - no trace/no disassembler
-uint8_t bTrace = 0;
+volatile uint8_t bTrace = 0;
 
 void bus_init(void)
 {
@@ -58,6 +58,64 @@ struct render_area frame_area = {
     end_page : SSD1306_NUM_PAGES - 1
 };
 
+#define DISP_START (2 * SSD1306_WIDTH)
+struct render_area disp_area = {
+    start_col : 0,
+    end_col : SSD1306_WIDTH - 1,
+    start_page : 2,
+    end_page : 5
+};
+#define LCD_START (2 * SSD1306_WIDTH)
+struct render_area lcd_area = {
+    start_col : 0,
+    end_col : SSD1306_WIDTH - 1,
+    start_page : 2,
+    end_page : 3
+};
+#define ANNUN_START (4 * SSD1306_WIDTH)
+struct render_area annun_area = {
+    start_col : 0,
+    end_col : SSD1306_WIDTH - 1,
+    start_page : 4,
+    end_page : 5
+};
+
+void updateFullDisplay(void)
+{
+    render(buf, &frame_area);
+}
+void updateRow(void)
+{
+    render(buf+LCD_START, &lcd_area);
+}
+void updateAnnun(void)
+{
+    render(buf+ANNUN_START, &annun_area);
+}
+void updateDisp(void)
+{
+    render(buf+DISP_START, &disp_area);
+}
+void updateDisplay(void)
+{
+    switch(bRend) {
+    case REND_NONE:
+        return;
+    case REND_LCD:
+        updateRow();
+        break;
+    case REND_ANNUN:
+        updateAnnun();
+        break;
+    case REND_LCD | REND_ANNUN:
+        updateDisp();
+        break;
+    default:
+        updateFullDisplay();
+    }
+    bRend = REND_NONE;
+}
+
 extern void initRoms(void);
 
 uint16_t prtInst[] = {
@@ -75,6 +133,16 @@ uint16_t prtInst[] = {
     0x108, 0x3b3, 0x108, 0x264, 0x083, 0x3a0, 0x244, 0x171,
     0x00
 };
+
+void dispOverflow(bool bOvf)
+{
+    gpio_put(LED_PIN_R, bOvf ? LED_ON : LED_OFF);
+    if( bOvf )
+        WriteString(buf, 5, 56, (char *)"Buffer overflow!");
+    else
+        WriteString(buf, 5, 56, (char *)"                ");
+    bRend = REND_ALL;
+}
 
 int main()
 {
@@ -127,6 +195,9 @@ int main()
     multicore_launch_core1(core1_main_3);
 
     calc_render_area_buflen(&frame_area);
+    calc_render_area_buflen(&lcd_area);
+    calc_render_area_buflen(&annun_area);
+    calc_render_area_buflen(&disp_area);
 
     // zero the entire display
     memset(buf, 0, SSD1306_BUF_LEN);
@@ -175,6 +246,10 @@ int main()
     stopBrk(0x009A);
     setBrk(0x009B);
 
+    // Ignore MEMLFT routine
+    stopBrk(0x05A1);
+    setBrk(0x05B6);
+
     // FOR DEBOUNCE (DRSY30)
     stopBrk(0x0178);
     setBrk(0x0179);
@@ -187,9 +262,9 @@ int main()
     stopBrk(0xF3E0);
     setBrk(0xF3E1);
 
+    bool bErr = false;
     while (1)
     {
-        bool bErr = false;
         // capture_bus_transactions();
         process_bus();
         // Update the USB CLI
@@ -198,15 +273,13 @@ int main()
         extern int queue_overflow;
         if( queue_overflow ) {
             if( !bErr ) {
-                gpio_put(LED_PIN_R, LED_ON);
-                WriteString(buf, 5, 56, (char *)"Buffer overflow!");
+                dispOverflow(true);
                 bTrace &= 0b011; // Turn disasm off ...
                 bErr = true;
             }
         } else {
             if( bErr ) {
-                gpio_put(LED_PIN_R, LED_OFF);
-                WriteString(buf, 5, 56, (char *)"                ");
+                dispOverflow(false);
                 bErr = false;
             }
         }
@@ -219,7 +292,6 @@ int main()
             WriteString(buf, 5, 48, sBuf);
             oSync = sync_count;
             oEmbed = embed_seen;
-            bRend++;
         }
         if (oDin != data_in || oDout != data_out)
         {
@@ -227,13 +299,11 @@ int main()
             WriteString(buf, 5, 56, sBuf);
             oDin = data_in;
             oDout = data_out;
-            bRend++;
         }
+        bRend = REND_ALL;
 #endif // DEBUG_ANALYZER
-        if (bRend) {
-            render(buf, &frame_area);
-            bRend = 0;
-        }
+        if( bRend )
+            updateDisplay();
     }
 }
 
@@ -251,6 +321,8 @@ void UpdateLCD(char *txt, bool *bp, bool on)
         Write41String(buf, 3, 16, NULL, NULL);
         UpdateAnnun(ANN_OFF);
     }
+    bRend |= REND_LCD;
+    //printf(" - R:%03X", bRend);
 }
 
 typedef struct
@@ -279,6 +351,13 @@ void UpdateAnnun(uint16_t ann)
     char sBuf[24];
     memset(sBuf, ' ', 24);
     int pa = 0;
+    uint16_t oAnn = 0xFFFF;
+
+    // Same ... ?
+    if( ann == oAnn )
+        return;
+
+    // Update annuncioators ...
     if (ann == ANN_OFF)
         ann = 0;
     else
@@ -297,5 +376,6 @@ void UpdateAnnun(uint16_t ann)
         printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
 
     WriteString(buf, 0, 32, sBuf);
-    //render(buf, &frame_area);
+    bRend |= REND_ANNUN;
+    oAnn = ann;
 }

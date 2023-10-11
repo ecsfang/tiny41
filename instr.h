@@ -39,6 +39,7 @@
 #define INST_SLSDAB                    01550
 #define INST_SRSABC                    01650
 #define INST_SLSABC                    01750
+
 #define INST_PRPH_SLCT                 01760 // CPFAD
 #define INST_RAM_SLCT                  01160 // CDADD
 #define INST_POWOFF                    00140

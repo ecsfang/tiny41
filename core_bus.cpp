@@ -19,6 +19,10 @@
 #define DRIVE_CARRY
 #define DRIVE_DATA
 #define DRIVE_ISA
+#define WAND_EMU
+
+extern int bRend;
+extern void updateDisplay(void);
 
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
@@ -41,17 +45,28 @@ inline uint16_t swap16(uint16_t b)
   return __builtin_bswap16(b);
 }
 
-volatile uint8_t wandBuf[16]; // Max size of a barcode
-volatile uint8_t nWBuf = 0;
-volatile uint8_t pWBuf = 0;
+#define BAR_MAXLEN 0x10
+class CBarcode {
+  volatile uint8_t buf[BAR_MAXLEN]; // Max size of a barcode
+  volatile uint8_t nb = 0;          // Bytes left in buffer
+  volatile uint8_t pb = 0;          // Byte pointer into buffer
+public:
+  bool empty(void) { return nb == 0; }
+  bool available(void) { return nb != 0; }
+  void set(uint8_t *bc) {
+    nb = *bc++;
+    if( nb > 0 && nb <= BAR_MAXLEN )
+      memcpy((void *)buf, (void *)bc, nb);
+    pb = 0;
+  }
+  uint8_t get(void) {
+    nb--;
+    return buf[pb++];
+  }
+};
 
-void sendWand(uint8_t *w, uint8_t n)
-{
-  for(int i=0; i<n; i++)
-    wandBuf[i] = w[i];
-  nWBuf = n;
-  pWBuf = 0;
-}
+// Hold current barcode to scan
+CBarcode cBar;
 
 #define BRK_SIZE (0x10000/(32/2)) // 2 bits per brkpt
 uint32_t brkpt[BRK_SIZE];
@@ -125,14 +140,18 @@ void _setFI_PBSY(void)
 {
   bPBusy = true;
 }
+void _clrFI_PBSY(void)
+{
+  bPBusy = false;
+}
 
 // Set FI flag (T0-T13)
 inline void setFI(int flag)
 {
-  if( bPBusy ) {
-    flag |= FI_PBSY;
-    bPBusy = false;
-  }
+//  if( bPBusy )
+//    flag |= FI_PBSY;
+//    bPBusy = false;
+//  }
   carry_fi |= flag;
 }
 inline void clrFI(int flag = FI_MASK)
@@ -147,11 +166,14 @@ inline uint16_t getFI(void)
 {
   if( bPBusy )
     setFI(FI_PBSY);
+  else
+    clrFI(FI_PBSY);
   return carry_fi & FI_MASK;
 }
 
 volatile int wDelayBuf = 0;
-volatile bool bSendNextWndData = false;
+volatile uint16_t iGetNextWndData = 0;
+volatile uint16_t iSendNextWndData = 0;
 
 void _power_on()
 {
@@ -171,6 +193,8 @@ void power_on(void)
   _power_on();
 }
 
+static uint8_t  wand_page[PAGE_SIZE];
+
 #if 0
 uint8_t wdata[] = {
   16, 0x50, 0x10, 0x02, 0xC0, 0x00, 0xF3, 0x00, 0x44, 0x43, 0x6F, 0x1B, 0x13, 0x00, 0x43, 0x11, 0x10,
@@ -180,7 +204,6 @@ uint8_t wdata[] = {
   11, 0x23, 0x14, 0x10, 0x76, 0x87, 0xCE, 0x75, 0x7E, 0xC0, 0x00, 0x2F,
    0
 };
-#endif
 
 uint8_t wdata[] = {
 /* ROW:  1 */  16, 0x01, 0x10, 0x05, 0xC6, 0x00, 0xF5, 0x00, 0x43, 0x4F, 0x44, 0x45, 0xF6, 0x43, 0x4F, 0x44, 0x45,
@@ -200,31 +223,66 @@ uint8_t wdata[] = {
 /* ROW: 15 */  12, 0x11, 0x1E, 0x00, 0x87, 0x91, 0x75, 0x7E, 0x9F, 0x09, 0xC4, 0x15, 0x2F,
   0
 };
+#endif
 
 static int row = -1;
 static int wp = 0;
 
-void wand_on(void)
+// Get pointer to barcode data for Row r
+int barRow(int r)
 {
-  printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
-  if( wp == 0 ) {
-    _power_on();
-    row=1;
+  int bc = 0;
+  uint8_t n;
+  while( r > 1 ) {
+    // Get length of this row
+    n = wand_page[bc];
+    if( n > 0 && n <= BAR_MAXLEN )
+      bc += n+1;
+    else
+      return 0; // End of rows ...
+    r--;
   }
-  // Set carry to service the wand
-  _setFI_PBSY();
-  // Fill buffer with next batch of bytes ...
-  sendWand(wdata+wp+1,*(wdata+wp));
-  // Update pointer to next batch ...
-  wp += *(wdata+wp)+1;
-  if( *(wdata+wp) == 0 )
-    wp = 0;
-  if( !wp ) {
-    printf("Done!");
-    row = -1;
+  return bc;
+}
+
+void wand_scan(void)
+{
+  if( wand_page[0] > 0 && wand_page[0] <= BAR_MAXLEN ) {
+    if( wp == 0 ) {
+      /**if( row < 0 )*/
+      {
+        // Start with first row!
+        _power_on();
+        // Set carry to service the wand
+        _setFI_PBSY();
+        // Start with first row ...
+        row=1;
+        wp = barRow(row);
+      } /**else
+      {
+        // We are done! Prepare for next go ...
+        printf("Done with barcodes!\n");
+        row = -1;
+        // Clear Wand carry
+        _clrFI_PBSY();
+        return;
+      }***/
+    }
+    printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
+    // Fill barcode buffer with data for current row ...
+    cBar.set(&wand_page[wp]);
+    // Update pointer to next row of data ...
+    wp = barRow(row);
+    if( wp == 0 ) {
+      printf("Done!");
+      // Clear Wand carry
+      _clrFI_PBSY();
+      row = -1;
+    }
+    printf("\n");
+  } else {
+    printf("No barcode to scan in flash memory!!\n");
   }
-  sleep_ms(10);
-  printf("\n");
 }
 
 #if CF_DBG_DISP_INST
@@ -272,6 +330,16 @@ void readPort(int n, uint16_t *data)
   for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
     // Swap order to get right endian of 16-bit word ...
     data[i] = swap16(*fp++);
+  }
+}
+// Read flash into ram for wand use
+void read8Port(int n, uint8_t *data)
+{
+  // Point at the wanted flash image ...
+  const uint8_t *fp = (uint8_t*)(XIP_BASE + PAGE1(n));
+  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
+    // Swap order to get right endian of 16-bit word ...
+    data[i] = *fp++;
   }
 }
 #endif
@@ -389,6 +457,9 @@ void initRoms()
       addRom(port, rom_pages[pIdx]);
     }
   }
+#ifdef WAND_EMU
+    read8Port(NR_PAGES, wand_page);
+#endif
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
 }
@@ -444,7 +515,7 @@ void handle_bus(volatile Bus_t *pBus);
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T 0x1000
+#define NUM_BUS_T 0x800
 #endif
 
 #define NUM_BUS_MASK (NUM_BUS_T-1)
@@ -471,13 +542,15 @@ int nCpu2 = 0;
 char cpu3buf[256];
 int nCpu3 = 0;
 
+extern void dispOverflow(bool bOvf);
+
 void reset_bus_buffer(void)
 {
   // Reset buffer if overflow has occured ...
   if( queue_overflow ) {
     queue_overflow = 0;
     data_rd = data_wr = 0;
-    gpio_put(LED_PIN_R, LED_OFF);
+    dispOverflow(false);
   }
 }
 
@@ -512,6 +585,9 @@ void core1_main_3(void)
   uint64_t tm = time_us_64();
 #endif
 
+  // This is the mail loop where everything happens regarding the BUS
+  // All 56 cycles of the bus is taken care of, and data is pulled from
+  // the bus or injected on the bus accordingly.
   while (1) {
     // Wait for CLK2 to have a falling edge
     WAIT_FALLING(P_CLK2);
@@ -546,17 +622,15 @@ void core1_main_3(void)
         break;
       case 54-1:
         // Don't drive data any more
-        gpio_put(P_ISA_OE, DISABLE_OE);
-        bIsaEn = 0;
+        gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
         // ... so no more data after this ...
         output_isa = drive_data_flag = 0;
         break;
       default: // Drive during bit 43->52
-        if (!bIsaEn) {
-          gpio_put(P_ISA_OE, ENABLE_OE); // Enable ISA driver
-          bIsaEn = 1;
-        }
-        // Expose the next bit on the ISA line ...
+        // Enable ISA driver (if not already enable) ...
+        if( bIsaEn == DISABLE_OE )
+          gpio_put(P_ISA_OE, (bIsaEn = ENABLE_OE));
+        // Expose the bit on the ISA line and prepare the next ...
         gpio_put(P_ISA_DRV, drive_data & 1);
         drive_data >>= 1;
       }
@@ -577,9 +651,9 @@ void core1_main_3(void)
       bit_no = (bit_no >= LAST_CYCLE) ? 0 : bit_no+1;
     }
 
-    // NOTE! Bit numbers are ok since bit_no has been incremented!
+    // NOTE! Bit numbers are now ok since bit_no has been incremented!
 
-    // Save all bits in data56 reg ...
+    // Save all bits in data and isa reg ...
     bit = 1LL << bit_no;
     if (GPIO_PIN(P_DATA))
       data56 |= bit;
@@ -635,7 +709,7 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-2:
       // Check if more data to be read from the wand ...
-      if( nWBuf ) {
+      if( cBar.available() ) {
         setFI(FI_PBSY | FI_WNDB);
       } else {
         clrFI(FI_WNDB);
@@ -650,7 +724,7 @@ void core1_main_3(void)
       gpio_put(LED_PIN_B, LED_OFF);
       break;
     case LAST_CYCLE:
-      // If bitno = LAST_CYCLE then we have another frame, store the transaction
+      // If bitno == LAST_CYCLE then we have another frame, save the transaction
       // A 56 bit frame has completed, we send some information to core0 so it can update
       // the display and anything else it needs to
 
@@ -671,26 +745,26 @@ void core1_main_3(void)
         case INST_RAM_SLCT:
           // Fetch selected RAM in the next run ...
           bSelRam = true;
-          // ... and reset any chip enabled ...
+          // ... and reset any chip previously enabled ...
           perph = 0;
           break;
         case INST_PRPH_SLCT:
-          // Fetch selected peripheral in the next run ...
+          // Fetch selected peripheral from DATA in the next run ...
           bSelPa = true;
           break;
 #ifdef DRIVE_CARRY
+        case INST_WNDB:
+          // Check if more data is to be read ...
+          break;
         case INST_WANDRD:
-          if( perph == WAND_ADDR && nWBuf && pBus->sync  ) {
+          if( perph == WAND_ADDR && cBar.available() && pBus->sync  ) {
             // Enable data driver ...
             output_data = bDataEn = 1;
             // Get next byte from the wand-buffer!
-            data56_out = wandBuf[pWBuf++];
-            nWBuf--;
-            if( !nWBuf ) {
-              // Ready to receive next batch of data
-              bSendNextWndData = true;
-              // Number of instructions delay after buffer is emptied ...
-              wDelayBuf = 0;
+            data56_out = cBar.get();
+            if( cBar.empty() ) {
+              // Buffer empty, ready to receive next batch of data
+              iGetNextWndData++;
             }
           }
           break;
@@ -729,6 +803,8 @@ void core1_main_3(void)
           queue_overflow++;
           // Restore last pointer (overwriting this cycle)
           data_wr = last_data_wr;
+          // Turn at least disasm off ...
+          //bTrace &= 0b011;
         }
       }
       // Enable DATA for next cycle ... ?
@@ -745,27 +821,19 @@ void core1_main_3(void)
 void post_handling(uint16_t addr)
 {
   // Check if we have more data to send and that the buffer is empty ...
-  // nWBuf == 0 if all data in buffer have been read
+  // cBar.empty() if all data in buffer have been read
   // FI_WNDB (T2) is low if buffer is empty
-  if( bSendNextWndData && !nWBuf && !getFI(FI_WNDB) ) {
-    // row < 0 if we are done with all data
+  if( (iGetNextWndData > iSendNextWndData) && cBar.empty() && !getFI(FI_WNDB) ) {
+/*    // row < 0 if we are done with all data
     if( row < 0 ) {
       printf("End wand busy flag ...\n");
       clrFI(FI_PBSY);
       bSendNextWndData = false;
       return;
-    }
+    }**/
     // ... else we have more data to send!
-    if( (addr & 0x0FFF) == 0xA23) {
-      // Address xA23 is where the Wand checks the buffer status
-      // Update buffer with next batch of data ...
-      // Make a small delay between the old and new batch of data ...
-      if( wDelayBuf > 3 ) {
-        wand_on();
-        bSendNextWndData = false;
-      }
-      wDelayBuf++;
-    }
+    iSendNextWndData++;
+    wand_scan();
   }
 }
 
@@ -809,6 +877,12 @@ void process_bus(void)
     // Note that instructions can be missed if the buffer is overflowed!
     // Better handle these cases here ...
     post_handling(bus[data_rd].addr);
+
+    if( bRend ) {
+      int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
+      if( remaining < (NUM_BUS_MASK>>2))
+        updateDisplay();
+    }
   }
 }
 
@@ -878,85 +952,67 @@ void dump_dregs(void)
 
 void updateDispReg(uint64_t data, uint8_t r)
 {
-  int bShift = inst50cmd[r].shft;
-  int bReg = inst50cmd[r].reg;
-  int bits = inst50cmd[r].len;
+  Inst_t  *inst = &inst50cmd[r];
 
-  uint64_t *ra = (bReg & REG_A) ? &dreg_a : NULL;
-  uint64_t *rb = (bReg & REG_B) ? &dreg_b : NULL;
-  uint64_t *rc = (bReg & REG_C) ? &dreg_c : NULL;
+  uint64_t *ra = (inst->reg & REG_A) ? &dreg_a : NULL;
+  uint64_t *rb = (inst->reg & REG_B) ? &dreg_b : NULL;
+  uint64_t *rc = (inst->reg & REG_C) ? &dreg_c : NULL;
 
 #if CF_DBG_DISP_INST
   printf("\n%s %016llX -->", inst50disp[r], data);
 #endif
 
-  if ((bShift & D_LONG) && bits == 48) {
-    if (ra)
-      *ra = data & (MASK_48_BIT);
-    if (rb)
-      *rb = data & (MASK_48_BIT);
-    if (rc)
-      *rc = data & (REG_C_48_MASK);
+  if ((inst->shft & D_LONG) && inst->len == 48) {
+    if (ra) *ra = data & (MASK_48_BIT);
+    if (rb) *rb = data & (MASK_48_BIT);
+    if (rc) *rc = data & (REG_C_48_MASK);
   } else {
-    int n = (bShift & D_LONG) ? 48 / bits : 1;
+    int n = (inst->shft & D_LONG) ? 48 / inst->len : 1;
     for (int i = 0; i < n; i++) {
       uint16_t ch9 = CH9(data);
-      if (bShift & SHIFT_R) { // Shift RIGHT
-        if (ra)
-          *ra = (*ra >> 4) | (((uint64_t)CH9_B03(ch9)) << 44);
-        if (rb)
-          *rb = (*rb >> 4) | (((uint64_t)CH9_B47(ch9)) << 44);
-        if (rc)
-          *rc = (*rc >> 4) | (((uint64_t)CH9_B8(ch9)) << 44);
-      } else { // Shift LEFT
-        if (ra)
-          *ra = (*ra << 4) | (CH9_B03(ch9));
-        if (rb)
-          *rb = (*rb << 4) | (CH9_B47(ch9));
-        if (rc)
-          *rc = (*rc << 4) | (CH9_B8(ch9));
+      if (inst->shft & SHIFT_R) {
+        // Shift RIGHT
+        if (ra) *ra = (*ra >> 4) | (((uint64_t)CH9_B03(ch9)) << 44);
+        if (rb) *rb = (*rb >> 4) | (((uint64_t)CH9_B47(ch9)) << 44);
+        if (rc) *rc = (*rc >> 4) | (((uint64_t)CH9_B8(ch9)) << 44);
+      } else {
+        // Shift LEFT
+        if (ra) *ra = (*ra << 4) | (CH9_B03(ch9));
+        if (rb) *rb = (*rb << 4) | (CH9_B47(ch9));
+        if (rc) *rc = (*rc << 4) | (CH9_B8(ch9));
       }
-      data >>= bits; // shift 8 or 12 bits ...
+      data >>= inst->len; // shift 8 or 12 bits ...
     }
-    if (ra)
-      *ra &= MASK_48_BIT;
-    if (rb)
-      *rb &= MASK_48_BIT;
-    if (rc)
-      *rc &= REG_C_48_MASK;
+    if (ra) *ra &= MASK_48_BIT;
+    if (rb) *rb &= MASK_48_BIT;
+    if (rc) *rc &= REG_C_48_MASK;
   }
   dump_dregs();
 }
 
 void rotateDispReg(uint8_t r)
 {
-  int bShift = inst70cmd[r].shft;
-  int bReg = inst70cmd[r].reg;
-  int ch = inst70cmd[r].len;
+  Inst_t  *inst = &inst70cmd[r];
 
-  uint64_t *ra = (bReg & REG_A) ? &dreg_a : NULL;
-  uint64_t *rb = (bReg & REG_B) ? &dreg_b : NULL;
-  uint64_t *rc = (bReg & REG_C) ? &dreg_c : NULL;
+  uint64_t *ra = (inst->reg & REG_A) ? &dreg_a : NULL;
+  uint64_t *rb = (inst->reg & REG_B) ? &dreg_b : NULL;
+  uint64_t *rc = (inst->reg & REG_C) ? &dreg_c : NULL;
 
 #if CF_DBG_DISP_INST
   printf("\n%s -->", inst70disp[r]);
 #endif
 
-  for (int i = 0; i < ch; i++) {
-    if (bShift & SHIFT_R) { // Shift RIGHT
-      if (ra)
-        ROTATE_RIGHT(*ra);
-      if (rb)
-        ROTATE_RIGHT(*rb);
-      if (rc)
-        ROTATE_RIGHT(*rc);
-    } else { // Shift LEFT
-      if (ra)
-        ROTATE_LEFT(*ra);
-      if (rb)
-        ROTATE_LEFT(*rb);
-      if (rc)
-        ROTATE_LEFT(*rc);
+  for (int i = 0; i < inst->len; i++) {
+    if (inst->shft & SHIFT_R) {
+      // Shift RIGHT
+      if (ra) ROTATE_RIGHT(*ra);
+      if (rb) ROTATE_RIGHT(*rb);
+      if (rc) ROTATE_RIGHT(*rc);
+    } else {
+      // Shift LEFT
+      if (ra) ROTATE_LEFT(*ra);
+      if (rb) ROTATE_LEFT(*rb);
+      if (rc) ROTATE_LEFT(*rc);
     }
   }
   dump_dregs();
@@ -1111,10 +1167,6 @@ void handle_bus(volatile Bus_t *pBus)
 
   // Check for a pending instruction from the previous cycle
   switch (pending_data_inst) {
-  case INST_WNDB:
-    break;
-  case INST_PBSY:
-    break;
   case INST_LDI:
     bLdi = true;
     break;
@@ -1126,7 +1178,7 @@ void handle_bus(volatile Bus_t *pBus)
     UpdateAnnun((uint16_t)(data56 & 0xFFF));
     break;
 
-  case INST_SRLDA:
+  case INST_SRLDA:  // All ...50 instructions
   case INST_SRLDB:
   case INST_SRLDC:
   case INST_SRLDAB:
@@ -1175,8 +1227,7 @@ void handle_bus(volatile Bus_t *pBus)
       // Falls through
     case INST_WRITE:
     case INST_FETCH:
-    case INST_PBSY:
-    case INST_WNDB:
+      // Handle instruction in next cycle ...
       pending_data_inst = inst;
       break;
     case INST_POWOFF:

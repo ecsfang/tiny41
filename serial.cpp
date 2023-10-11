@@ -77,7 +77,7 @@ void list_modules(void)
 extern void list_brks(void);
 extern void clrAllBrk(void);
 extern void power_on(void);
-extern void wand_on(void);
+extern void wand_scan(void);
 
 static uint16_t sBrk = 0;
 static uint16_t nBrk = 0;
@@ -148,7 +148,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'l', list_modules,      "List modules"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'o', power_on,          "Power On"  },
-  { 'w', wand_on,           "Wand On"  },
+  { 'w', wand_scan,         "Wand scan"  },
   { 'q', sel_qram,          "Select QRAM page"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
 };
