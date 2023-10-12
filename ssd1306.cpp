@@ -33,22 +33,27 @@ void SSD1306_send_cmd_list(uint8_t *buf, int num) {
         SSD1306_send_cmd(buf[i]);
 }
 
+void SSD1306_send_X_cmd_list(uint8_t *buf, int num) {
+    // I2C write process expects a control byte followed by data
+    i2c_write_blocking(i2c_default, SSD1306_I2C_ADDR, buf, num, false);
+}
+
 void SSD1306_send_buf(uint8_t buf[], int buflen) {
     // in horizontal addressing mode, the column address pointer auto-increments
     // and then wraps around to the next page, so we can send the entire frame
     // buffer in one gooooooo!
 
+    // NOTE - REWROTE - SO BUFFER MUST HAVE PLACE FOR CONTROL BYTE 
     // copy our frame buffer into a new buffer because we need to add
     // the control byte to the beginning
 
-    uint8_t *temp_buf = (uint8_t *)malloc(buflen + 1);
+    uint8_t *temp_buf = &buf[-1];
 
+    uint8_t old = temp_buf[0];
     temp_buf[0] = 0x40;
-    memcpy(temp_buf+1, buf, buflen);
 
     i2c_write_blocking(i2c_default, SSD1306_I2C_ADDR, temp_buf, buflen + 1, false);
-
-    free(temp_buf);
+    temp_buf[0] = old;
 }
 
 void SSD1306_init() {
@@ -119,15 +124,15 @@ void SSD1306_scroll(bool on) {
 void render(uint8_t *buf, struct render_area *area) {
     // update a portion of the display with a render area
     uint8_t cmds[] = {
-        SSD1306_SET_COL_ADDR,
-        area->start_col,
-        area->end_col,
-        SSD1306_SET_PAGE_ADDR,
-        area->start_page,
-        area->end_page
+        0x80, SSD1306_SET_COL_ADDR,
+        0x80, area->start_col,
+        0x80, area->end_col,
+        0x80, SSD1306_SET_PAGE_ADDR,
+        0x80, area->start_page,
+        0x80, area->end_page
     };
     
-    SSD1306_send_cmd_list(cmds, count_of(cmds));
+    SSD1306_send_X_cmd_list(cmds, count_of(cmds));
     SSD1306_send_buf(buf, area->buflen);
 }
 
@@ -229,11 +234,10 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     y = y/8;
 
     ch = toupper(ch);
-    int idx = ch; //GetFontIndex(ch);
+    int idx = ch;
     int fb_idx = y * 128 + x;
 
     for (int i=0;i<5;i++) {
-        //buf[fb_idx++] = reversed[idx * 5 + i];
         buf[fb_idx++] = font[idx * 5 + i];
     }
 }
@@ -295,7 +299,7 @@ void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str) {
     }
 }
 
-extern int bRend;
+extern void Render(int r);
 
 void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
     // Call out any string off the screen
@@ -311,7 +315,7 @@ void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
             x += Write41Char(buf, x, y, ' ', false);
         }
     }
-    bRend |= 0b001;
+    Render(0b001);
 }
 
 

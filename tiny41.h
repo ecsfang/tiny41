@@ -87,6 +87,74 @@ enum {
     REND_NONE,
     REND_LCD = 0b001,
     REND_ANNUN = 0b010,
+    REND_DISP = 0b011,
+    REND_STATUS = 0b100,
     REND_ALL = 0b111
+};
+
+#define LCD_START 2     // Just the number display
+#define ANNUN_START 4   // Just the annunciators
+#define DISP_START 2    // Number and annunciator display combined
+#define STATUS_START 5  // Status area
+
+#define LCD_ROW     (LCD_START*8)    // Starting row for each displaysegment
+#define ANNUN_ROW   (ANNUN_START*8)  // Starting row for each displaysegment
+#define DISP_ROW    (DISP_START*8)   // Starting row for each displaysegment
+#define STATUS_ROW  (STATUS_START*8) // Starting row for each displaysegment
+
+class CRendArea {
+    struct render_area m_area;
+    uint8_t *m_buf;
+public:
+    CRendArea(uint8_t *b, int s, int e) {
+        m_buf = b + s*SSD1306_WIDTH;
+        m_area.start_col = 0;
+        m_area.end_col = SSD1306_WIDTH - 1;
+        m_area.start_page = s;
+        m_area.end_page = e;
+        calc_render_area_buflen(&m_area);
+    }
+    void render(void) {
+        ::render(m_buf, &m_area);
+    }
+};
+
+extern uint8_t *buf;
+
+class CDisplay {
+    CRendArea   disLcd;
+    CRendArea   disAnnun;
+    CRendArea   disDisp;
+    CRendArea   disStatus;
+    CRendArea   disFull;
+    int         m_rend;
+public:
+    static uint8_t m_dispBuf[SSD1306_BUF_LEN+1];
+    CDisplay() :
+        // Initialize render area for parts of frame (SSD1306_WIDTH pixels by SSD1306_NUM_PAGES pages)
+        disLcd(buf, LCD_START, LCD_START+1),
+        disAnnun(buf, ANNUN_START, ANNUN_START+1),
+        disDisp(buf, DISP_START, ANNUN_START+1),
+        disStatus(buf, STATUS_START, SSD1306_NUM_PAGES-1),
+        disFull(buf, 0, SSD1306_NUM_PAGES-1) {
+        m_rend = 0;
+    }
+    void render(void) {
+        switch(m_rend) {
+        case REND_NONE:                         return;
+        case REND_LCD:      disLcd.render();    break;
+        case REND_ANNUN:    disAnnun.render();  break;
+        case REND_DISP:     disDisp.render();   break;
+        case REND_STATUS:   disStatus.render(); break;
+        default:            disFull.render();
+        }
+        m_rend = REND_NONE;
+    }
+    void rend(int r) {
+        m_rend |= r;
+    }
+    bool needRendering(void) {
+        return m_rend != 0;
+    }
 };
 
