@@ -8,7 +8,6 @@
 #include "core_bus.h"
 #include "disasm.h"
 #include "serial.h"
-// #include "disstr.h"
 #include <malloc.h>
 #ifdef USE_FLASH
 #include "hardware/flash.h"
@@ -20,9 +19,6 @@
 #define DRIVE_DATA
 #define DRIVE_ISA
 #define WAND_EMU
-
-//extern int bRend;
-//extern void updateDisplay(void);
 
 extern CDisplay    disp41;
 
@@ -50,8 +46,8 @@ inline uint16_t swap16(uint16_t b)
 #define BAR_MAXLEN 0x10
 class CBarcode {
   volatile uint8_t bb[BAR_MAXLEN]; // Max size of a barcode
-  volatile uint8_t nb = 0;          // Bytes left in buffer
-  volatile uint8_t pb = 0;          // Byte pointer into buffer
+  volatile uint8_t nb = 0;         // Bytes left in buffer
+  volatile uint8_t pb = 0;         // Byte pointer into buffer
 public:
   bool empty(void) { return nb == 0; }
   bool available(void) { return nb != 0; }
@@ -70,7 +66,7 @@ public:
 // Hold current barcode to scan
 CBarcode cBar;
 
-#define BRK_SIZE (0x10000/(32/2)) // 2 bits per brkpt
+#define BRK_SIZE ((ADDR_MASK+1)/(32/2)) // 2 bits per brkpt
 uint32_t brkpt[BRK_SIZE];
 enum {
   BRK_NONE,
@@ -191,6 +187,7 @@ void power_on(void)
   _power_on();
 }
 
+// Dedicated page to contain current flashed barcode
 static uint8_t  wand_page[PAGE_SIZE];
 
 static int row = -1;
@@ -247,6 +244,9 @@ extern const char *inst50disp[16];
 extern const char *inst70disp[16];
 #endif
 
+// Each port contains two 4k flash pages since 10 bits are stored (4k * uint16_t)
+// ROM is not packed in flash due to compatibility with ROM file format
+// And packed file would still be larger than 4k ...
 #define PAGEn(n,i) (FLASH_TARGET_OFFSET + (2 * n + i) * FLASH_SECTOR_SIZE)
 #define PAGE1(n) PAGEn(n,0)
 #define PAGE2(n) PAGEn(n,1)
@@ -421,15 +421,6 @@ void initRoms()
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 
-#define CF_DUMP_DBG_DREGS 0
-#define CF_DISPLAY_LCD 1
-#define CF_DISPLAY_OLED 0
-#define CF_DBG_DISP_ON 0
-#define CF_DBG_SLCT 0
-#define CF_DBG_DISP_INST 0
-#define CF_USE_DISP_ON 0
-#define CF_DBG_KEY 1
-
 #define CH9(c) (c & 0x1FF)
 #define CH9_B03(c) ((c & 0x00F) >> 0) // Bit 0-3
 #define CH9_B47(c) ((c & 0x0F0) >> 4) // Bit 4-7
@@ -444,12 +435,12 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 #define FALLING_EDGE(SIGNAL) ((last_##SIGNAL == 1) && (SIGNAL == 0))
 
 // Do we drive ROM data?
-volatile int drive_data_flag = 0;
-volatile int output_isa = 0;  // Output ongoing on ISA...
-volatile int output_data = 0; // Output ongoing on DATA...
+volatile int drive_isa_flag = 0;  // Drive ISA in next cycle
+volatile int output_isa = 0;      // Output ongoing on ISA...
+volatile int output_data = 0;     // Output ongoing on DATA...
 
 // The data we drive
-int drive_data = 0;
+int drive_isa = 0;
 
 volatile int embed_seen = 0;
 volatile int sync_count = 0;
@@ -494,8 +485,6 @@ bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
-char cpu3buf[256];
-int nCpu3 = 0;
 
 extern void dispOverflow(bool bOvf);
 
@@ -573,21 +562,21 @@ void core1_main_3(void)
         if( !bErr )
           gpio_put(LED_PIN_B, LED_ON);
         // Prepare data for next round ...
-        gpio_put(P_ISA_DRV, drive_data & 1);
+        gpio_put(P_ISA_DRV, drive_isa & 1);
         break;
       case 54-1:
         // Don't drive data any more
         gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
         // ... so no more data after this ...
-        output_isa = drive_data_flag = 0;
+        output_isa = drive_isa_flag = 0;
         break;
       default: // Drive during bit 43->52
         // Enable ISA driver (if not already enable) ...
         if( bIsaEn == DISABLE_OE )
           gpio_put(P_ISA_OE, (bIsaEn = ENABLE_OE));
         // Expose the bit on the ISA line and prepare the next ...
-        gpio_put(P_ISA_DRV, drive_data & 1);
-        drive_data >>= 1;
+        gpio_put(P_ISA_DRV, drive_isa & 1);
+        drive_isa >>= 1;
       }
     }
 
@@ -653,13 +642,13 @@ void core1_main_3(void)
       // Check if we should emulate any modules ...
       if (mp->flags & IMG_INSERTED) {
         embed_seen++;
-        pBus->cmd = drive_data = mp->image[romAddr];
-        drive_data_flag = 1;
+        pBus->cmd = drive_isa = mp->image[romAddr];
+        drive_isa_flag = 1;
       }
 #endif
       break;
     case 42: // Enable ISA output in next loop (cycle 43)
-      if( drive_data_flag )
+      if( drive_isa_flag )
         output_isa = 1;
       break;
     case LAST_CYCLE-2:

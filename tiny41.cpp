@@ -119,7 +119,7 @@ int main()
     bool bp[12];
     memset(bp, 0, 12);
 
-    Write41String(buf, 5, 0, text[0], bp);
+    Write41String(buf, 5, TITLE_ROW, text[0], bp);
     bp[3] = true;
     Write41String(buf, 5, LCD_ROW, text[1], bp);
 
@@ -227,30 +227,29 @@ void UpdateLCD(char *txt, bool *bp, bool on)
 
 typedef struct
 {
-    uint8_t len; // Length of the text
     char ann[4];
-    bool sp; // True if followed by a space
 } Annu_t;
 
 Annu_t annu[NR_ANNUN] = {
-    {1, "B", true},
-    {2, "US", true},
-    {1, "G", false},
-    {1, "R", true},
-    {2, "SH", true},
-    {1, "0", false},
-    {1, "1", false},
-    {1, "2", false},
-    {1, "3", false},
-    {1, "4", true},
-    {1, "P", true},
-    {2, "AL", false}};
+    {"B " },    // Battery
+    {"US "},    // USer
+    {"G"  },    // G in Grad
+    {"R " },    // Rad
+    {"SH "},    // SHift
+    {"0"  },    // Flag 0-4
+    {"1"  },
+    {"2"  },
+    {"3"  },
+    {"4 " },
+    {"P " },    // Prgm
+    {"AL" }     // ALpha
+};
 
 void UpdateAnnun(uint16_t ann)
 {
     char sBuf[24];
     memset(sBuf, ' ', 24);
-    int pa = 0;
+    int i, pa = 0;
     static uint16_t oAnn = 0xFFFF;
 
     // Update annunciators ...
@@ -265,11 +264,11 @@ void UpdateAnnun(uint16_t ann)
 
     for (int a = 0; a < NR_ANNUN; a++) {
         if (ann & 1 << ((NR_ANNUN - 1) - a)) {
-            for (int i = 0; i < annu[a].len; i++)
-                sBuf[pa + i] = annu[a].ann[i];
-        }
-        // Add space if needed ...
-        pa += annu[a].len + (annu[a].sp ? 1 : 0);
+            i = 0;
+            while(annu[a].ann[i])
+                sBuf[pa++] = annu[a].ann[i++];
+        } else
+            pa += strlen(annu[a].ann);
     }
     sBuf[pa] = 0;
 

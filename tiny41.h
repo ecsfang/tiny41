@@ -6,6 +6,15 @@
 #define PICO_DEFAULT_I2C_SCL_PIN 27
 //#define PICO_DEFAULT_I2C 1
 
+#define CF_DUMP_DBG_DREGS 0
+#define CF_DISPLAY_LCD 1
+#define CF_DISPLAY_OLED 0
+#define CF_DBG_DISP_ON 0
+#define CF_DBG_SLCT 0
+#define CF_DBG_DISP_INST 0
+#define CF_USE_DISP_ON 0
+#define CF_DBG_KEY 1
+
 #include "ssd1306.h"
 
 #define USE_40190
@@ -92,11 +101,13 @@ enum {
     REND_ALL = 0b111
 };
 
+#define TITLE_START 0   // Top of the display
 #define LCD_START 2     // Just the number display
 #define ANNUN_START 4   // Just the annunciators
 #define DISP_START 2    // Number and annunciator display combined
 #define STATUS_START 5  // Status area
 
+#define TITLE_ROW   (TITLE_START*8)  // Starting row for each displaysegment
 #define LCD_ROW     (LCD_START*8)    // Starting row for each displaysegment
 #define ANNUN_ROW   (ANNUN_START*8)  // Starting row for each displaysegment
 #define DISP_ROW    (DISP_START*8)   // Starting row for each displaysegment

@@ -253,23 +253,14 @@ inline void _write41char(uint8_t *buf, int p, uint16_t c) {
 }
 
 int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp) {
-    if ((x > SSD1306_WIDTH - (bp?3:8)) || y > SSD1306_HEIGHT - 8)
+    if ((x > SSD1306_WIDTH - (bp?3:8)) || y > (SSD1306_HEIGHT>>3 - 1) )
         return 0;
-
-    // For the moment, only write on Y row boundaries (every 8 vertical pixels)
-    y = y/8;
 
     if( bp && (ch == 0x2c || ch == 0x2e || ch == 0x3A) ) {
         int fb_idx = y * SSD1306_WIDTH + x - 3;
-        int cp = 0;
-        if( ch == 0x2e )
-            cp = 3;
-        else if( ch == 0x3a )
-            cp = 6;
-        int i=0;
-        for (;i<3;i++) {
+        int cp = (ch == 0x2e ? 3 : (ch == 0x3a ? 6 : 0));
+        for (int i=0;i<3;i++)
             _write41char(buf, fb_idx++, punct41[cp++]);
-        }
         return 0;
     } else {
         int fb_idx = y * SSD1306_WIDTH + x;
@@ -279,7 +270,6 @@ int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp) {
         for (;i<FONT41_WIDTH;i++) {
             _write41char(buf, fb_idx++, font41[cp++]);
         }
-
         // Clear last columns (should be used for punctation (.,:;))
         for (;i<CHAR41_WIDTH;i++) {
             _write41char(buf, fb_idx++, 0);
@@ -305,6 +295,9 @@ void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
     // Call out any string off the screen
     if (x > SSD1306_WIDTH - CHAR41_WIDTH || y > SSD1306_HEIGHT - 2*8)
         return;
+
+    // For the moment, only write on Y row boundaries (every 8 vertical pixels)
+    y >>= 3;
 
     if( str ) {
         while (*str) {
