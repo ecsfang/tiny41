@@ -18,7 +18,7 @@
 #include "ssd1306.h"
 
 #define USE_40190
-//#define MEASURE_TIME
+#define MEASURE_TIME
 #define MEASURE_COUNT
 
 #ifdef USE_40190
@@ -65,10 +65,6 @@
 #define P_CLK1      6
 #endif
 
-
-//#define P_DTA_DRV 0
-//#define P_DTA_OE  28
-
 #define LED_ON    0
 #define LED_OFF   1
 
@@ -83,11 +79,20 @@
 #define LAST_CYCLE (BUS_CYCLES-1)
 
 extern void UpdateLCD(char *, bool *, bool);
-extern void UpdateAnnun(uint16_t ann);
+extern void UpdateAnnun(uint16_t ann, bool nl);
 
-#define IS_TRACE() ((bTrace & 0b011) == 0b011)
-#define IS_FULLTRACE() ((bTrace & 0b111) == 0b111)
-#define IS_DISASM() (bTrace & 0b100)
+enum {
+    TRACE_NONE = 0b000,     // No tracing
+    TRACE_ON = 0b001,       // Tracing enabled
+    TRACE_BRK = 0b010,      // Trace on (from breakpoint)
+    TRACE_ACTIVE = 0b011,   // Trace active (enabled and on)
+    TRACE_DISASM = 0b100,   // Disassembler active
+    TRACE_ALL = 0b111       // Full trace
+};
+
+#define IS_TRACE()      ((bTrace & TRACE_ACTIVE) == TRACE_ACTIVE)
+#define IS_FULLTRACE()  ((bTrace & TRACE_ALL) == TRACE_ALL)
+#define IS_DISASM()     ((bTrace & TRACE_DISASM) == TRACE_DISASM)
 
 //#define TRACE
 #define USE_FLASH
@@ -130,7 +135,7 @@ public:
     }
 };
 
-extern uint8_t *buf;
+//extern uint8_t *buf;
 
 class CDisplay {
     CRendArea   disLcd;
@@ -141,13 +146,15 @@ class CDisplay {
     int         m_rend;
 public:
     static uint8_t m_dispBuf[SSD1306_BUF_LEN+1];
+    static uint8_t    *m_buf;
     CDisplay() :
         // Initialize render area for parts of frame (SSD1306_WIDTH pixels by SSD1306_NUM_PAGES pages)
-        disLcd(buf, LCD_START, LCD_START+1),
-        disAnnun(buf, ANNUN_START, ANNUN_START+1),
-        disDisp(buf, DISP_START, ANNUN_START+1),
-        disStatus(buf, STATUS_START, SSD1306_NUM_PAGES-1),
-        disFull(buf, 0, SSD1306_NUM_PAGES-1) {
+        //m_buf = &CDisplay::m_dispBuf[1];
+        disLcd(m_buf, LCD_START, LCD_START+1),
+        disAnnun(m_buf, ANNUN_START, ANNUN_START+1),
+        disDisp(m_buf, DISP_START, ANNUN_START+1),
+        disStatus(m_buf, STATUS_START, SSD1306_NUM_PAGES-1),
+        disFull(m_buf, 0, SSD1306_NUM_PAGES-1) {
         m_rend = 0;
     }
     void render(void) {
@@ -167,5 +174,6 @@ public:
     bool needRendering(void) {
         return m_rend != 0;
     }
+    uint8_t *buf() { return m_buf; }
 };
 

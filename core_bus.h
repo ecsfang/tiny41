@@ -8,8 +8,13 @@
 
 #include "instr.h"
 
-#define MASK_48_BIT    (0xFFFFFFFFFFFFL)
+#define MASK_64_BIT    (0xFFFFFFFFFFFFFFFFL)
+#define MASK_56_BIT    (0x00FFFFFFFFFFFFFFL)
+#define MASK_48_BIT    (0x0000FFFFFFFFFFFFL)
 #define REG_C_48_MASK  (0x111111111111L)
+
+#define PA_MASK        (~MASK_56_BIT)
+#define PA_SHIFT       56
 
 #define ROTATE_RIGHT(V) {uint64_t t = (V & 0xF); V >>= 4; V |= t<<44;}
 #define  ROTATE_LEFT(V) {uint64_t t = (V & (0xFLL << 44)); V <<= 4; V |= t>>44;}
@@ -24,7 +29,7 @@
 #define NR_PAGES    0x10
 #define LAST_PAGE   (NR_PAGES - 1)
 #define PAGE(p)     (p>>12)
-
+#define ISA_SHIFT   44
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
@@ -47,6 +52,8 @@ enum {
     FI_MASK = (1 << 14)-1
 };
 
+#define CMD_SYNC    0x8000
+
 typedef struct {
   uint64_t  data;
 #ifdef TRACE_ISA
@@ -54,10 +61,7 @@ typedef struct {
 #endif
   uint16_t  addr;
   uint16_t  cmd;
-  //uint16_t  flag;
   uint16_t  fi;
-  uint8_t   pa;
-  uint8_t   sync;
 } Bus_t;
 
 enum {
@@ -67,10 +71,119 @@ enum {
     IMG_DIRTY = 0x04
 };
 
-typedef struct {
-    uint16_t *image;
-    uint16_t flags;
-} Module_t;
+class CModule {
+  uint16_t *m_img;
+  uint16_t m_flgs;
+public:
+  void set(uint16_t *image) {
+    m_img = image;
+    m_flgs = IMG_INSERTED;
+  }
+  void clr(void) {
+    m_img = NULL;
+    m_flgs = IMG_NONE;
+  }
+  bool isDirty(void) {
+    return m_flgs & IMG_DIRTY;
+  }
+  void clear(void) {
+    m_flgs &= ~IMG_DIRTY;
+  }
+  bool isInserted(void) {
+    return m_flgs & IMG_INSERTED;
+  }
+  bool isLoaded(void) {
+    return m_img != NULL;
+  }
+  bool isRam(void) {
+    return m_flgs & IMG_RAM;
+  }
+  void togglePlug(void) {
+    m_flgs ^= IMG_INSERTED;
+  }
+  void plug(void) {
+    m_flgs |= IMG_INSERTED;
+  }
+  void unplug(void) {
+    m_flgs &= ~IMG_INSERTED;
+  }
+  void toggleRam(void) {
+    m_flgs ^= IMG_RAM;
+  }
+  void setRam(void) {
+    m_flgs |= IMG_RAM;
+  }
+  void setRom(void) {
+    m_flgs &= ~IMG_RAM;
+  }
+  uint16_t read(uint16_t addr) {
+    return m_img[addr & PAGE_MASK] & INST_MASK;
+  }
+  uint16_t operator [](uint16_t addr) {
+    return m_img[addr & PAGE_MASK] & INST_MASK;
+  }
+  void write(uint16_t addr, uint16_t dta) {
+    m_img[addr & PAGE_MASK] = dta;
+    m_flgs |= IMG_DIRTY;
+  }
+};
+
+class CModules {
+  CModule m_modules[NR_PAGES];
+public:
+  CModules() {
+    clearAll();
+  }
+  void add(int port, uint16_t *image) {
+	  if( image ) {
+      m_modules[port].set(image);
+      printf("Add ROM @ %04X - %04X\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK);
+  	} 
+  }
+  void clearAll() {
+    memset(m_modules, 0, sizeof(CModule) * NR_PAGES);
+  }
+  void remove(int port) {
+    m_modules[port].clr();
+	}
+  bool isDirty(int port) {
+    return m_modules[port].isDirty();
+  }
+  void clear(int port) {
+    m_modules[port].clear();
+  }
+  bool isInserted(int port) {
+    return m_modules[port].isInserted();
+  }
+  bool isLoaded(int port) {
+    return m_modules[port].isLoaded();
+  }
+  bool isRam(int port) {
+    return m_modules[port].isRam();
+  }
+  void togglePlug(int port) {
+    m_modules[port].togglePlug();
+  }
+  void unplug(int port) {
+    m_modules[port].unplug();
+  }
+  void toggleRam(int port) {
+    m_modules[port].toggleRam();
+  }
+  void setRam(int port) {
+    m_modules[port].setRam();
+  }
+  void setRom(int port) {
+    m_modules[port].setRom();
+  }
+  CModule *at(int addr) {
+    return &m_modules[PAGE(addr)];
+  }
+  CModule *operator [](uint16_t addr) {
+    return &m_modules[addr & 0xF];
+  }
+
+};
 
 
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
@@ -93,7 +206,6 @@ typedef struct {
 extern void core1_main_3(void);
 
 extern void process_bus(void);
-extern void capture_bus_transactions(void);
 
 extern volatile int sync_count;
 extern volatile int embed_seen;
@@ -101,10 +213,70 @@ extern volatile int embed_seen;
 extern volatile int data_wr;
 extern volatile int data_rd;
 
+#define BRK_SIZE ((ADDR_MASK+1)/(32/2)) // 2 bits per brkpt
+#define BRK_MASK(a,w) ((m_brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0b11)
+#define BRK_SHFT(a) ((a & 0xF)<<1)
+#define BRK_WORD(a) (a >> 4)
+
+typedef enum {
+  BRK_NONE,
+  BRK_START,
+  BRK_END,
+  BRK_CLR
+} BrkMode_e;
+
+class CBreakpoint {
+  uint32_t m_brkpt[BRK_SIZE];
+public:
+  // Check if breakpoint is set for given address
+  inline int isBrk(uint16_t addr) {
+    uint32_t w = m_brkpt[BRK_WORD(addr)];
+    return w ? (w >> BRK_SHFT(addr)) & 0b11 : 0;
+  }
+  // Clear breakpoint on given address
+  void clrBrk(uint16_t addr) {
+    m_brkpt[BRK_WORD(addr)] &= ~(0b11 << BRK_SHFT(addr));
+  }
+  void clrAllBrk(void) {
+    printf("Clear all breakpoints\n");
+    memset(m_brkpt, 0, sizeof(uint32_t) * BRK_SIZE);
+  }
+  // Set breakpoint on given address
+  void setBrk(uint16_t addr) {
+    clrBrk(addr); // Remove previous settings
+    m_brkpt[BRK_WORD(addr)] |= BRK_START << BRK_SHFT(addr);
+  }
+  void stopBrk(uint16_t addr) {
+    clrBrk(addr); // Remove previous settings
+    m_brkpt[BRK_WORD(addr)] |= BRK_END << BRK_SHFT(addr);
+  }
+  void list_brks(void) {
+    int n = 0;
+    for(int w=0; w<BRK_SIZE; w++) {
+      if( m_brkpt[w] ) {
+        for(int a=w*16; a<(w+1)*16; a++) {
+          int br = isBrk(a);
+          if( br ) {
+            printf("#%d: %04X -> ", ++n, a);
+            switch( br ) {
+              case 1: printf("start"); break;
+              case 2: printf("stop"); break;
+              default: printf("???"); break;
+            }
+            printf("\n");
+          }
+        }
+      }
+    }
+    if( !n )
+      printf("No breakpoints\n");
+  }
+};
+
 // Set breakpoint on given address
-void setBrk(uint16_t addr);     // Start trace
-void stopBrk(uint16_t addr);    // Stop trace
+//void setBrk(uint16_t addr);     // Start trace
+//void stopBrk(uint16_t addr);    // Stop trace
 // Clear breakpoint on given address
-void clrBrk(uint16_t addr);
+//void clrBrk(uint16_t addr);
 
 #endif//__CORE_BUS_H__

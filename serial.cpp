@@ -16,6 +16,9 @@
 int pcount = 0;
 int periodic_read = 0;
 
+extern CModules modules;
+extern CBreakpoint brk;
+
 // Memory that emulates a pak
 typedef unsigned char BYTE;
 typedef void (*FPTR)(void);
@@ -33,21 +36,21 @@ void serial_help(void);
 // Toggle over-all trace (off -> no trace at all)
 void toggle_trace(void)
 {
-  bTrace ^= 0b001;
-  if( bTrace & 0b001 ) bTrace |= 0b010;
-  printf("Turn trace %s\n", bTrace & 0b001 ? "on":"off");
+  bTrace ^= TRACE_ON;
+  if( bTrace & TRACE_ON ) bTrace |= TRACE_BRK;
+  printf("Turn trace %s\n", bTrace & TRACE_ON ? "on":"off");
 }
 // Toggle disassembler (on -> call disassembler if trace is on)
 void toggle_disasm(void)
 {
-  bTrace ^= 0b100;
+  bTrace ^= TRACE_DISASM;
   printf("Turn disassemble %s\n", IS_DISASM() ? "on":"off");
 }
 #define BAR() printf("+------+------+------+-----+\n")
 
 void list_modules(void)
 {
-  extern Module_t modules[NR_PAGES];
+  extern CModules modules;
 
   printf("\nLoaded modules\n");
   BAR();
@@ -60,9 +63,9 @@ void list_modules(void)
     else 
       printf("     | ");
 
-    if( modules[i].flags & IMG_INSERTED ) {
-      printf(" %02X  | ", modules[i].image[0]);
-      if( modules[i].flags & IMG_RAM )
+    if( modules.isInserted(i) ) {
+      printf(" %02X  | ", (*modules[i])[0]);
+      if( modules.isRam(i) )
         printf("yes |");
       else
         printf("    |");
@@ -81,13 +84,6 @@ extern void wand_scan(void);
 
 static uint16_t sBrk = 0;
 static uint16_t nBrk = 0;
-
-typedef enum {
-  BRK_NONE,
-  BRK_START,
-  BRK_END,
-  BRK_CLR
-} BrkMode_e;
 
 BrkMode_e brk_mode = BRK_NONE;
 
@@ -130,9 +126,15 @@ void plug_unplug(void)
   bPlug = true;
 }
 
-extern void clrBrk(uint16_t addr);
-extern void setBrk(uint16_t addr);
-extern void stopBrk(uint16_t addr);
+void listBreakpoints(void)
+{
+  brk.list_brks();
+}
+void clrBreakpoints(void)
+{
+  brk.clrAllBrk();
+}
+
 extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -140,11 +142,11 @@ SERIAL_COMMAND serial_cmds[] = {
   { '?', serial_help,       "Serial command help"  },
   { 'd', toggle_disasm,     "Toggle disassembler"  },
   { 't', toggle_trace,      "Toggle trace"  },
-  { 'b', list_brks,         "List breakpoints"  },
+  { 'b', listBreakpoints,   "List breakpoints"  },
   { 'B', set_brk,           "Set breakpoint"  },
   { 'E', end_brk,           "End breakpoint"  },
   { 'C', clr_brk,           "Clear breakpoint"  },
-  { 'x', clrAllBrk,         "Clear all breakpoints"  },
+  { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'o', power_on,          "Power On"  },
@@ -168,16 +170,14 @@ void serial_help(void)
 int getHexKey(int ky)
 {
   int x = -1;
-  if( (ky >= '0' && ky <= '9') || (ky >= 'a' && ky <= 'f') || (ky >= 'A' && ky <= 'F') ) {
-    if( ky >= 'A' && ky <= 'F' )
-      x = ky - ('A'-0xa);
-    else
-      x = ky - ((ky>='a') ? ('a'-0xa) : '0');
-  }
+  if( ky >= '0' && ky <= '9' )
+    x = ky - '0';
+  else if( ky >= 'a' && ky <= 'f' ) 
+    x = ky - ('a'-0xa);
+  else if( ky >= 'A' && ky <= 'F' )
+    x = ky - ('A'-0xa);
   return x;
 }
-
-extern Module_t modules[NR_PAGES];
 
 
 void serial_loop(void)
@@ -207,29 +207,22 @@ void serial_loop(void)
       } else {
         int x = getHexKey(key);
         if( x >= 0 && x <= 0xF ) {
-          if( bQram ) {
-            if( modules[x].image ) {
-              modules[x].flags ^= IMG_RAM;
-              if( modules[x].flags & IMG_RAM )
-                printf("\rModule in page #%X marked as QRAM    \n", x);
-              else
-                printf("\rModule in page #%X marked as ROM     \n", x);
-            } else {
-              printf("\rNo image at page #%X!!               \n", x);
+          CModule *m = modules[x];
+          if( m->isLoaded() ) {
+            if( bQram ) {
+              m->toggleRam();
+              printf("\rModule in page #%X marked as %s     \n",
+                x, m->isRam() ? "QRAM" : "ROM");
+              bQram = false;
             }
-            bQram = false;
-          }
-          if( bPlug ) {
-            if( modules[x].image ) {
-              modules[x].flags ^= IMG_INSERTED;
-              if( modules[x].flags & IMG_INSERTED )
-                printf("\rModule in page #%X inserted          \n", x);
-              else
-                printf("\rModule in page #%X removed           \n", x);
-            } else {
-              printf("\rNo image at page #%X!!               \n", x);
+            if( bPlug ) {
+              m->togglePlug();
+              printf("\rModule in page #%X %s           \n",
+                x, m->isInserted() ? "inserted":"removed");
+              bPlug = false;
             }
-            bPlug = false;
+          } else {
+            printf("\rNo image at page #%X!!               \n", x);
           }
           if( nBrk ) {
             sBrk <<= 4;
@@ -240,15 +233,15 @@ void serial_loop(void)
               switch(brk_mode) {
               case BRK_START:
                 printf("\rStart breakpoint @ %04X\n", sBrk);
-                setBrk(sBrk);
+                brk.setBrk(sBrk);
                 break;
               case BRK_END:
                 printf("\rEnd breakpoint @ %04X\n", sBrk);
-                stopBrk(sBrk);
+                brk.stopBrk(sBrk);
                 break;
               case BRK_CLR:
                 printf("\rClear breakpoint @ %04X\n", sBrk);
-                clrBrk(sBrk);
+                brk.clrBrk(sBrk);
                 break;
               }
               brk_mode = BRK_NONE;

@@ -22,7 +22,7 @@
 
 #include "instr.h" // Instruction codes ...
 
-extern int peripheral_ce;
+extern int selectedPeripheral(void);
 
 // Buffer for the disassembled string
 static char disBuf[256];
@@ -148,7 +148,7 @@ void prtCl0Cmd(int inst, int data, int con)
 				// printf(" (PA=%02X)", con&0xFF);
 				break;
 			case 0xB:	// 001360
-				switch( peripheral_ce ) {
+				switch( selectedPeripheral() ) {
 				case DISP_ADDR:
 					addDis(" (WRTEN - writes annunciators)");
 					break;
@@ -166,7 +166,7 @@ void prtCl0Cmd(int inst, int data, int con)
 			if( mod == 0x0 )
 				addDis("READ DATA");	// copy active user memory register to C
 			else {
-				if ( mod == 5 && peripheral_ce == DISP_ADDR)
+				if ( mod == 5 && selectedPeripheral() == DISP_ADDR)
 					addDis("READEN");
 				else {
 					addDis("C=REG ");
@@ -190,7 +190,7 @@ bool disAsmPeripheral(int inst)
 	const char *dBuf = NULL;
   int cmd = inst & 0077;
   int mod = inst >> 6;
-	switch (peripheral_ce) {
+	switch (selectedPeripheral()) {
 	case DISP_ADDR:
 		if( inst == INST_WRITE_ANNUNCIATORS )
 			dBuf = "WRTEN";
@@ -237,12 +237,17 @@ bool disAsmPeripheral(int inst)
 	return false;
 }
 
+int disMod(const char *fmt, int m)
+{
+	return sprintf(disBuf, fmt, m);
+}
+
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 {
 	static int prev;
 	static bool bClass1 = false;
 	static int con;
-//	printf(" %04X [%02o %04o] %03X %014llX - ", addr, addr>>10, addr & 0x3FF, inst, data);
+	int mod = inst >> 6;
 
 	pDis = 0;
 
@@ -259,18 +264,18 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 				case 0x083: pDis = sprintf(disBuf, "ERROR?"); break;
 				default:
 					if( inst & 0x3F == 0x03 )
-						pDis = sprintf(disBuf, "?PFSET %X", inst >> 6);
+						pDis = disMod("?PFSET %X", mod);
 				}
 				break;
 			default:
 				switch( inst & 0x3F ) {
 				case 0x03:	// Check peripheral flag N
-					pDis = sprintf(disBuf, "?PFSET %X", inst >> 6);
+					pDis = disMod("?PFSET %X", mod);
 					break;
 				case 0x3A:
 				case 0x3B:
 					// Read data line into C from reg N
-					pDis = sprintf(disBuf, "C=DATA[%X]", inst>>6);
+					pDis = disMod("C=DATA[%X]", mod);
 					if( inst & 0x1 )
 						pDis += sprintf(disBuf+pDis,"R");
 					break;

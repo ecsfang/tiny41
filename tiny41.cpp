@@ -24,7 +24,9 @@
 int bRend = REND_NONE;
 
 // Init trace - no trace/no disassembler
-volatile uint8_t bTrace = 0;
+volatile uint8_t bTrace = TRACE_NONE;
+
+extern CBreakpoint brk;
 
 void bus_init(void)
 {
@@ -49,7 +51,7 @@ void bus_init(void)
 
 
 uint8_t CDisplay::m_dispBuf[SSD1306_BUF_LEN+1];
-uint8_t *buf = &CDisplay::m_dispBuf[1];
+uint8_t *CDisplay::m_buf = &CDisplay::m_dispBuf[1];
 
 CDisplay    disp41;
 
@@ -64,7 +66,7 @@ void dispOverflow(bool bOvf)
 {
     gpio_put(LED_PIN_R, bOvf ? LED_ON : LED_OFF);
     const char *bErr = bOvf ? "Buffer overflow!" : "                ";
-    WriteString(buf, 5, (STATUS_START+2)*8, (char *)bErr);
+    WriteString(disp41.buf(), 5, (STATUS_START+2)*8, (char *)bErr);
     bRend |= REND_STATUS;
 }
 
@@ -108,7 +110,7 @@ int main()
     multicore_launch_core1(core1_main_3);
 
     // zero the entire display
-    memset(buf, 0, SSD1306_BUF_LEN);
+    memset(disp41.buf(), 0, SSD1306_BUF_LEN);
     disp41.rend(REND_ALL);
     disp41.render();
 
@@ -119,12 +121,12 @@ int main()
     bool bp[12];
     memset(bp, 0, 12);
 
-    Write41String(buf, 5, TITLE_ROW, text[0], bp);
+    Write41String(disp41.buf(), 5, TITLE_ROW, text[0], bp);
     bp[3] = true;
-    Write41String(buf, 5, LCD_ROW, text[1], bp);
+    Write41String(disp41.buf(), 5, LCD_ROW, text[1], bp);
 
     // Turn on all annunciators ...
-    UpdateAnnun(0xFFF);
+    UpdateAnnun(0xFFF, false);
 
     disp41.rend(REND_ALL);
     disp41.render();
@@ -142,14 +144,26 @@ int main()
     //  - add a start at first address after loop
 
 #define IGNORE_LOOP(a) do {         \
-                        stopBrk(a); \
-                        setBrk(a+1);\
+                        brk.stopBrk(a); \
+                        brk.setBrk(a+1);\
                        } while (0)
 
     // Reset keyboard (RST10)
     IGNORE_LOOP(0x00A0);
     // Ignore key at DISOFF
     IGNORE_LOOP(0x089D);
+    // Ignore key at ...
+    IGNORE_LOOP(0x0E9E);
+    brk.setBrk(0x0EA3);
+    // Ignore key at ...
+    IGNORE_LOOP(0x0ECE);
+    brk.setBrk(0x009B);
+    // Ignore key in Zenrom ...
+    IGNORE_LOOP(0xA20B);
+    brk.setBrk(0xA210);
+    // Ignore key in Zenrom ...
+    IGNORE_LOOP(0xA8F0);
+    brk.setBrk(0xA8F8);
     // Ignore key
     IGNORE_LOOP(0x009A);
     // FOR DEBOUNCE (DRSY30)
@@ -160,13 +174,12 @@ int main()
     IGNORE_LOOP(0xF3E0);
 
     // Ignore MEMLFT routine (calculate free memory)
-    stopBrk(0x05A1);
-    setBrk(0x05B6);
+    brk.stopBrk(0x05A1);
+    brk.setBrk(0x05B6);
 
     bool bErr = false;
     while (1)
     {
-        // capture_bus_transactions();
         process_bus();
         // Update the USB CLI
         serial_loop();
@@ -175,7 +188,7 @@ int main()
         if( queue_overflow ) {
             if( !bErr ) {
                 dispOverflow(true);
-                bTrace &= 0b011; // Turn disasm off ...
+                bTrace &= ~TRACE_DISASM; // Turn disasm off ...
                 bErr = true;
             }
         } else {
@@ -214,13 +227,15 @@ static int cAnn = 0;
 
 void UpdateLCD(char *txt, bool *bp, bool on)
 {
+    if( IS_TRACE() )
+        printf("\n\n[%s] (%s)", txt, on ? "ON" : "OFF");
     if (on) {
-        Write41String(buf, 3, LCD_ROW, txt, bp);
-        UpdateAnnun(cAnn);
+        Write41String(disp41.buf(), 3, LCD_ROW, txt, bp);
+        UpdateAnnun(cAnn, false);
     } else {
         // Turn off the display
-        Write41String(buf, 3, LCD_ROW, NULL, NULL);
-        UpdateAnnun(ANN_OFF);
+        Write41String(disp41.buf(), 3, LCD_ROW, NULL, NULL);
+        UpdateAnnun(ANN_OFF, false);
     }
     disp41.rend(REND_LCD);
 }
@@ -245,7 +260,7 @@ Annu_t annu[NR_ANNUN] = {
     {"AL" }     // ALpha
 };
 
-void UpdateAnnun(uint16_t ann)
+void UpdateAnnun(uint16_t ann, bool nl)
 {
     char sBuf[24];
     memset(sBuf, ' ', 24);
@@ -272,10 +287,13 @@ void UpdateAnnun(uint16_t ann)
     }
     sBuf[pa] = 0;
 
-    if( IS_TRACE() )
-        printf("\nAnnunciators: [%s] (%d)", sBuf, cAnn);
+    if( IS_TRACE() ) {
+        if( nl )
+            printf("\n");
+        printf("\n[%s] (%d)\n", sBuf, cAnn);
+    }
 
-    WriteString(buf, 0, ANNUN_ROW, sBuf);
+    WriteString(disp41.buf(), 0, ANNUN_ROW, sBuf);
     disp41.rend(REND_ANNUN);
     oAnn = ann;
 }

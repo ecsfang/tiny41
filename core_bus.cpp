@@ -66,67 +66,9 @@ public:
 // Hold current barcode to scan
 CBarcode cBar;
 
-#define BRK_SIZE ((ADDR_MASK+1)/(32/2)) // 2 bits per brkpt
-uint32_t brkpt[BRK_SIZE];
-enum {
-  BRK_NONE,
-  BRK_START,
-  BRK_STOP,
-};
-#define BRK_MASK(a,w) ((brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0b11)
-#define BRK_SHFT(a) ((a & 0xF)<<1)
-#define BRK_WORD(a) (a >> 4)
 
-// Check if breakpoint is set for given address
-inline int isBrk(uint16_t addr)
-{
-  uint32_t w = brkpt[BRK_WORD(addr)];
-  return w ? (w >> BRK_SHFT(addr)) & 0b11 : 0;
-}
-// Clear breakpoint on given address
-void clrBrk(uint16_t addr)
-{
-  brkpt[BRK_WORD(addr)] &= ~(0b11 << BRK_SHFT(addr));
-}
-void clrAllBrk(void)
-{
-  printf("Clear all breakpoints\n");
-  memset(brkpt, 0, sizeof(uint32_t) * BRK_SIZE);
-}
-// Set breakpoint on given address
-void setBrk(uint16_t addr)
-{
-  clrBrk(addr); // Remove previous settings
-  brkpt[BRK_WORD(addr)] |= BRK_START << BRK_SHFT(addr);
-}
-void stopBrk(uint16_t addr)
-{
-  clrBrk(addr); // Remove previous settings
-  brkpt[BRK_WORD(addr)] |= BRK_STOP << BRK_SHFT(addr);
-}
+CBreakpoint brk;
 
-void list_brks(void)
-{
-  int n = 0;
-  for(int w=0; w<BRK_SIZE; w++) {
-    if( brkpt[w] ) {
-      for(int a=w*16; a<(w+1)*16; a++) {
-        int br = isBrk(a);
-        if( br ) {
-          printf("#%d: %04X -> ", ++n, a);
-          switch( br ) {
-            case 1: printf("start"); break;
-            case 2: printf("stop"); break;
-            default: printf("???"); break;
-          }
-          printf("\n");
-        }
-      }
-    }
-  }
-  if( !n )
-    printf("No breakpoints\n");
-}
 void swapRam(uint16_t *dta, int n);
 
 // Keep track of FI flags (0-13)
@@ -222,7 +164,7 @@ void wand_scan(void)
       row = 1;
       wp = barRow(row);
     }
-    printf("Simulate Wand Barcode scan - Row:%d ... ", row++);
+    printf("\nSimulate Wand Barcode scan - Row:%d ... ", row++);
     // Fill barcode buffer with data for current row ...
     cBar.set(&wand_page[wp]);
     // Update pointer to next row of data ...
@@ -301,34 +243,19 @@ void read8Port(int n, uint8_t *data)
 }
 #endif
 
-
 // Allocate memory for all flash images ...
 static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
 
 // Make space for information about all flash images
-Module_t modules[NR_PAGES];
-
-// Add image to the list of modules
-// A pointer to the image and which port to attatch it to
-void addRom(int port, uint16_t *image)
-{
-	if( image ) {
-    modules[port].image = image;
-    modules[port].flags = IMG_INSERTED;
-    printf("Add ROM @ %04X - %04X\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK);
-	} else {
-    modules[port].image = NULL;
-    modules[port].flags = IMG_NONE;
-	}
-}
+CModules modules;
 
 #ifdef USE_FLASH
 // Save a ram image to flash (emulate Q-RAM)
 void saveRam(int port, int ovr = 0)
 {
   if( port >= FIRST_PAGE && port < NR_PAGES ) {
-    if (ovr | (modules[port].flags & IMG_DIRTY)) {
-      modules[port].flags &= ~IMG_DIRTY;
+    if (ovr || modules.isDirty(port)) {
+      modules.clear(port);
       erasePort(port);
       writePort(port, rom_pages[port - FIRST_PAGE]);
       printf("Wrote RAM[%X] to flash\n", port);
@@ -349,8 +276,9 @@ void swapRam(uint16_t *dta, int n)
 
 void qRam(int page)
 {
-  if (modules[page].flags & IMG_INSERTED) {
-    modules[page].flags |= IMG_RAM;
+  CModule *m = modules[page];
+  if (m->isInserted()) {
+    m->setRam();
     printf("Add QRAM[%X] @ %04X - %04X\n", page, page*PAGE_SIZE, (page*PAGE_SIZE)|PAGE_MASK);
   }
 }
@@ -376,7 +304,7 @@ void initRoms()
     erasePort(p);
 #endif
   // Remove all modules ...
-  memset(modules, 0, sizeof(Module_t) * NR_PAGES);
+  modules.clearAll();
 
   // Check for existing images and load them ...
   for (int port = FIRST_PAGE; port <= LAST_PAGE; port++) {
@@ -409,7 +337,7 @@ void initRoms()
     printf("\n");
 #endif
     if( !nErr ) {
-      addRom(port, rom_pages[pIdx]);
+      modules.add(port, rom_pages[pIdx]);
     }
   }
 #ifdef WAND_EMU
@@ -479,7 +407,6 @@ volatile Bus_t bus[NUM_BUS_T];
 int last_sync = 0;
 int gpio_states = 0;
 
-int peripheral_ce = 0;
 char dtext[2 * NR_CHARS + 1];
 bool bPunct[2 * NR_CHARS + 1];
 
@@ -508,11 +435,12 @@ void core1_main_3(void)
   static uint64_t isa = 0LL;
   static uint64_t bit = 0LL;
   int sync = 0;
+  bool bIsSync = false;
   static uint64_t data56 = 0;
   static uint16_t dataFI = 0;
   int last_data_wr;
   static uint16_t romAddr = 0;
-  Module_t *mp = NULL;
+  CModule *mp = NULL;
   volatile Bus_t *pBus = &bus[data_wr];
   static uint8_t perph = 0;
   static uint8_t ramad = 0;
@@ -588,9 +516,9 @@ void core1_main_3(void)
 
     // Increment the bit number (or sync ...)
     if (sync && !last_sync) {
-      pBus->sync = 1;
+      bIsSync = true;
       sync_count++;
-      bit_no = 44;
+      bit_no = ISA_SHIFT;
     } else {
       bit_no = (bit_no >= LAST_CYCLE) ? 0 : bit_no+1;
     }
@@ -610,10 +538,7 @@ void core1_main_3(void)
       tm = time_us_64();
 #endif
       pBus = &bus[data_wr];
-      pBus->sync = 0;
-      pBus->cmd = 0;
-      pBus->fi = 0;
-      romAddr = 0;
+      memset((void*)pBus, 0, sizeof(Bus_t));
       break;
 
     case 7:
@@ -632,17 +557,15 @@ void core1_main_3(void)
       // Got address. If the address is that of the embedded ROM then we flag that we have
       // to put an instruction on the bus later
       pBus->addr = (isa >> 14) & ADDR_MASK;
-      mp = &modules[PAGE(pBus->addr)];
-      if (mp->flags & IMG_INSERTED)
-        romAddr = pBus->addr & PAGE_MASK; // - mp->start;
+      mp = modules.at(pBus->addr);
       break;
 
     case 30:
 #ifdef DRIVE_ISA
       // Check if we should emulate any modules ...
-      if (mp->flags & IMG_INSERTED) {
+      if (mp->isInserted()) {
         embed_seen++;
-        pBus->cmd = drive_isa = mp->image[romAddr];
+        pBus->cmd = drive_isa = (*mp)[pBus->addr];
         drive_isa_flag = 1;
       }
 #endif
@@ -679,8 +602,8 @@ void core1_main_3(void)
       if( pBus->addr || isa || pBus->cmd ) {
         // Is instruction fetched from flash?
         if( !pBus->cmd )
-          pBus->cmd = (isa >> 44) & INST_MASK;
-        pBus->data = data56;
+          pBus->cmd = (isa >> ISA_SHIFT) & INST_MASK;
+        pBus->data = data56 & MASK_56_BIT;
 #ifdef TRACE_ISA
         pBus->isa = isa;
 #endif
@@ -697,11 +620,8 @@ void core1_main_3(void)
           bSelPa = true;
           break;
 #ifdef DRIVE_CARRY
-        case INST_WNDB:
-          // Check if more data is to be read ...
-          break;
         case INST_WANDRD:
-          if( perph == WAND_ADDR && cBar.available() && pBus->sync  ) {
+          if( perph == WAND_ADDR && cBar.available() && bIsSync  ) {
             // Enable data driver ...
             output_data = bDataEn = 1;
             // Get next byte from the wand-buffer!
@@ -717,8 +637,9 @@ void core1_main_3(void)
 #ifdef MEASURE_TIME
         {
           uint16_t dt = (uint16_t)(time_us_64() - tm);
-          pBus->fi = dt;
           // Floating input-pin ... ?
+          // A normal cycle (56 clock cycles @ 366kHz) should take ~158us (0x9E).
+          // So, if outside that range, we have an invalid cycle ...
           if( dt < 0x40 || dt > 0x100 ) {
             bErr = true;
             break;
@@ -731,7 +652,12 @@ void core1_main_3(void)
         pBus->fi |= cnt++ << 8;
 #endif
         // Report selected peripheral to trace ...
-        pBus->pa = perph;
+        //pBus->pa = perph;
+        pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
+
+        if( bIsSync )
+          pBus->cmd |= CMD_SYNC;
+        bIsSync = false;
 
         // Setup FI-signal for next round ...
         dataFI = getFI();
@@ -739,7 +665,6 @@ void core1_main_3(void)
         // Cleanup, fix trace buffer pointer and
         // check for overflow ...
         isa = data56 = 0LL;
-        bit = 1LL;
 
         INC_BUS_PTR(data_wr);
         if (data_rd == data_wr) {
@@ -748,7 +673,7 @@ void core1_main_3(void)
           // Restore last pointer (overwriting this cycle)
           data_wr = last_data_wr;
           // Turn at least disasm off ...
-          bTrace &= 0b011;
+          bTrace &= ~TRACE_DISASM;
         }
       }
       // Enable DATA for next cycle ... ?
@@ -768,14 +693,7 @@ void post_handling(uint16_t addr)
   // cBar.empty() if all data in buffer have been read
   // FI_WNDB (T2) is low if buffer is empty
   if( (iGetNextWndData > iSendNextWndData) && cBar.empty() && !getFI(FI_WNDB) ) {
-/*    // row < 0 if we are done with all data
-    if( row < 0 ) {
-      printf("End wand busy flag ...\n");
-      clrFI(FI_PBSY);
-      bSendNextWndData = false;
-      return;
-    }**/
-    // ... else we have more data to send!
+    // We have more data to send!
     iSendNextWndData++;
     wand_scan();
   }
@@ -784,6 +702,9 @@ void post_handling(uint16_t addr)
 void process_bus(void)
 {
   int br; // Breakpoint
+
+  // Get pointer to trace element ...
+  volatile Bus_t *pb = &bus[data_rd];
 
   // Process data coming in from the bus via core 1
   while (data_wr != data_rd) {
@@ -808,19 +729,21 @@ void process_bus(void)
     printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
 #else
     // Handle the bus traffic
-    br = isBrk(bus[data_rd].addr);
+    br = brk.isBrk(pb->addr);
     if( br == BRK_START )
-      bTrace |= 0b010;
-    handle_bus(&bus[data_rd]);
-    if( br == BRK_STOP )
-      bTrace &= 0b101;
+      bTrace |= TRACE_BRK;
+    handle_bus(pb);
+    if( br == BRK_END )
+      bTrace &= ~TRACE_BRK;
 #endif
-    INC_BUS_PTR(data_rd);
-
     // Any handling outside bus traceing
     // Note that instructions can be missed if the buffer is overflowed!
     // Better handle these cases here ...
-    post_handling(bus[data_rd].addr);
+    post_handling(pb->addr);
+
+    INC_BUS_PTR(data_rd);
+    // Point at next element ...
+    pb = &bus[data_rd];
 
     if( disp41.needRendering() ) {
       // Render only if buffer is not too full ...
@@ -890,8 +813,6 @@ void dump_dregs(void)
 
 #if CF_DISPLAY_LCD
   UpdateLCD(dtext, bPunct, display_on);
-  if( IS_TRACE() )
-    printf("\n[%s] (%s)", dtext, display_on ? "ON" : "OFF");
 #endif
 }
 
@@ -963,27 +884,66 @@ void rotateDispReg(uint8_t r)
   dump_dregs();
 }
 
+// Keep track of selected peripheral ...
+int peripheral_ce = 0;
+void setPeripheral(int pa)
+{
+  switch (pa) {
+  case DISP_ADDR:
+  case WAND_ADDR:
+  case TIMR_ADDR:
+  case CRDR_ADDR:
+    peripheral_ce = pa;
+    break;
+  default:
+    peripheral_ce = NONE_ADDR;
+  }
+}
+int selectedPeripheral(void)
+{
+  return peripheral_ce;
+}
+void printPeripheral(void)
+{
+  switch (selectedPeripheral()) {
+  case DISP_ADDR:
+  case WAND_ADDR:
+  case TIMR_ADDR:
+  case CRDR_ADDR:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%c ", "TCDW"[selectedPeripheral() - TIMR_ADDR]);
+    break;
+  default:
+    nCpu2 += sprintf(cpu2buf + nCpu2, "  ");
+  }
+}
+
+// Handle bus-trace ...
 void handle_bus(volatile Bus_t *pBus)
 {
-  int addr = pBus->addr;
-  int inst = pBus->cmd;
-  int pa = pBus->pa;
-  int sync = pBus->sync;
-  int fi = pBus->fi;
   static int oCnt = 0xFF;
-  int cnt = (pBus->fi>>8) & 0xFF;
-  uint64_t data56 = pBus->data;
-#ifdef TRACE_ISA
-  uint64_t isa = pBus->isa;
-#endif
-  bool bLdi = false;
   static int pending_data_inst = 0;
   static int oAddr = ADDR_MASK;
 
+  int addr = pBus->addr;
+  int inst = pBus->cmd & INST_MASK;
+  int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
+  int fi = pBus->fi;
+  int cnt = (pBus->fi>>8) & 0xFF;
+  uint64_t data56 = pBus->data & MASK_56_BIT;
+#ifdef TRACE_ISA
+  uint64_t isa = pBus->isa;
+#endif
+
+  nCpu2 = 0;
+
+  setPeripheral((pBus->data & PA_MASK) >> PA_SHIFT);
+
 #ifdef MEASURE_COUNT
-  if( ((++oCnt) & 0xFF) != cnt ) {
-    printf("\n\n ###### LOST TRACE CYCLES (%d-%d) #########################\n\n", oCnt, cnt);
-    oCnt = cnt;
+  if( IS_TRACE() ) {
+    if( (++oCnt & 0xFF) != cnt ) {
+      nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED TRACE CYCLES #########################\n");
+      oCnt = cnt;
+    }
   }
 #endif
 
@@ -995,46 +955,27 @@ void handle_bus(volatile Bus_t *pBus)
   }
 #endif
 
-  switch (pa) {
-  case DISP_ADDR:
-  case WAND_ADDR:
-  case TIMR_ADDR:
-  case CRDR_ADDR:
-    peripheral_ce = pa;
-    break;
-  default:
-    peripheral_ce = NONE_ADDR;
-  }
 
 #if 1
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
-  nCpu2 = sprintf(cpu2buf, "\n%c", queue_overflow ? '#' : ' ');
+  nCpu2 += sprintf(cpu2buf+nCpu2, "\n%c", queue_overflow ? '#' : ' ');
 #else
-  nCpu2 = sprintf(cpu2buf, "\n");
+  nCpu2 += sprintf(cpu2buf+nCpu2, "\n");
 #endif
 #else
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
   if( queue_overflow )
-    nCpu2 = sprintf(cpu2buf, "\n[****]");
+    nCpu2 += sprintf(cpu2buf+nCpu2, "\n[****]");
   else
-    nCpu2 = sprintf(cpu2buf, "\n[%4d]", remaining);
+    nCpu2 += sprintf(cpu2buf+nCpu2, "\n[%4d]", remaining);
 #else
-  nCpu2 = sprintf(cpu2buf, "\n");
+  nCpu2 += sprintf(cpu2buf+nCpu2, "\n");
 #endif
 #endif
 
-  switch (peripheral_ce) {
-  case DISP_ADDR:
-  case WAND_ADDR:
-  case TIMR_ADDR:
-  case CRDR_ADDR:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%c", "TCDW"[peripheral_ce - TIMR_ADDR]);
-    break;
-  default:
-    nCpu2 += sprintf(cpu2buf + nCpu2, " ");
-  }
+  printPeripheral();
 
   uint8_t q = (addr >> 10) & 0b1111;
 #ifdef TRACE_ISA
@@ -1051,12 +992,12 @@ void handle_bus(volatile Bus_t *pBus)
 #if 1
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %04X|%c %04X (Q%2d:%03X) %03X",
-            data56, fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X|%014llX %c %04X (Q%2d:%03X) %03X",
+            fi, data56, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%014llX %04X|%c %04X           %03X",
-            data56, fi, sync ? '*':' ', addr, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X|%014llX %c %04X           %03X",
+            fi, data56, sync ? '*':' ', addr, inst);
   }
 #else
   if( PAGE(addr) < 3 ) {
@@ -1078,15 +1019,14 @@ void handle_bus(volatile Bus_t *pBus)
       nCpu2 += sprintf(cpu2buf+nCpu2, "   > @%04X --> %03X (%04o)", addr, inst, inst);
     break;
   case INST_WRITE:
-    if (1) {
+    {
       int wAddr = (data56 >> 12) & ADDR_MASK;
       int wDat = data56 & INST_MASK;
-      Module_t *ram = &modules[PAGE(wAddr)];
+      CModule *ram = modules.at(wAddr);
       // TBD - Should we allow writes to images not inserted?
-      if (ram->flags & IMG_INSERTED && ram->flags & IMG_RAM) {
+      if (ram->isLoaded() && ram->isRam()) {
         // Page active and defined as ram - update!
-        ram->image[wAddr & PAGE_MASK] = wDat;
-        ram->flags |= IMG_DIRTY;
+        ram->write(wAddr, wDat);
         nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X !!\n", wDat, wAddr);
       } else {
         nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X (Not RAM!)\n", wDat, wAddr);
@@ -1097,7 +1037,7 @@ void handle_bus(volatile Bus_t *pBus)
     if( IS_FULLTRACE() ) {
       char *dp = disAsm(inst, addr, data56, sync);
       if( oAddr != addr )
-        printf("\n");
+        printf("\n"); // Add spave if a jump occurred ...
       if( dp )
         nCpu2 += sprintf(cpu2buf + nCpu2, " - %s", dp);
       oAddr = addr + 1;
@@ -1112,15 +1052,11 @@ void handle_bus(volatile Bus_t *pBus)
 
   // Check for a pending instruction from the previous cycle
   switch (pending_data_inst) {
-  case INST_LDI:
-    bLdi = true;
-    break;
-
   case INST_WRITE_ANNUNCIATORS:
 #if CF_DBG_DISP_INST
     printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
-    UpdateAnnun((uint16_t)(data56 & 0xFFF));
+    UpdateAnnun((uint16_t)(data56 & 0xFFF), true);
     break;
 
   case INST_SRLDA:  // All ...50 instructions
@@ -1142,7 +1078,7 @@ void handle_bus(volatile Bus_t *pBus)
     updateDispReg(data56, pending_data_inst >> 6);
     break;
   case INST_WANDRD:
-    if( IS_TRACE() && peripheral_ce == WAND_ADDR )
+    if( IS_TRACE() && selectedPeripheral() == WAND_ADDR )
       printf(" WB -> %03X", (int)(data56 & 0xFFF));
     break;
   }
@@ -1167,9 +1103,6 @@ void handle_bus(volatile Bus_t *pBus)
       printf("\n%s_SLCT: PA=%02X", inst == INST_PRPH_SLCT ? "PRPH" : "RAM", pa);
       break;
 #endif
-    case INST_LDI:
-      bLdi = true;
-      // Falls through
     case INST_WRITE:
     case INST_FETCH:
       // Handle instruction in next cycle ...
@@ -1177,13 +1110,20 @@ void handle_bus(volatile Bus_t *pBus)
       break;
     case INST_POWOFF:
       dump_dregs();
-      saveRam(0xC);
+      // Any QRAM that needs to be saved ... ?
+      for(int p=FIRST_PAGE; p<=LAST_PAGE; p++) {
+        CModule *m = modules[p];
+        if( m->isLoaded() && m->isRam() && m->isDirty() ) {
+          saveRam(p);
+          printf("Updated QRAM in page #X\n", p);
+        }
+      }
       break;
     }
   }
 
-  if( peripheral_ce && !bLdi ) {
-    switch(peripheral_ce) {
+  if( selectedPeripheral() && sync) {
+    switch(selectedPeripheral()) {
     case WAND_ADDR:
       // Check for Wand transactions
       if (inst == INST_WANDRD)
