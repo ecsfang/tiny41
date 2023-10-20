@@ -62,7 +62,14 @@ typedef struct {
   uint16_t  addr;
   uint16_t  cmd;
   uint16_t  fi;
-} Bus_t;
+} __attribute__((packed)) Bus_t;
+
+// Size of trace buffer should be a power of 2 (for the mask)
+#ifdef TRACE_ISA
+#define NUM_BUS_T 0x400
+#else
+#define NUM_BUS_T 0x1000
+#endif
 
 enum {
     IMG_NONE = 0x00,
@@ -218,6 +225,9 @@ extern volatile int data_rd;
 #define BRK_SHFT(a) ((a & 0xF)<<1)
 #define BRK_WORD(a) (a >> 4)
 
+#define START_TRACE() bTrace |= TRACE_BRK
+#define END_TRACE()   bTrace &= ~TRACE_BRK
+
 typedef enum {
   BRK_NONE,
   BRK_START,
@@ -229,9 +239,9 @@ class CBreakpoint {
   uint32_t m_brkpt[BRK_SIZE];
 public:
   // Check if breakpoint is set for given address
-  inline int isBrk(uint16_t addr) {
+  inline BrkMode_e isBrk(uint16_t addr) {
     uint32_t w = m_brkpt[BRK_WORD(addr)];
-    return w ? (w >> BRK_SHFT(addr)) & 0b11 : 0;
+    return w ? (BrkMode_e)((w >> BRK_SHFT(addr)) & 0b11) : BRK_NONE;
   }
   // Clear breakpoint on given address
   void clrBrk(uint16_t addr) {

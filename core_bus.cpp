@@ -292,6 +292,9 @@ void initRoms()
 #endif
   printf("%d bytes total heap\n", getTotalHeap());
   printf("%d bytes free heap\n", getFreeHeap());
+  printf("Trace element: %d bytes\n", sizeof(Bus_t));
+  printf("Trace buffer: %d bytes\n", sizeof(Bus_t)*NUM_BUS_T);
+
 #ifdef RESET_RAM
   for (int i = 0; i < RAM_SIZE; i++)
     rom_pages[0xC - FIRST_PAGE][i] = 0x0000;
@@ -349,10 +352,10 @@ void initRoms()
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 
-#define CH9(c) (c & 0x1FF)
-#define CH9_B03(c) ((c & 0x00F) >> 0) // Bit 0-3
-#define CH9_B47(c) ((c & 0x0F0) >> 4) // Bit 4-7
-#define CH9_B8(c) ((c & 0x100) >> 8)  // Bit 9
+// Extract display data from data56
+#define CH9_B03(c) ((c >> 0) & 0x00F) // Bit 0-3
+#define CH9_B47(c) ((c >> 4) & 0x00F) // Bit 4-7
+#define CH9_B8(c)  ((c >> 8) & 0x001) // Bit 9
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -368,7 +371,7 @@ volatile int output_isa = 0;      // Output ongoing on ISA...
 volatile int output_data = 0;     // Output ongoing on DATA...
 
 // The data we drive
-int drive_isa = 0;
+uint16_t drive_isa = 0;
 
 volatile int embed_seen = 0;
 volatile int sync_count = 0;
@@ -384,13 +387,6 @@ void handle_bus(volatile Bus_t *pBus);
 ////////////////////////////////////////////////////////////////////////////////
 
 // Data transfer to core 0
-
-// Size of trace buffer should be a power of 2 (for the mask)
-#ifdef TRACE_ISA
-#define NUM_BUS_T 0x400
-#else
-#define NUM_BUS_T 0x800
-#endif
 
 #define NUM_BUS_MASK (NUM_BUS_T-1)
 #define INC_BUS_PTR(d) d = (d+1) & NUM_BUS_MASK
@@ -699,51 +695,60 @@ void post_handling(uint16_t addr)
   }
 }
 
+#ifdef DUMP_CYCLE
+void dumpCycle(Bus_t *p)
+{
+  /*printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%014llX ISA:%014llX",
+  data_rd,
+  bus[data_rd].addr,
+  bus[data_rd].addr,
+  bus[data_rd].cmd,
+  bus[data_rd].pa,
+  bus[data_rd].data,
+  bus[data_rd].isa);
+  */
+  printf("\n%4d: Addr:%04X Inst: %03X PeriAd:%02X Data56:%014llX ISA:%014llX",
+    data_rd,
+    bus[data_rd].addr,
+    bus[data_rd].cmd,
+    bus[data_rd].pa,
+    bus[data_rd].data,
+    bus[data_rd].isa);
+  ISA_t *s = (ISA_t*)&bus[data_rd].isa;
+  printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
+}
+#endif
+
 void process_bus(void)
 {
-  int br; // Breakpoint
+  BrkMode_e br; // Breakpoint
 
-  // Get pointer to trace element ...
-  volatile Bus_t *pb = &bus[data_rd];
+  // Pointer to current trace element ...
+  volatile Bus_t *pb = NULL;
 
   // Process data coming in from the bus via core 1
   while (data_wr != data_rd) {
-#if 0
-    /*printf("\n%d: Addr:%04X %07o  Inst: %06o PeriAd:%02X Data56:%014llX ISA:%014llX",
-     data_rd,
-     bus[data_rd].addr,
-     bus[data_rd].addr,
-     bus[data_rd].cmd,
-     bus[data_rd].pa,
-     bus[data_rd].data,
-     bus[data_rd].isa);
-     */
-    printf("\n%4d: Addr:%04X Inst: %03X PeriAd:%02X Data56:%014llX ISA:%014llX",
-     data_rd,
-     bus[data_rd].addr,
-     bus[data_rd].cmd,
-     bus[data_rd].pa,
-     bus[data_rd].data,
-     bus[data_rd].isa);
-    ISA_t *s = (ISA_t*)&bus[data_rd].isa;
-    printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
+    // Point at current element ...
+    pb = &bus[data_rd];
+
+#ifdef DUMP_CYCLE
+    dumpCycle(pb);
 #else
     // Handle the bus traffic
     br = brk.isBrk(pb->addr);
     if( br == BRK_START )
-      bTrace |= TRACE_BRK;
+      START_TRACE();
     handle_bus(pb);
     if( br == BRK_END )
-      bTrace &= ~TRACE_BRK;
+      END_TRACE();
 #endif
     // Any handling outside bus traceing
     // Note that instructions can be missed if the buffer is overflowed!
     // Better handle these cases here ...
     post_handling(pb->addr);
 
-    INC_BUS_PTR(data_rd);
     // Point at next element ...
-    pb = &bus[data_rd];
+    INC_BUS_PTR(data_rd);
 
     if( disp41.needRendering() ) {
       // Render only if buffer is not too full ...
@@ -775,22 +780,18 @@ void dump_dregs(void)
 
   // Build a text form of the display
   int j = 0;
+  char cc = 0;
+  char cl = 0;
 
   for (int i = 0; i < NR_CHARS; i++) {
-    char cc = 0;
-    char cl = 0;
-    int u = 0;
 
     int b = ((NR_CHARS - 1) - i) << 2;
 
-    cc = (dreg_a >> b) & 0x0F;
-    cc |= ((dreg_b >> b) & 0x0F) << 4;
-    u = (dreg_c >> b) & 1;
+    cc =   (dreg_a >> b) & 0x0F;
+    cc |= ((dreg_b >> b) & 0x03) << 4;
+    cl =  ((dreg_b >> b) & 0x0C) >> 2;
 
-    cl = (cc & 0xc0) >> 6;
-    cc &= 0x3f;
-
-    if (u) {
+    if ((dreg_c >> b) & 1) {
       // Upper ROM character
       cc |= 0x80;
     } else {
@@ -809,7 +810,7 @@ void dump_dregs(void)
     }
   }
 
-  dtext[j++] = '\0';
+  dtext[j] = '\0';
 
 #if CF_DISPLAY_LCD
   UpdateLCD(dtext, bPunct, display_on);
@@ -835,17 +836,16 @@ void updateDispReg(uint64_t data, uint8_t r)
   } else {
     int n = (inst->shft & D_LONG) ? 48 / inst->len : 1;
     for (int i = 0; i < n; i++) {
-      uint16_t ch9 = CH9(data);
       if (inst->shft & SHIFT_R) {
         // Shift RIGHT
-        if (ra) *ra = (*ra >> 4) | (((uint64_t)CH9_B03(ch9)) << 44);
-        if (rb) *rb = (*rb >> 4) | (((uint64_t)CH9_B47(ch9)) << 44);
-        if (rc) *rc = (*rc >> 4) | (((uint64_t)CH9_B8(ch9)) << 44);
+        if (ra) *ra = (*ra >> 4) | (((uint64_t)CH9_B03(data)) << 44);
+        if (rb) *rb = (*rb >> 4) | (((uint64_t)CH9_B47(data)) << 44);
+        if (rc) *rc = (*rc >> 4) | (((uint64_t)CH9_B8(data)) << 44);
       } else {
         // Shift LEFT
-        if (ra) *ra = (*ra << 4) | (CH9_B03(ch9));
-        if (rb) *rb = (*rb << 4) | (CH9_B47(ch9));
-        if (rc) *rc = (*rc << 4) | (CH9_B8(ch9));
+        if (ra) *ra = (*ra << 4) | (CH9_B03(data));
+        if (rb) *rb = (*rb << 4) | (CH9_B47(data));
+        if (rc) *rc = (*rc << 4) | (CH9_B8(data));
       }
       data >>= inst->len; // shift 8 or 12 bits ...
     }

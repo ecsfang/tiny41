@@ -208,23 +208,24 @@ void serial_loop(void)
         int x = getHexKey(key);
         if( x >= 0 && x <= 0xF ) {
           CModule *m = modules[x];
-          if( m->isLoaded() ) {
-            if( bQram ) {
-              m->toggleRam();
-              printf("\rModule in page #%X marked as %s     \n",
-                x, m->isRam() ? "QRAM" : "ROM");
-              bQram = false;
+          if( bQram || bPlug ) {
+            if( m->isLoaded() ) {
+              if( bQram ) {
+                m->toggleRam();
+                printf("\rModule in page #%X marked as %s     \n",
+                  x, m->isRam() ? "QRAM" : "ROM");
+                bQram = false;
+              }
+              if( bPlug ) {
+                m->togglePlug();
+                printf("\rModule in page #%X %s           \n",
+                  x, m->isInserted() ? "inserted":"removed");
+                bPlug = false;
+              }
+            } else {
+              printf("\rNo image at page #%X!!               \n", x);
             }
-            if( bPlug ) {
-              m->togglePlug();
-              printf("\rModule in page #%X %s           \n",
-                x, m->isInserted() ? "inserted":"removed");
-              bPlug = false;
-            }
-          } else {
-            printf("\rNo image at page #%X!!               \n", x);
-          }
-          if( nBrk ) {
+          } else if( nBrk ) {
             sBrk <<= 4;
             sBrk |= x;
             nBrk++;

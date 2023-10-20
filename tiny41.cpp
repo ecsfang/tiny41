@@ -139,13 +139,25 @@ int main()
     bRend = 0;
 #endif
 
-    // Remove some loops from trace ...
-    //  - add a stop at last address in loop
-    //  - add a start at first address after loop
-
+// Remove some loops from trace ...
+//  - add a stop at last address in loop
+//  - add a start at first address after loop
 #define IGNORE_LOOP(a) do {         \
                         brk.stopBrk(a); \
                         brk.setBrk(a+1);\
+                       } while (0)
+
+// Ignore loop with conditional exit from loop
+#define IGNORE_LOOP_COND(a,c) do {         \
+                        brk.stopBrk(a); \
+                        brk.setBrk(a+1);\
+                        brk.setBrk(c);\
+                       } while (0)
+
+// Ignore function with loop
+#define IGNORE_FUNC(a,c) do {         \
+                        brk.stopBrk(a); \
+                        brk.setBrk(c);\
                        } while (0)
 
     // Reset keyboard (RST10)
@@ -153,17 +165,15 @@ int main()
     // Ignore key at DISOFF
     IGNORE_LOOP(0x089D);
     // Ignore key at ...
-    IGNORE_LOOP(0x0E9E);
-    brk.setBrk(0x0EA3);
+    IGNORE_LOOP_COND(0x0BB2, 0x0BA2);
     // Ignore key at ...
-    IGNORE_LOOP(0x0ECE);
-    brk.setBrk(0x009B);
+    IGNORE_LOOP_COND(0x0E9E, 0x0EA3);
+    // Ignore key at ...
+    IGNORE_LOOP_COND(0x0ECE, 0x009B);
     // Ignore key in Zenrom ...
-    IGNORE_LOOP(0xA20B);
-    brk.setBrk(0xA210);
+    IGNORE_LOOP_COND(0xA20B, 0xA210);
     // Ignore key in Zenrom ...
-    IGNORE_LOOP(0xA8F0);
-    brk.setBrk(0xA8F8);
+    IGNORE_LOOP_COND(0xA8F0, 0xA8F8);
     // Ignore key
     IGNORE_LOOP(0x009A);
     // FOR DEBOUNCE (DRSY30)
@@ -172,10 +182,8 @@ int main()
     IGNORE_LOOP(0xF3D4);
     // Tone in Wand
     IGNORE_LOOP(0xF3E0);
-
     // Ignore MEMLFT routine (calculate free memory)
-    brk.stopBrk(0x05A1);
-    brk.setBrk(0x05B6);
+    IGNORE_FUNC(0x05A1, 0x05B6);
 
     bool bErr = false;
     while (1)
