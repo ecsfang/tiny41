@@ -920,7 +920,7 @@ void printPeripheral(void)
 // Handle bus-trace ...
 void handle_bus(volatile Bus_t *pBus)
 {
-  static int oCnt = 0xFF;
+  static int oCnt = -1;
   static int pending_data_inst = 0;
   static int oAddr = ADDR_MASK;
 
@@ -940,10 +940,13 @@ void handle_bus(volatile Bus_t *pBus)
 
 #ifdef MEASURE_COUNT
   if( IS_TRACE() ) {
-    if( (++oCnt & 0xFF) != cnt ) {
+    if( oCnt == -1)
+      oCnt = cnt-1;
+    if( ++oCnt != cnt ) {
       nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED TRACE CYCLES #########################\n");
       oCnt = cnt;
     }
+    oCnt &= 0xFF;
   }
 #endif
 

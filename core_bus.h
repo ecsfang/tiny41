@@ -11,13 +11,13 @@
 #define MASK_64_BIT    (0xFFFFFFFFFFFFFFFFL)
 #define MASK_56_BIT    (0x00FFFFFFFFFFFFFFL)
 #define MASK_48_BIT    (0x0000FFFFFFFFFFFFL)
-#define REG_C_48_MASK  (0x111111111111L)
+#define REG_C_48_MASK  (0x0000111111111111L)
 
 #define PA_MASK        (~MASK_56_BIT)
 #define PA_SHIFT       56
 
 #define ROTATE_RIGHT(V) {uint64_t t = (V & 0xF); V >>= 4; V |= t<<44;}
-#define  ROTATE_LEFT(V) {uint64_t t = (V & (0xFLL << 44)); V <<= 4; V |= t>>44;}
+#define  ROTATE_LEFT(V) {uint64_t t = (V>>44) & 0xF; V <<= 4; V |= t;}
 
 // #define EMBED_RAM
 #define RAM_SIZE    0x1000

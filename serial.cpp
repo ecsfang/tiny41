@@ -14,8 +14,6 @@
 #include "core_bus.h"
 
 int pcount = 0;
-int periodic_read = 0;
-
 extern CModules modules;
 extern CBreakpoint brk;
 
@@ -87,6 +85,15 @@ static uint16_t nBrk = 0;
 
 BrkMode_e brk_mode = BRK_NONE;
 
+typedef enum {
+  ST_NONE,
+  ST_QRAM,
+  ST_PLUG,
+  ST_BRK
+} State_e;
+
+State_e state = ST_NONE;
+
 static void sbrkpt(BrkMode_e b)
 {
   brk_mode = b;
@@ -98,6 +105,7 @@ static void sbrkpt(BrkMode_e b)
   printf(" breakpoint: ----\b\b\b\b");
   sBrk = 0;
   nBrk = 1;
+  state = ST_BRK; // Expect 4 nibble addres
 }
 void set_brk(void)
 {
@@ -112,18 +120,16 @@ void clr_brk(void)
   sbrkpt(BRK_CLR);
 }
 
-bool bQram = false;
 void sel_qram(void)
 {
   printf("\nSelect QRAM page: -\b");
-  bQram = true;
+  state = ST_QRAM;  // Expect port address
 }
 
-bool bPlug = false;
 void plug_unplug(void)
 {
   printf("\nSelect page to plug or unplug: -\b");
-  bPlug = true;
+  state = ST_PLUG;  // Expect port address
 }
 
 void listBreakpoints(void)
@@ -176,56 +182,48 @@ int getHexKey(int ky)
     x = ky - ('a'-0xa);
   else if( ky >= 'A' && ky <= 'F' )
     x = ky - ('A'-0xa);
-  return x;
+  return x; // Value of hex or -1
 }
 
 
 void serial_loop(void)
 {
-  int key;
-  int periodic_key = 0;
+  int key = getchar_timeout_us(1000);
 
-  if (periodic_read)
-    pcount++;
-
-  if (pcount >= 500) {
-    periodic_key = '0';
-    pcount = 0;
-  }
-
-  if (((key = getchar_timeout_us(1000)) != PICO_ERROR_TIMEOUT) || (periodic_key != 0)) {
-    if (periodic_key != 0) {
-      key = periodic_key;
-      periodic_key = 0;
-    }
-    if( nBrk || bQram || bPlug ) {
-      // Input of hex-digit ... ?
+  if( key != PICO_ERROR_TIMEOUT ) {
+    if( state != ST_NONE ) {
+      // Assume input of some kind.
       if( key == 0x1b ) { // ESC - abort any key sequence ...
-        bQram = bPlug = false;
+        state = ST_NONE;
         nBrk = sBrk = 0;
-        printf("\nAbort ...\n");
+        printf("\nAbort!\n");
       } else {
+        // Input of hex-digit ... ?
         int x = getHexKey(key);
-        if( x >= 0 && x <= 0xF ) {
+        if( x >= 0 ) {
           CModule *m = modules[x];
-          if( bQram || bPlug ) {
+          switch( state ) {
+          case ST_QRAM:
             if( m->isLoaded() ) {
-              if( bQram ) {
-                m->toggleRam();
-                printf("\rModule in page #%X marked as %s     \n",
-                  x, m->isRam() ? "QRAM" : "ROM");
-                bQram = false;
-              }
-              if( bPlug ) {
-                m->togglePlug();
-                printf("\rModule in page #%X %s           \n",
-                  x, m->isInserted() ? "inserted":"removed");
-                bPlug = false;
-              }
+              m->toggleRam();
+              printf("\rModule in page #%X marked as %s", x, m->isRam() ? "QRAM" : "ROM");
             } else {
-              printf("\rNo image at page #%X!!               \n", x);
+              printf("\rNo image at page #%X!!", x);
             }
-          } else if( nBrk ) {
+            printf("              \n");  // Clean previous content on page ...
+            state = ST_NONE;
+            break;
+          case ST_PLUG:
+            if( m->isLoaded() ) {
+              m->togglePlug();
+              printf("\rModule in page #%X %s", x, m->isInserted() ? "inserted":"removed");
+            } else {
+              printf("\rNo image at page #%X!!", x);
+            }
+            printf("              \n");  // Clean previous content on page ...
+            state = ST_NONE;
+            break;
+          case ST_BRK:
             sBrk <<= 4;
             sBrk |= x;
             nBrk++;
@@ -247,6 +245,7 @@ void serial_loop(void)
               }
               brk_mode = BRK_NONE;
               sBrk = nBrk = 0;
+              state = ST_NONE;
             }
           }
         }
@@ -267,6 +266,6 @@ void serial_loop(void)
     // So, if we get a timeout we send a space and backspace it. And
     // flush the stdio, but that didn't fix the problem but seems like a good idea.
     stdio_flush();
-    printf(" \b");
+//    printf(" \b");
   }
 }
