@@ -245,6 +245,7 @@ void read8Port(int n, uint8_t *data)
 
 // Allocate memory for all flash images ...
 static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
+static uint16_t bank_page[PAGE_SIZE];
 
 // Make space for information about all flash images
 CModules modules;
@@ -283,6 +284,40 @@ void qRam(int page)
   }
 }
 
+void loadPage(int page, uint16_t *img, int bank = 0)
+{
+  // Read flash image
+  readPort(page+bank?NR_PAGES:0, img);
+  int nErr = 0; // Nr of errors
+  int nClr = 0; // Nr of erased words
+  // Check that image is valid (10 bits)
+  for(int i=0; i<PAGE_SIZE; i++) {
+    if( img[i] > INST_MASK ) {
+      nErr++;
+      if( img[i] == ADDR_MASK )
+        nClr++;
+    }
+  }
+#if 1
+  // Verify loaded code
+  if( nClr == PAGE_SIZE ) {
+    printf("%04X -> Image is cleared!", page*PAGE_SIZE);
+  } else {
+    if( nErr ) printf("%d errors in image 0x%X!\n", nErr, page);
+    printf("%04X ->", page*PAGE_SIZE);
+    for(int i=0; i<8; i++)
+      printf(" %03X", img[0x000+i]);
+    printf(" ...", page*PAGE_SIZE+0xFF0);
+    for(int i=0; i<8; i++)
+      printf(" %03X", img[0xff8+i]);
+  }
+  printf("\n");
+#endif
+  if( !nErr ) {
+    modules.add(page, img, bank);
+  }
+}
+
 void initRoms()
 {
 #ifdef USE_FLASH
@@ -312,40 +347,13 @@ void initRoms()
   // Check for existing images and load them ...
   for (int port = FIRST_PAGE; port <= LAST_PAGE; port++) {
     int pIdx = port - FIRST_PAGE;
-    // Read flash image
-    readPort(port, rom_pages[pIdx]);
-		int nErr = 0; // Nr of errors
-		int nClr = 0; // Nr of erased words
-    // Check that image is valid (10 bits)
-		for(int i=0; i<PAGE_SIZE; i++) {
-			if( rom_pages[pIdx][i] > INST_MASK ) {
-				nErr++;
-        if( rom_pages[pIdx][i] == ADDR_MASK )
-          nClr++;
-      }
-    }
-#if 1
-    // Verify loaded code
-    if( nClr == PAGE_SIZE ) {
-      printf("%04X -> Image is cleared!", port*PAGE_SIZE);
-    } else {
-      if( nErr ) printf("%d errors in image 0x%X!\n", nErr, port);
-      printf("%04X ->", port*PAGE_SIZE);
-      for(int i=0; i<8; i++)
-        printf(" %03X", rom_pages[pIdx][0x000+i]);
-      printf(" ...", port*PAGE_SIZE+0xFF0);
-      for(int i=0; i<8; i++)
-        printf(" %03X", rom_pages[pIdx][0xff8+i]);
-    }
-    printf("\n");
-#endif
-    if( !nErr ) {
-      modules.add(port, rom_pages[pIdx]);
-    }
+    loadPage(port, rom_pages[pIdx]);
   }
 #ifdef WAND_EMU
     read8Port(NR_PAGES, wand_page);
 #endif
+  // Load second bank of printer-ROM (if available)
+  loadPage(6, bank_page, 1);
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
 }
@@ -614,6 +622,14 @@ void core1_main_3(void)
         case INST_PRPH_SLCT:
           // Fetch selected peripheral from DATA in the next run ...
           bSelPa = true;
+          break;
+        case INST_ENBANK1:
+          if( bIsSync )
+            mp->bank(0);
+          break;
+        case INST_ENBANK2:
+          if( bIsSync )
+            mp->bank(1);
           break;
 #ifdef DRIVE_CARRY
         case INST_WANDRD:

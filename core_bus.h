@@ -68,7 +68,7 @@ typedef struct {
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T 0x1000
+#define NUM_BUS_T (0x1000/2)
 #endif
 
 enum {
@@ -79,12 +79,26 @@ enum {
 };
 
 class CModule {
-  uint16_t *m_img;
-  uint16_t m_flgs;
+  uint16_t  *m_banks[2];
+  uint16_t  *m_img;
+  uint16_t  m_flgs;
+  int       m_bank;
 public:
-  void set(uint16_t *image) {
-    m_img = image;
+  CModule() {
+    m_img = NULL;
+    m_bank = 0;
+  }
+  void set(uint16_t *image, int bank = 0) {
+    m_banks[bank] = image;
+    m_img = m_banks[0];
     m_flgs = IMG_INSERTED;
+  }
+  void bank(int bank) {
+    if(m_banks[bank])
+      m_img = m_banks[bank];
+  }
+  bool haveBank(void) {
+    return m_banks[1] ? true : false;
   }
   void clr(void) {
     m_img = NULL;
@@ -141,10 +155,10 @@ public:
   CModules() {
     clearAll();
   }
-  void add(int port, uint16_t *image) {
+  void add(int port, uint16_t *image, int bank) {
 	  if( image ) {
-      m_modules[port].set(image);
-      printf("Add ROM @ %04X - %04X\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK);
+      m_modules[port].set(image, bank);
+      printf("Add ROM @ %04X - %04X [bank %d]\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK, bank);
   	} 
   }
   void clearAll() {

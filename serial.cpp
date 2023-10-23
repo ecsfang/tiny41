@@ -52,7 +52,7 @@ void list_modules(void)
 
   printf("\nLoaded modules\n");
   BAR();
-  printf("| Page | Port | XROM | RAM |\n");
+  printf("| Page | Port | XROM | RAM | Bank\n");
   BAR();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
     printf("|  #%X  | ", i);
@@ -70,6 +70,10 @@ void list_modules(void)
     } else {
       printf(" --  |     |");
     }
+    if( modules.at(i)->haveBank() )
+      printf(" | Yes");
+    else
+      printf(" |");
     printf("\n");
   }
   BAR();
