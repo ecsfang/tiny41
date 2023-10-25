@@ -255,16 +255,28 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 		// Execute specific peripheral instruction
 		switch( selPer ) {
 			case PER_PRT:	// Printer
-				switch( inst ) {
-				case 0x003: pDis = sprintf(disBuf, "BUSY?"); break;
-				case 0x005: pDis = sprintf(disBuf, "RTNCPU"); break;
-				case 0x007: pDis = sprintf(disBuf, "BUF=BUF+C"); break;
-				case 0x03A: pDis = sprintf(disBuf, "C=STATUS"); break;
-				case 0x043: pDis = sprintf(disBuf, "POWON?"); break;
-				case 0x083: pDis = sprintf(disBuf, "ERROR?"); break;
-				default:
-					if( inst & 0x3F == 0x03 )
-						pDis = disMod("?PFSET %X", mod);
+				if( inst == 0x005 ) {
+					pDis = sprintf(disBuf, "RTNCPU"); break;
+				} else {
+					int r = (inst >> 6) & 0x0F;
+            		int cmd = (inst >> 1) & 0x3;
+
+					switch(cmd) {
+					case 0b00:  // Write ...
+						pDis = sprintf(disBuf, "WRITE (%d)", r);
+						break;
+					case 0b01:  // Read ...
+						pDis = sprintf(disBuf, "READ (%d)", r);
+						break;
+					case 0b10:
+						pDis = sprintf(disBuf, "FUNC0 (%d)", r);
+						break;
+					case 0b11:  // ???
+						pDis = sprintf(disBuf, "FUNC1 (%d)", r);
+						break;
+					}
+					if( inst & 1 )
+						pDis = sprintf(disBuf, " RTN");
 				}
 				break;
 			default:

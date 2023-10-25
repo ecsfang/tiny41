@@ -42,6 +42,7 @@
 
 #define INST_PRPH_SLCT                 01760 // CPFAD
 #define INST_RAM_SLCT                  01160 // CDADD
+#define INST_SEL_PRT                   01144 // Select printer
 #define INST_POWOFF                    00140
 
 #define INST_FLLDA                     00070

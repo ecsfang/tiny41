@@ -287,7 +287,7 @@ void qRam(int page)
 void loadPage(int page, uint16_t *img, int bank = 0)
 {
   // Read flash image
-  readPort(page+bank?NR_PAGES:0, img);
+  readPort(page+(bank?NR_PAGES:0), img);
   int nErr = 0; // Nr of errors
   int nClr = 0; // Nr of erased words
   // Check that image is valid (10 bits)
@@ -315,6 +315,7 @@ void loadPage(int page, uint16_t *img, int bank = 0)
 #endif
   if( !nErr ) {
     modules.add(page, img, bank);
+    printf("HaveBank: %d\n", modules[page]->haveBank());
   }
 }
 
@@ -429,6 +430,8 @@ void reset_bus_buffer(void)
   }
 }
 
+static uint64_t blinky[16];
+
 void core1_main_3(void)
 {
   static int bIsaEn = 0;
@@ -452,6 +455,7 @@ void core1_main_3(void)
   static bool bSelRam = false;
   static bool bErr = false;
   static uint8_t cnt = 0;
+  bool bPrt = false;
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -612,6 +616,26 @@ void core1_main_3(void)
         pBus->isa = isa;
 #endif
 
+        if( bPrt ) {
+            int r = (pBus->cmd >> 6) & 0x0F;
+            int cmd = (pBus->cmd >> 1) & 0x3;
+            switch(cmd) {
+              case 0b00:  // Write ...
+                blinky[r] = pBus->data;
+                break;
+              case 0b01:  // Read ...
+                // Enable data driver ...
+                output_data = bDataEn = 1;
+                // Get next byte from the wand-buffer!
+                data56_out = blinky[r];
+                break;
+              case 0b10:
+              case 0b11:  // ???
+                break;
+            }
+            if( pBus->cmd & 1)
+              bPrt = false;
+        } else {
         switch( pBus->cmd ) {
         case INST_RAM_SLCT:
           // Fetch selected RAM in the next run ...
@@ -622,6 +646,9 @@ void core1_main_3(void)
         case INST_PRPH_SLCT:
           // Fetch selected peripheral from DATA in the next run ...
           bSelPa = true;
+          break;
+        case INST_SEL_PRT:
+          bPrt = true;
           break;
         case INST_ENBANK1:
           if( bIsSync )
@@ -645,6 +672,7 @@ void core1_main_3(void)
           }
           break;
 #endif
+        }
         }
 #ifdef MEASURE_TIME
         {

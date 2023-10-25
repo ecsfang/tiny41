@@ -83,10 +83,12 @@ class CModule {
   uint16_t  *m_img;
   uint16_t  m_flgs;
   int       m_bank;
+  int       m_port;
 public:
   CModule() {
     m_img = NULL;
     m_bank = 0;
+    m_port = 0;
   }
   void set(uint16_t *image, int bank = 0) {
     m_banks[bank] = image;
@@ -96,6 +98,9 @@ public:
   void bank(int bank) {
     if(m_banks[bank])
       m_img = m_banks[bank];
+  }
+  void port(int p) {
+    m_port = p;
   }
   bool haveBank(void) {
     return m_banks[1] ? true : false;
@@ -163,6 +168,8 @@ public:
   }
   void clearAll() {
     memset(m_modules, 0, sizeof(CModule) * NR_PAGES);
+    for(int p=0; p<NR_PAGES; p++)
+      m_modules[p].port(p);
   }
   void remove(int port) {
     m_modules[port].clr();

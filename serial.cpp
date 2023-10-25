@@ -44,7 +44,7 @@ void toggle_disasm(void)
   bTrace ^= TRACE_DISASM;
   printf("Turn disassemble %s\n", IS_DISASM() ? "on":"off");
 }
-#define BAR() printf("+------+------+------+-----+\n")
+#define BAR() printf("+------+------+------+-----+-----+\n")
 
 void list_modules(void)
 {
@@ -52,7 +52,7 @@ void list_modules(void)
 
   printf("\nLoaded modules\n");
   BAR();
-  printf("| Page | Port | XROM | RAM | Bank\n");
+  printf("| Page | Port | XROM | RAM | Bank|\n");
   BAR();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
     printf("|  #%X  | ", i);
@@ -63,18 +63,11 @@ void list_modules(void)
 
     if( modules.isInserted(i) ) {
       printf(" %02X  | ", (*modules[i])[0]);
-      if( modules.isRam(i) )
-        printf("yes |");
-      else
-        printf("    |");
+      printf("%3.3s |", modules.isRam(i) ? "Yes" : "" );
     } else {
       printf(" --  |     |");
     }
-    if( modules.at(i)->haveBank() )
-      printf(" | Yes");
-    else
-      printf(" |");
-    printf("\n");
+    printf(" %3.3s |\n", modules[i]->haveBank() ? "Yes" : "" );
   }
   BAR();
 }
