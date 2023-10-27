@@ -276,7 +276,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 						break;
 					}
 					if( inst & 1 )
-						pDis = sprintf(disBuf, " RTN");
+						pDis = sprintf(disBuf+pDis, " RTN");
 				}
 				break;
 			default:

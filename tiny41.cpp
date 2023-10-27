@@ -185,6 +185,11 @@ int main()
     // Ignore MEMLFT routine (calculate free memory)
     IGNORE_FUNC(0x05A1, 0x05B6);
 
+    // Ignore loop in Blinky ...
+    IGNORE_LOOP_COND(0x6F42, 0x66CA);
+    // Waiting for carry in Blinky
+    IGNORE_LOOP(0x6F27);
+
     bool bErr = false;
     while (1)
     {
