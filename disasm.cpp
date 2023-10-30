@@ -264,6 +264,9 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 					switch(cmd) {
 					case 0b00:  // Write ...
 						pDis = sprintf(disBuf, "WRITE (%d)", r);
+						if( r == 11 ) {
+							// Add C X to print buffer!
+						}
 						break;
 					case 0b01:  // Read ...
 						pDis = sprintf(disBuf, "READ (%d)", r);

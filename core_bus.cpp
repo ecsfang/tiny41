@@ -762,6 +762,7 @@ void dumpCycle(Bus_t *p)
   printf("\nAddr: %04X Inst: %03X\n", s->addr, s->inst);
 }
 #endif
+unsigned int skipClk = 0;
 
 void process_bus(void)
 {
@@ -783,8 +784,12 @@ void process_bus(void)
     if( br == BRK_START )
       START_TRACE();
     handle_bus(pb);
-    if( br == BRK_END )
+    skipClk++;
+    if( br == BRK_END ) {
+      if( IS_TRACE() )
+        skipClk = 0;
       END_TRACE();
+    }
 #endif
     // Any handling outside bus traceing
     // Note that instructions can be missed if the buffer is overflowed!
@@ -986,11 +991,11 @@ void handle_bus(volatile Bus_t *pBus)
   if( IS_TRACE() ) {
     if( oCnt == -1)
       oCnt = cnt-1;
-    if( ++oCnt != cnt ) {
-      nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED TRACE CYCLES #########################\n");
+    oCnt = ++oCnt & 0xFF;
+    if( oCnt != cnt ) {
+      nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED %d TRACE CYCLES #########################\n", skipClk);
       oCnt = cnt;
     }
-    oCnt &= 0xFF;
   }
 #endif
 
