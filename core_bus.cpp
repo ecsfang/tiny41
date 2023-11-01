@@ -456,6 +456,8 @@ void core1_main_3(void)
   static bool bErr = false;
   static uint8_t cnt = 0;
   bool bPrt = false;
+  static int nAlm = 0;
+  static int outB = 0;
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -589,6 +591,11 @@ void core1_main_3(void)
       } else {
         clrFI(FI_WNDB);
       }
+      if( nAlm ) {
+        nAlm--;
+        if( !nAlm )
+          setFI(FI_ALM);
+      }
       break;
     case LAST_CYCLE-1:
       // Report next FI signal to trace ...
@@ -622,14 +629,57 @@ void core1_main_3(void)
             switch(cmd) {
               case 0b00:  // Write ...
                 blinky[r] = pBus->data;
+                
+                switch(r) {
+                case 10:  // 2B9 - 1010 111 00 1 r = 10
+                  // Writing 0x01 results in clearing of FI[12]
+                  if( pBus->data & 0x01 ) {
+                    clrFI(FI_TFAIL);
+                    clrFI(FI_ALM);
+                    nAlm = 69;  // Set flag after some cycles
+                  }
+                  break;
+                case 11:  // 2F9 - 1011 111 00 1 r = 11
+                  // Write to out buffer - set buffer flag
+                  if( outB )
+                    setFI(FI_TFAIL);
+                  outB++;
+                  break;
+                }
                 break;
               case 0b01:  // Read ...
                 // Enable data driver ...
                 output_data = bDataEn = 1;
                 // Get next byte from the wand-buffer!
-                data56_out = blinky[r];
+                if( r == 10 )
+                  data56_out = blinky[10] - outB;
+                else
+                  data56_out = blinky[r];
                 break;
-              case 0b10:
+              case 0b10:  // Func ...
+                switch( r ) {
+                case 2: // 0BC 0010 111 10 0 r = 2
+                case 4: // 13C 0100 111 10 0 r = 4
+                  // This result in that r[14] == 0b11.1....
+                  blinky[14] = 0b11010000;
+                  break;
+                case 3: // 0FC 0011 111 10 0 r = 3
+                case 5: // 17C 0101 111 10 0 r = 5
+                  // This result in that r[14] == 0b10.0....
+                  blinky[14] = 0b10000000;
+                  break;
+                case 7: // 1FC 0111 111 10 0 r = 7
+                  // Reset
+                  blinky[14] = 0L;
+                  clrFI(FI_TFAIL);
+                  break;
+                case 8: // 23D 1000 111 10 1 r = 8
+                  // Reset
+                  clrFI(FI_TFAIL);
+                  clrFI(FI_ALM);
+                  outB = 0;
+                  break;
+                }
               case 0b11:  // ???
                 break;
             }
