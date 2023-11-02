@@ -431,6 +431,7 @@ void reset_bus_buffer(void)
 }
 
 static uint64_t blinky[16];
+static uint64_t blinkyRAM[16];
 
 void core1_main_3(void)
 {
@@ -458,6 +459,7 @@ void core1_main_3(void)
   bool bPrt = false;
   static int nAlm = 0;
   static int outB = 0;
+  static int outBSize = 0x7F;
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -632,12 +634,14 @@ void core1_main_3(void)
                 
                 switch(r) {
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
-                  // Writing 0x01 results in clearing of FI[12]
-                  if( pBus->data & 0x01 ) {
-                    clrFI(FI_TFAIL);
-                    clrFI(FI_ALM);
-                    nAlm = 69;  // Set flag after some cycles
-                  }
+                  outBSize = pBus->data & 0xFFF;
+                  if( outBSize > 0x7F )
+                    outBSize = 0x7F;
+                  blinky[r] = (pBus->data & ~0xFFF) | outBSize;
+                  // Writing results in clearing of FI[12]
+                  clrFI(FI_TFAIL);
+                  clrFI(FI_ALM);
+                  nAlm = 69;  // Set flag after some cycles
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
                   // Write to out buffer - set buffer flag
@@ -650,9 +654,8 @@ void core1_main_3(void)
               case 0b01:  // Read ...
                 // Enable data driver ...
                 output_data = bDataEn = 1;
-                // Get next byte from the wand-buffer!
                 if( r == 10 )
-                  data56_out = blinky[10] - outB;
+                  data56_out = blinky[10]; // - outB;
                 else
                   data56_out = blinky[r];
                 break;
@@ -722,6 +725,21 @@ void core1_main_3(void)
           }
           break;
 #endif
+        default:
+          if( (ramad & 0xFF0 == 0x020) ) {
+            int r = (pBus->cmd >> 6) & 0x0F;
+            switch( pBus->cmd & 0x3F ) {
+            case 0x38:
+              // READ
+              output_data = bDataEn = 1;
+              data56_out = blinky[r];
+              break;
+            case 0x28:
+              // WRITE
+              blinky[r] = pBus->data;
+              break;
+            }
+          }
         }
         }
 #ifdef MEASURE_TIME

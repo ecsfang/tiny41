@@ -189,6 +189,8 @@ int main()
     IGNORE_LOOP_COND(0x6F42, 0x66CA);
     // Waiting for carry in Blinky
     IGNORE_LOOP(0x6F27);
+    // Ignore checksum loop in Blinky
+    IGNORE_LOOP(0x657D);
 
     bool bErr = false;
     while (1)
