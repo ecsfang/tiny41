@@ -431,7 +431,6 @@ void reset_bus_buffer(void)
 }
 
 static uint64_t blinky[16];
-static uint64_t blinkyRAM[16];
 
 void core1_main_3(void)
 {
@@ -455,7 +454,7 @@ void core1_main_3(void)
   static bool bSelPa = false;
   static bool bSelRam = false;
   static bool bErr = false;
-  static uint8_t cnt = 0;
+  static uint16_t iCnt = 0;
   bool bPrt = false;
   static int nAlm = 0;
   static int outB = 0;
@@ -726,7 +725,7 @@ void core1_main_3(void)
           break;
 #endif
         default:
-          if( (ramad & 0xFF0 == 0x020) ) {
+          if( (ramad & 0xF0) == 0x20 ) {
             int r = (pBus->cmd >> 6) & 0x0F;
             switch( pBus->cmd & 0x3F ) {
             case 0x38:
@@ -757,7 +756,7 @@ void core1_main_3(void)
 #endif
 #ifdef MEASURE_COUNT
         // Report FI-status to trace ...
-        pBus->fi |= cnt++ << 8;
+        pBus->fi |= iCnt++ << 16;
 #endif
         // Report selected peripheral to trace ...
         //pBus->pa = perph;
@@ -1044,8 +1043,8 @@ void handle_bus(volatile Bus_t *pBus)
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
   int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
-  int fi = pBus->fi;
-  int cnt = (pBus->fi>>8) & 0xFF;
+  int fi = pBus->fi & 0xFFFF;
+  int cnt = (pBus->fi>>16) & 0xFFFF;
   uint64_t data56 = pBus->data & MASK_56_BIT;
 #ifdef TRACE_ISA
   uint64_t isa = pBus->isa;
@@ -1059,7 +1058,7 @@ void handle_bus(volatile Bus_t *pBus)
   if( IS_TRACE() ) {
     if( oCnt == -1)
       oCnt = cnt-1;
-    oCnt = ++oCnt & 0xFF;
+    oCnt = ++oCnt & 0xFFFF;
     if( oCnt != cnt ) {
       nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED %d TRACE CYCLES #########################\n", skipClk);
       oCnt = cnt;
@@ -1112,12 +1111,12 @@ void handle_bus(volatile Bus_t *pBus)
 #if 1
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X|%014llX %c %04X (Q%2d:%03X) %03X",
-            fi, data56, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c %04X (Q%2d:%03X) %03X",
+            cnt, fi, data56, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X|%014llX %c %04X           %03X",
-            fi, data56, sync ? '*':' ', addr, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c %04X           %03X",
+            cnt, fi, data56, sync ? '*':' ', addr, inst);
   }
 #else
   if( PAGE(addr) < 3 ) {

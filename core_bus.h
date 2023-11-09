@@ -61,7 +61,7 @@ typedef struct {
 #endif
   uint16_t  addr;
   uint16_t  cmd;
-  uint16_t  fi;
+  uint32_t  fi;
 } __attribute__((packed)) Bus_t;
 
 // Size of trace buffer should be a power of 2 (for the mask)
