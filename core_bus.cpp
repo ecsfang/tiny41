@@ -431,6 +431,7 @@ void reset_bus_buffer(void)
 }
 
 static uint64_t blinky[16];
+static volatile uint64_t blinkyRAM[16];
 
 void core1_main_3(void)
 {
@@ -459,6 +460,7 @@ void core1_main_3(void)
   static int nAlm = 0;
   static int outB = 0;
   static int outBSize = 0x7F;
+  static int bwr = 0;
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -600,7 +602,8 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-1:
       // Report next FI signal to trace ...
-      pBus->fi = getFI();
+      //pBus->fi = getFI();
+      pBus->fi = ramad;
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
       // Turn off MLDL-led ...
@@ -624,13 +627,19 @@ void core1_main_3(void)
         pBus->isa = isa;
 #endif
 
+        if( bwr ) {
+          bwr--;
+          blinkyRAM[bwr] = pBus->data;
+          bwr = 0;
+        }
+
         if( bPrt ) {
             int r = (pBus->cmd >> 6) & 0x0F;
             int cmd = (pBus->cmd >> 1) & 0x3;
             switch(cmd) {
               case 0b00:  // Write ...
                 blinky[r] = pBus->data;
-                
+//               bwr = r+1;
                 switch(r) {
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
                   outBSize = pBus->data & 0xFFF;
@@ -664,6 +673,7 @@ void core1_main_3(void)
                 case 4: // 13C 0100 111 10 0 r = 4
                   // This result in that r[14] == 0b11.1....
                   blinky[14] = 0b11010000;
+                  blinky[0] |= 0x10000000000000LL;
                   break;
                 case 3: // 0FC 0011 111 10 0 r = 3
                 case 5: // 17C 0101 111 10 0 r = 5
@@ -688,58 +698,73 @@ void core1_main_3(void)
             if( pBus->cmd & 1)
               bPrt = false;
         } else {
-        switch( pBus->cmd ) {
-        case INST_RAM_SLCT:
-          // Fetch selected RAM in the next run ...
-          bSelRam = true;
-          // ... and reset any chip previously enabled ...
-          perph = 0;
-          break;
-        case INST_PRPH_SLCT:
-          // Fetch selected peripheral from DATA in the next run ...
-          bSelPa = true;
-          break;
-        case INST_SEL_PRT:
-          bPrt = true;
-          break;
-        case INST_ENBANK1:
-          if( bIsSync )
-            mp->bank(0);
-          break;
-        case INST_ENBANK2:
-          if( bIsSync )
-            mp->bank(1);
-          break;
+          switch( pBus->cmd ) {
+          case INST_RAM_SLCT:
+            // Fetch selected RAM in the next run ...
+            bSelRam = true;
+            // ... and reset any chip previously enabled ...
+            perph = 0;
+            break;
+          case INST_PRPH_SLCT:
+            // Fetch selected peripheral from DATA in the next run ...
+            bSelPa = true;
+            break;
+          case INST_SEL_PRT:
+            bPrt = true;
+            break;
+          case INST_ENBANK1:
+            if( bIsSync )
+              mp->bank(0);
+            break;
+          case INST_ENBANK2:
+            if( bIsSync )
+              mp->bank(1);
+            break;
 #ifdef DRIVE_CARRY
-        case INST_WANDRD:
-          if( perph == WAND_ADDR && cBar.available() && bIsSync  ) {
-            // Enable data driver ...
-            output_data = bDataEn = 1;
-            // Get next byte from the wand-buffer!
-            data56_out = cBar.get();
-            if( cBar.empty() ) {
-              // Buffer empty, ready to receive next batch of data
-              iGetNextWndData++;
-            }
-          }
-          break;
-#endif
-        default:
-          if( (ramad & 0xF0) == 0x20 ) {
-            int r = (pBus->cmd >> 6) & 0x0F;
-            switch( pBus->cmd & 0x3F ) {
-            case 0x38:
-              // READ
+          case INST_WANDRD: // READ DATA
+            if( perph == WAND_ADDR && cBar.available() && bIsSync  ) {
+              // Enable data driver ...
               output_data = bDataEn = 1;
-              data56_out = blinky[r];
-              break;
-            case 0x28:
-              // WRITE
-              blinky[r] = pBus->data;
+              // Get next byte from the wand-buffer!
+              data56_out = cBar.get();
+              if( cBar.empty() ) {
+                // Buffer empty, ready to receive next batch of data
+                iGetNextWndData++;
+              }
               break;
             }
+            // Fall trough!!!
+#endif
+          default:
+            if( (ramad & 0x3F0) == 0x20 ) {
+              int r = (pBus->cmd >> 6) & 0x0F;
+              switch(pBus->cmd) {
+              case INST_WDATA:
+                if( ramad == 0x020 )
+                  blinky[0] = pBus->data;
+                else
+                  bwr = (ramad & 0xF) + 1;
+                break;
+              default:
+                switch( pBus->cmd & 0x3F ) {
+                case 0x38:
+                  // READ
+                  output_data = bDataEn = 1;
+                  data56_out = blinkyRAM[r];
+                  ramad = (ramad & 0x3F0) | r;
+                  break;
+                case 0x28:
+                  // WRITE
+                  if( r == 0 || (blinky[0] & 0x10000000000000LL) )
+                  {
+                    bwr = r+1;
+                    ramad = (ramad & 0x3F0) | r;
+                  }
+                  break;
+                }
+              }
+            }
           }
-        }
         }
 #ifdef MEASURE_TIME
         {
@@ -1040,6 +1065,9 @@ void handle_bus(volatile Bus_t *pBus)
   static int pending_data_inst = 0;
   static int oAddr = ADDR_MASK;
 
+  static uint64_t rr[16];
+  static uint64_t bStat = 0;
+
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
   int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
@@ -1066,6 +1094,16 @@ void handle_bus(volatile Bus_t *pBus)
   }
 #endif
 
+  for( int i=0; i<16; i++ ) {
+    if( rr[i] != blinkyRAM[i] ) {
+      printf("\nBLKR%d: %014llX\n", i, blinkyRAM[i]);
+      rr[i] = blinkyRAM[i];
+    }
+  }
+  if( bStat != blinky[0] ) {
+    printf("\nBLINKY Stat: %014llX\n", blinky[0]);
+    bStat = blinky[0];
+  }
 #ifdef CPU2_PRT
   // Any printouts from the other CPU ... ?
   if (cpu2buf[0]) {

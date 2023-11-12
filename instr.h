@@ -4,6 +4,9 @@
 // Bus instructions
 // Beware: These are in octal
 
+#define INST_RDATA                     00070    // 0000 0011 1000   0x38
+#define INST_WDATA                     01360    // 001 011 110 000   0x2F0
+
 #define INST_LDI                       00460
 #define INST_FETCH                     01460
 #define INST_WRITE                     00100
@@ -14,13 +17,13 @@
 #define INST_ALM                       01554
 #define INST_PBSY                      01654
 
-#define INST_WANDRD                    00070
+#define INST_WANDRD                    INST_RDATA
 
 #define INST_DISPLAY_OFF               01340
 #define INST_DISPLAY_TOGGLE            01440
 #define INST_COMPENSATION_INSTRUCTION  01774
 #define INST_C_PFAD                    01760
-#define INST_WRITE_ANNUNCIATORS        01360
+#define INST_WRITE_ANNUNCIATORS        INST_WDATA
 #define INST_READ_ANNUNCIATORS         00570
 
 #define INST_SRLDA                     00050
@@ -45,7 +48,7 @@
 #define INST_SEL_PRT                   01144 // Select printer
 #define INST_POWOFF                    00140
 
-#define INST_FLLDA                     00070
+#define INST_FLLDA                     INST_RDATA
 #define INST_FLLDB                     00170
 #define INST_FLLDC                     00270
 #define INST_FLLDAB                    00370
@@ -71,8 +74,6 @@
 #define INST_ENROM2                    0x1980
 #define INST_ENROM3                    0x1D40
 #define INST_ENROM4                    0x1C0
-
-#define INST_WANDRD                    00070
 
 #define TIMR_ADDR                      0xFB   // The Timer
 #define CRDR_ADDR                      0xFC   // The Card Reader
