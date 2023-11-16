@@ -138,6 +138,20 @@ void clrBreakpoints(void)
   brk.clrAllBrk();
 }
 
+extern volatile uint64_t blinky[16];
+extern volatile uint64_t blinkyRAM[16];
+
+void dump_blinky(void)
+{
+  printf("Blinky registers and RAM\n=====================================\n");
+  for(int i=0; i<0x10; i++) {
+    printf("Reg%02d: %014llx\n", i, blinky[i]);
+  }
+  for(int i=0; i<0x10; i++) {
+    printf("Mem 0x%02X: %014llx\n", 0x20+i, blinkyRAM[i]);
+  }
+  printf("\n");
+}
 extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -156,6 +170,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'w', wand_scan,         "Wand scan"  },
   { 'q', sel_qram,          "Select QRAM page"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
+  { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
 };
 
 const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);

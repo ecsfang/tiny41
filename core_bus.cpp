@@ -409,6 +409,10 @@ volatile uint64_t data56_out = 0;
 
 volatile Bus_t bus[NUM_BUS_T];
 
+volatile uint8_t prtBuf[256];
+volatile uint8_t wprt = 0;
+volatile uint8_t rprt = 0;
+
 int last_sync = 0;
 int gpio_states = 0;
 
@@ -430,8 +434,8 @@ void reset_bus_buffer(void)
   }
 }
 
-static uint64_t blinky[16];
-static volatile uint64_t blinkyRAM[16];
+volatile uint64_t blinky[16];
+volatile uint64_t blinkyRAM[16];
 
 void core1_main_3(void)
 {
@@ -461,6 +465,10 @@ void core1_main_3(void)
   static int outB = 0;
   static int outBSize = 0x7F;
   static int bwr = 0;
+  static int busyCnt = 0;
+
+  memset((void*)blinky, 0, 16*sizeof(uint64_t));
+  memset((void*)blinkyRAM, 0, 16*sizeof(uint64_t));
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -602,8 +610,8 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-1:
       // Report next FI signal to trace ...
-      //pBus->fi = getFI();
-      pBus->fi = ramad;
+      pBus->fi = getFI();
+      //pBus->fi = ramad;
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
       // Turn off MLDL-led ...
@@ -653,18 +661,23 @@ void core1_main_3(void)
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
                   // Write to out buffer - set buffer flag
-                  if( outB )
+                  blinky[r] = pBus->data & 0xFF;
+                  prtBuf[wprt++] = (uint8_t)(pBus->data & 0xFF);
+                  if( busyCnt ) // Already busy ... ?
                     setFI(FI_TFAIL);
                   outB++;
+                  busyCnt = 8;
                   break;
                 }
                 break;
               case 0b01:  // Read ...
                 // Enable data driver ...
                 output_data = bDataEn = 1;
-                if( r == 10 )
-                  data56_out = blinky[10]; // - outB;
-                else
+//                if( r == 10 )
+//                  data56_out = blinky[10]; // - outB;
+//                if( r == 5 )
+//                  data56_out = blinky[5]; // & ~0xFFLL; // - outB;
+//                else
                   data56_out = blinky[r];
                 break;
               case 0b10:  // Func ...
@@ -683,10 +696,13 @@ void core1_main_3(void)
                 case 7: // 1FC 0111 111 10 0 r = 7
                   // Reset
                   blinky[14] = 0L;
+                  blinky[10] &= ~0xFFLL;
                   clrFI(FI_TFAIL);
                   break;
                 case 8: // 23D 1000 111 10 1 r = 8
                   // Reset
+                  blinky[14] = 0L;
+                  blinky[10] &= ~0xFFLL;
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
                   outB = 0;
@@ -783,6 +799,11 @@ void core1_main_3(void)
         // Report FI-status to trace ...
         pBus->fi |= iCnt++ << 16;
 #endif
+        if(busyCnt) {
+          busyCnt--;
+          if( !busyCnt )
+            clrFI(FI_TFAIL);
+        }
         // Report selected peripheral to trace ...
         //pBus->pa = perph;
         pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
@@ -828,6 +849,19 @@ void post_handling(uint16_t addr)
     // We have more data to send!
     iSendNextWndData++;
     wand_scan();
+  }
+  if (wprt != rprt) {
+    char c = prtBuf[rprt++];
+    switch(c) {
+      case 0x04:
+      case 0x0A: printf("\n"); break;
+      case 0x86: printf("*"); break;
+      default:
+        if( c < 0x20 || c > 0x7F )
+          printf("%02X ", c);
+        else
+          printf("%c", c);
+    }
   }
 }
 
@@ -1065,8 +1099,8 @@ void handle_bus(volatile Bus_t *pBus)
   static int pending_data_inst = 0;
   static int oAddr = ADDR_MASK;
 
-  static uint64_t rr[16];
-  static uint64_t bStat = 0;
+//  static uint64_t rr[16];
+//  static uint64_t bStat = 0;
 
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
@@ -1093,7 +1127,7 @@ void handle_bus(volatile Bus_t *pBus)
     }
   }
 #endif
-
+#if 0
   for( int i=0; i<16; i++ ) {
     if( rr[i] != blinkyRAM[i] ) {
       printf("\nBLKR%d: %014llX\n", i, blinkyRAM[i]);
@@ -1104,6 +1138,7 @@ void handle_bus(volatile Bus_t *pBus)
     printf("\nBLINKY Stat: %014llX\n", blinky[0]);
     bStat = blinky[0];
   }
+#endif
 #ifdef CPU2_PRT
   // Any printouts from the other CPU ... ?
   if (cpu2buf[0]) {

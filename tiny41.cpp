@@ -190,8 +190,8 @@ int main()
     // Waiting for carry in Blinky
     IGNORE_LOOP(0x6F27);
     // Ignore checksum loop in Blinky
-    IGNORE_LOOP(0x657D);
-    IGNORE_LOOP(0x6768);
+    IGNORE_LOOP(0x657D);    // Bank 0
+    IGNORE_LOOP(0x6768);    // Bank 1
 
     bool bErr = false;
     while (1)
