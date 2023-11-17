@@ -687,6 +687,8 @@ void core1_main_3(void)
                   // This result in that r[14] == 0b11.1....
                   blinky[14] = 0b11010000;
                   blinky[0] |= 0x10000000000000LL;
+                  if( r == 4 )
+                    blinky[10] &= ~0xFFLL;
                   break;
                 case 3: // 0FC 0011 111 10 0 r = 3
                 case 5: // 17C 0101 111 10 0 r = 5
@@ -696,13 +698,11 @@ void core1_main_3(void)
                 case 7: // 1FC 0111 111 10 0 r = 7
                   // Reset
                   blinky[14] = 0L;
-                  blinky[10] &= ~0xFFLL;
                   clrFI(FI_TFAIL);
                   break;
                 case 8: // 23D 1000 111 10 1 r = 8
                   // Reset
                   blinky[14] = 0L;
-                  blinky[10] &= ~0xFFLL;
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
                   outB = 0;

@@ -259,7 +259,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 					pDis = sprintf(disBuf, "RTNCPU"); break;
 				} else {
 					int r = (inst >> 6) & 0x0F;
-            		int cmd = (inst >> 1) & 0x3;
+          int cmd = (inst >> 1) & 0x3;
 
 					switch(cmd) {
 					case 0b00:  // Write ...
@@ -278,8 +278,6 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 						pDis = sprintf(disBuf, "FUNC1 (%d)", r);
 						break;
 					}
-					if( inst & 1 )
-						pDis = sprintf(disBuf+pDis, " RTN");
 				}
 				break;
 			default:
@@ -291,20 +289,19 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 				case 0x3B:
 					// Read data line into C from reg N
 					pDis = disMod("C=DATA[%X]", mod);
-					if( inst & 0x1 )
-						pDis += sprintf(disBuf+pDis,"R");
 					break;
 				default:
 					if( inst & 0x2 ) {
 						// Load 8 bit character to peripheral
 						pDis = sprintf(disBuf, "LC %02X", inst>>2);
-						if( inst & 0x1 )
-							pDis += sprintf(disBuf+pDis,"R");
 					}
 				}
 		}
-		if( inst & 0x01 ) // Bit0? Return control to CPU
+		if( inst & 0x01 ) { // Bit0? Return control to CPU
 			selPer = PER_NONE;
+			if( inst != 0x005 )
+				pDis += sprintf(disBuf+pDis," R");
+		}
 		return disBuf;
 	}
 
