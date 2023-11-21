@@ -16,7 +16,7 @@
 #include <string.h>
 
 #include "pico/stdlib.h"
-
+#include "tiny41.h"
 #include "disasm.h"
 #include "disstr.h"
 
@@ -273,7 +273,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 					case 0b00:  // Write ...
 						pDis = sprintf(disBuf, "WRITE (%d)", r);
 #ifdef DISABLE_DISPRINT
-						if( r == 5 || r == 10 || r == 11)
+						//if( r == 5 || r == 10 || r == 11)
 							printf("WRITE (%d) <-- %014llX\n", r, data);
 #endif
 						if( r == 11 ) {
@@ -283,7 +283,8 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 					case 0b01:  // Read ...
 						pDis = sprintf(disBuf, "READ (%d)", r);
 #ifdef DISABLE_DISPRINT
-						if( r == 5 || r == 10 || r == 11) {
+						//if( r == 5 || r == 10 || r == 11)
+						{
 							printf("READ (%d) ", r);
 							bRead = true;	// Fetch data in next cycle ...
 						}
@@ -291,6 +292,9 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 						break;
 					case 0b10:
 						pDis = sprintf(disBuf, "FUNC0 (%d)", r);
+#ifdef DISABLE_DISPRINT
+						printf("FUNC (%d)\n", r);
+#endif
 						break;
 					case 0b11:  // ???
 						pDis = sprintf(disBuf, "FUNC1 (%d)", r);

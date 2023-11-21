@@ -33,7 +33,7 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
-#define TIMER_CNT   70
+#define TIMER_CNT   75
 
 enum {
     FI_NONE  = 0,

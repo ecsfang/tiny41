@@ -466,6 +466,7 @@ void core1_main_3(void)
   static int outBSize = 0x7F;
   static int bwr = 0;
   static int busyCnt = 0;
+  static bool bPrtClk = true;
 
   memset((void*)blinky, 0, 16*sizeof(uint64_t));
   memset((void*)blinkyRAM, 0, 16*sizeof(uint64_t));
@@ -597,15 +598,15 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-3:
       // Check blinky timer counter
-      if( nAlm ) {
+      if( bPrtClk && nAlm ) {
         nAlm--;
         if( !nAlm ) {
-          if( outBSize ) {
-            outBSize--;
-            nAlm = TIMER_CNT;
-          } else {
+          if( outBSize == 0 ) {
             // Set FI flag when counter reaches zero ...
             setFI(FI_ALM);
+          } else {
+            outBSize--;
+            nAlm = TIMER_CNT;
           }
         }
       }
@@ -659,6 +660,8 @@ void core1_main_3(void)
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
                   blinky[r] = pBus->data;
                   outBSize = blinky[r] & 0xFFF;
+                  if( bPrtClk )
+                    outBSize--;
                   // Writing results in clearing of FI[12]
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
@@ -695,6 +698,8 @@ void core1_main_3(void)
                     blinky[10] &= ~0xFFLL;
                   break;
                 case 3: // 0FC 0011 111 10 0 r = 3
+                  // Disable timer clock
+                  bPrtClk = false;
                 case 5: // 17C 0101 111 10 0 r = 5
                   // This result in that r[14] == 0b10.0....
                   blinky[14] = 0b10000000;
@@ -706,9 +711,11 @@ void core1_main_3(void)
                   break;
                 case 8: // 23D 1000 111 10 1 r = 8
                   // Reset
+                  bPrtClk = true;   // Enable timer clock
                   blinky[14] = 0L;
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
+                  outBSize = 0;
                   outB = 0;
                   break;
                 }
