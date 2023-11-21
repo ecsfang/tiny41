@@ -33,6 +33,8 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
+#define TIMER_CNT   70
+
 enum {
     FI_NONE  = 0,
     FI_PBSY  = 1 << 0,  // Printer BuSY

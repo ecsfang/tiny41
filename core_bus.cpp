@@ -595,17 +595,27 @@ void core1_main_3(void)
       if( drive_isa_flag )
         output_isa = 1;
       break;
+    case LAST_CYCLE-3:
+      // Check blinky timer counter
+      if( nAlm ) {
+        nAlm--;
+        if( !nAlm ) {
+          if( outBSize ) {
+            outBSize--;
+            nAlm = TIMER_CNT;
+          } else {
+            // Set FI flag when counter reaches zero ...
+            setFI(FI_ALM);
+          }
+        }
+      }
+      break;
     case LAST_CYCLE-2:
       // Check if more data to be read from the wand ...
       if( cBar.available() ) {
         setFI(FI_PBSY | FI_WNDB);
       } else {
         clrFI(FI_WNDB);
-      }
-      if( nAlm ) {
-        nAlm--;
-        if( !nAlm )
-          setFI(FI_ALM);
       }
       break;
     case LAST_CYCLE-1:
@@ -636,8 +646,7 @@ void core1_main_3(void)
 #endif
 
         if( bwr ) {
-          bwr--;
-          blinkyRAM[bwr] = pBus->data;
+          blinkyRAM[bwr-1] = pBus->data;
           bwr = 0;
         }
 
@@ -646,18 +655,14 @@ void core1_main_3(void)
             int cmd = (pBus->cmd >> 1) & 0x3;
             switch(cmd) {
               case 0b00:  // Write ...
-                blinky[r] = pBus->data;
-//               bwr = r+1;
                 switch(r) {
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
-                  outBSize = pBus->data & 0xFFF;
-                  if( outBSize > 0x7F )
-                    outBSize = 0x7F;
-                  blinky[r] = (pBus->data & ~0xFFF) | outBSize;
+                  blinky[r] = pBus->data;
+                  outBSize = blinky[r] & 0xFFF;
                   // Writing results in clearing of FI[12]
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
-                  nAlm = 69;  // Set flag after some cycles
+                  nAlm = TIMER_CNT;  // Set flag after some cycles
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
                   // Write to out buffer - set buffer flag
@@ -668,17 +673,16 @@ void core1_main_3(void)
                   outB++;
                   busyCnt = 8;
                   break;
+                default:
+                  blinky[r] = pBus->data;
                 }
                 break;
               case 0b01:  // Read ...
                 // Enable data driver ...
                 output_data = bDataEn = 1;
-//                if( r == 10 )
-//                  data56_out = blinky[10]; // - outB;
-//                if( r == 5 )
-//                  data56_out = blinky[5]; // & ~0xFFLL; // - outB;
-//                else
-                  data56_out = blinky[r];
+                data56_out = blinky[r];
+                if( r == 10 )
+                  data56_out = (data56_out & ~0xFFF) | outBSize;
                 break;
               case 0b10:  // Func ...
                 switch( r ) {
@@ -1228,8 +1232,11 @@ void handle_bus(volatile Bus_t *pBus)
   default:
     if( IS_FULLTRACE() ) {
       char *dp = disAsm(inst, addr, data56, sync);
-      if( oAddr != addr )
-        printf("\n"); // Add spave if a jump occurred ...
+      if( oAddr != addr ) {
+        // Make room for newline ...
+        memmove(cpu2buf+1, cpu2buf, ++nCpu2);
+        cpu2buf[0] = 0x0A;  // Add newline if a jump occurred ...
+      }
       if( dp )
         nCpu2 += sprintf(cpu2buf + nCpu2, " - %s", dp);
       oAddr = addr + 1;
@@ -1237,8 +1244,10 @@ void handle_bus(volatile Bus_t *pBus)
     break;
   }
 
+#ifndef DISABLE_DISPRINT
   if( IS_TRACE() )
     printf("%s", cpu2buf);
+#endif
   cpu2buf[0] = 0;
   nCpu2 = 0;
 

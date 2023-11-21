@@ -248,8 +248,16 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 	static bool bClass1 = false;
 	static int con;
 	int mod = inst >> 6;
+	static bool bRead = false;
 
 	pDis = 0;
+
+#ifdef DISABLE_DISPRINT
+	if( bRead ) {
+		printf(" --> %014llX\n", data);
+		bRead = false;
+	}
+#endif
 
 	if( selPer ) {
 		// Execute specific peripheral instruction
@@ -264,12 +272,22 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 					switch(cmd) {
 					case 0b00:  // Write ...
 						pDis = sprintf(disBuf, "WRITE (%d)", r);
+#ifdef DISABLE_DISPRINT
+						if( r == 5 || r == 10 || r == 11)
+							printf("WRITE (%d) <-- %014llX\n", r, data);
+#endif
 						if( r == 11 ) {
 							// Add C X to print buffer!
 						}
 						break;
 					case 0b01:  // Read ...
 						pDis = sprintf(disBuf, "READ (%d)", r);
+#ifdef DISABLE_DISPRINT
+						if( r == 5 || r == 10 || r == 11) {
+							printf("READ (%d) ", r);
+							bRead = true;	// Fetch data in next cycle ...
+						}
+#endif
 						break;
 					case 0b10:
 						pDis = sprintf(disBuf, "FUNC0 (%d)", r);
