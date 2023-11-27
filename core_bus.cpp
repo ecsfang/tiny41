@@ -690,9 +690,11 @@ void core1_main_3(void)
               case 0b10:  // Func ...
                 switch( r ) {
                 case 2: // 0BC 0010 111 10 0 r = 2
+                  bPrtClk = true;   // Enable timer clock
+                  blinky[14] |= BIT_6;
                 case 4: // 13C 0100 111 10 0 r = 4
                   // This result in that r[14] == 0b11.1....
-                  blinky[14] = 0b11010000;
+                  blinky[14] |= BIT_7 | BIT_4;
                   blinky[0] |= 0x10000000000000LL;
                   if( r == 4 )
                     blinky[10] &= ~0xFFLL;
@@ -700,9 +702,10 @@ void core1_main_3(void)
                 case 3: // 0FC 0011 111 10 0 r = 3
                   // Disable timer clock
                   bPrtClk = false;
+                  blinky[14] &= ~BIT_6; //0b10000000;
                 case 5: // 17C 0101 111 10 0 r = 5
                   // This result in that r[14] == 0b10.0....
-                  blinky[14] = 0b10000000;
+                  blinky[14] &= ~BIT_4; //0b10000000;
                   break;
                 case 7: // 1FC 0111 111 10 0 r = 7
                   // Reset
@@ -712,7 +715,7 @@ void core1_main_3(void)
                 case 8: // 23D 1000 111 10 1 r = 8
                   // Reset
                   bPrtClk = true;   // Enable timer clock
-                  blinky[14] = 0L;
+                  blinky[14] = 0; // BIT_7;
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
                   outBSize = 0;
