@@ -52,6 +52,7 @@ enum {
     BIT_13  = 1 << 13
 };
 
+#define BLINKY_CLK_ENABLE  BIT_6
 
 enum {
     FI_NONE  = 0,

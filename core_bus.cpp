@@ -691,18 +691,18 @@ void core1_main_3(void)
                 switch( r ) {
                 case 2: // 0BC 0010 111 10 0 r = 2
                   bPrtClk = true;   // Enable timer clock
-                  blinky[14] |= BIT_6;
+                  blinky[14] |= BLINKY_CLK_ENABLE;
                 case 4: // 13C 0100 111 10 0 r = 4
                   // This result in that r[14] == 0b11.1....
                   blinky[14] |= BIT_7 | BIT_4;
-                  blinky[0] |= 0x10000000000000LL;
+                  //blinky[0] |= 0x10000000000000LL;
                   if( r == 4 )
                     blinky[10] &= ~0xFFLL;
                   break;
                 case 3: // 0FC 0011 111 10 0 r = 3
                   // Disable timer clock
                   bPrtClk = false;
-                  blinky[14] &= ~BIT_6; //0b10000000;
+                  blinky[14] &= ~BLINKY_CLK_ENABLE; //0b10000000;
                 case 5: // 17C 0101 111 10 0 r = 5
                   // This result in that r[14] == 0b10.0....
                   blinky[14] &= ~BIT_4; //0b10000000;
@@ -714,7 +714,7 @@ void core1_main_3(void)
                   break;
                 case 8: // 23D 1000 111 10 1 r = 8
                   // Reset
-                  bPrtClk = true;   // Enable timer clock
+                  //bPrtClk = true;   // Enable timer clock
                   blinky[14] = 0; // BIT_7;
                   clrFI(FI_TFAIL);
                   clrFI(FI_ALM);
@@ -770,10 +770,11 @@ void core1_main_3(void)
               int r = (pBus->cmd >> 6) & 0x0F;
               switch(pBus->cmd) {
               case INST_WDATA:
-                if( ramad == 0x020 )
-                  blinky[0] = pBus->data;
-                else
-                  bwr = (ramad & 0xF) + 1;
+                if( ramad == 0x020 ) {
+                  //blinky[0] = pBus->data;
+                  blinky[14] &= ~BIT_4;
+                } else
+                bwr = (ramad & 0xF) + 1;
                 break;
               default:
                 switch( pBus->cmd & 0x3F ) {
@@ -785,7 +786,7 @@ void core1_main_3(void)
                   break;
                 case 0x28:
                   // WRITE
-                  if( r == 0 || (blinky[0] & 0x10000000000000LL) )
+                  if( r == 0 || (blinky[14] & BIT_4) ) //(blinky[0] & 0x10000000000000LL) )
                   {
                     bwr = r+1;
                     ramad = (ramad & 0x3F0) | r;
