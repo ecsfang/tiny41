@@ -53,6 +53,10 @@ enum {
 };
 
 #define BLINKY_CLK_ENABLE  BIT_6
+#define BLINKY_RAM_ENABLE  BIT_4
+#define BLINKY_READ         0b01
+#define BLINKY_WRITE        0b00
+#define BLINKY_FUNC         0b10
 
 enum {
     FI_NONE  = 0,
@@ -234,6 +238,209 @@ public:
 
 };
 
+class CFI {
+  volatile uint16_t carry_fi;
+  bool bPBusy;
+public:
+  CFI() {
+    carry_fi = 0;
+    bPBusy = false;
+  }
+  void set(int flag) {
+    carry_fi |= flag;
+  }
+  void clr(int flag = FI_MASK) {
+    carry_fi &= ~flag;
+  }
+  volatile uint16_t get(int flag) {
+    return carry_fi & flag;
+  }
+  volatile uint16_t get(void) {
+    if( bPBusy )
+      set(FI_PBSY);
+    else
+      clr(FI_PBSY);
+    return carry_fi & FI_MASK;
+  }
+  void busy(bool b) {
+    bPBusy = b;
+  }
+};
+/*
+extern volatile uint16_t carry_fi;
+extern volatile bool bPBusy;
+
+// Set FI flag (T0-T13)
+inline void setFI(int flag)
+{
+  carry_fi |= flag;
+}
+inline void clrFI(int flag = FI_MASK)
+{
+  carry_fi &= ~flag;
+}
+inline uint16_t getFI(int flag)
+{
+  return carry_fi & flag;
+}
+inline uint16_t getFI(void)
+{
+  if( bPBusy )
+    setFI(FI_PBSY);
+  else
+    clrFI(FI_PBSY);
+  return carry_fi & FI_MASK;
+}
+*/
+extern volatile uint8_t prtBuf[256];
+extern volatile uint8_t wprt;
+
+extern CFI fi;
+
+class CBlinky {
+  uint64_t reg[16];
+  uint64_t ram[16];
+  uint64_t m_out;
+  int nAlm;
+  int outBSize;
+  int bwr;
+  int busyCnt;
+  bool bPrtClk;
+  bool bRW;
+  bool  m_selected;
+public:
+  CBlinky() {
+    memset((void*)reg, 0, 16*sizeof(uint64_t));
+    memset((void*)ram, 0, 16*sizeof(uint64_t));
+  }
+  void chkTimer(void) {
+    if( bPrtClk && nAlm ) {
+      nAlm--;
+      if( !nAlm ) {
+        if( outBSize == 0 ) {
+          // Set FI flag when counter reaches zero ...
+          fi.set(FI_ALM);
+        } else {
+          outBSize--;
+          nAlm = TIMER_CNT;
+        }
+      }
+    }
+  }
+  inline bool pendingWrite(void) {
+    return bwr != 0;
+  }
+  inline bool isSelected(void) {
+    return m_selected;
+  }
+  void selected(void) {
+    m_selected = true;
+  }
+  void chkWrite(volatile Bus_t *p) {
+    if( bwr ) {
+      bwr--;
+      if( bwr == 0xFF ) { //BLINKY_ADDR ) {
+        // This is a special DATA WRITE to reg 0x20
+        reg[14] = p->data >> 48LL;
+        bRW =  (reg[14] & BLINKY_RAM_ENABLE) ? true : false;
+      } else
+        ram[bwr&0xF] = p->data;
+      bwr = 0;
+    }
+  }
+  uint64_t out(void) {
+    return m_out;
+  }
+  void addr(int a) {
+    bwr = a; // == BLINKY_ADDR ? a : a&0xF;
+    bwr++;
+  }
+  bool writeEnabled(void) {
+    return bRW;
+  }
+  void chkBusy(void) {
+    if(busyCnt) {
+      busyCnt--;
+      if( !busyCnt )
+        fi.clr(FI_TFAIL);
+    }
+  }
+
+  bool update(volatile Bus_t *p) {
+    int r = (p->cmd >> 6) & 0x0F;
+    int cmd = (p->cmd >> 1) & 0x3;
+    m_selected = p->cmd & 1 ? false : true;
+    switch(cmd) {
+    case BLINKY_WRITE:
+      switch(r) {
+      case 10:  // 2B9 - 1010 111 00 1 r = 10
+        reg[r] = p->data;
+        outBSize = reg[r] & 0xFFF;
+        if( bPrtClk )
+          outBSize--;
+        // Writing results in clearing of FI[12]
+        fi.clr(FI_TFAIL);
+        fi.clr(FI_ALM);
+        nAlm = TIMER_CNT;  // Set flag after some cycles
+        break;
+      case 11:  // 2F9 - 1011 111 00 1 r = 11
+        // Write to out buffer - set buffer flag
+        reg[r] = p->data & 0xFF;
+        prtBuf[wprt++] = (uint8_t)(p->data & 0xFF);
+        if( busyCnt ) // Already busy ... ?
+          fi.set(FI_TFAIL);
+        busyCnt = 8;
+        break;
+      default:
+        reg[r] = p->data;
+      }
+      break;
+    case BLINKY_READ:
+      m_out = reg[r];
+      if( r == 10 )
+        m_out = (m_out & ~0xFFF) | outBSize;
+      return true;  // Send m_out on DATA bus
+    case BLINKY_FUNC:
+      switch( r ) {
+      case 2: // Enable timer clock
+        bPrtClk = true;
+        reg[14] |= BLINKY_CLK_ENABLE;
+        break;
+      case 3: // Disable timer clock
+        bPrtClk = false;
+        reg[14] &= ~BLINKY_CLK_ENABLE;
+        break;
+      case 4: // Enable RAM (and set bit 7)
+        bRW = true;
+        reg[14] |= BIT_7 | BLINKY_RAM_ENABLE;
+        reg[10] &= ~0xFFLL;
+        break;
+      case 5: // Disable RAM
+        bRW = false;
+        reg[14] &= ~BLINKY_RAM_ENABLE;
+        break;
+      case 7: // Reset
+        reg[14] = 0L;
+        bPrtClk = false;
+        fi.clr(FI_TFAIL);
+        break;
+      case 8: // Clear buffer ...
+        fi.clr(FI_TFAIL);
+        fi.clr(FI_ALM);
+        outBSize = 0;
+        break;
+      }
+    }
+    return false;
+  }
+  uint64_t operator [](uint16_t addr) {
+    if( addr >= BLINKY_ADDR )
+      return ram[addr & 0x0F];
+    else
+      return reg[addr];
+  }
+
+};
 
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
 
