@@ -21,7 +21,7 @@
 #define MEASURE_TIME
 #define MEASURE_COUNT
 
-//#define DISABLE_DISPRINT
+#define DISABLE_DISPRINT
 
 #ifdef USE_40190
 #define ENABLE_OE   1

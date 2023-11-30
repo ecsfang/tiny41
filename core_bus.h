@@ -34,6 +34,7 @@
 #define QUEUE_STATUS
 
 #define TIMER_CNT   75
+#define BUSY_CNT    8
 
 enum {
     BIT_0   = 1 << 0,
@@ -52,7 +53,9 @@ enum {
     BIT_13  = 1 << 13
 };
 
-#define BLINKY_CLK_ENABLE  BIT_6
+#define BLINKY_RAM_ENABLE   BIT_6
+#define BLINKY_CLK_ENABLE   BIT_4
+#define BLINKY_ENABLE       BIT_7
 
 enum {
     FI_NONE  = 0,
@@ -72,6 +75,9 @@ enum {
     FI_SERV  = 1 << 13, // SERVice
     FI_MASK = (1 << 14)-1
 };
+
+#define FI_PRT_TIMER  FI_ALM
+#define FI_PRT_BUSY   FI_TFAIL
 
 #define CMD_SYNC    0x8000
 
@@ -330,5 +336,18 @@ public:
 //void stopBrk(uint16_t addr);    // Stop trace
 // Clear breakpoint on given address
 //void clrBrk(uint16_t addr);
+
+typedef struct {
+  uint64_t reg[16];
+  uint64_t ram[16];
+  uint8_t  flags;
+  int nAlm = 0;
+  int outB = 0;
+  int cntTimer = 0x7F;
+  int bwr = 0;
+  int busyCnt = 0;
+  bool bPrtClk = true;
+  int frq;
+} Blinky_t;
 
 #endif//__CORE_BUS_H__

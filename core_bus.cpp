@@ -405,6 +405,7 @@ volatile int queue_overflow = 0;
 volatile int data_wr = 0;
 volatile int data_rd = 0;
 
+#define DATA_OUTPUT(x) do { output_data = 1; data56_out = x;} while(0)
 volatile uint64_t data56_out = 0;
 
 volatile Bus_t bus[NUM_BUS_T];
@@ -434,13 +435,11 @@ void reset_bus_buffer(void)
   }
 }
 
-volatile uint64_t blinky[16];
-volatile uint64_t blinkyRAM[16];
+volatile Blinky_t blinky;
 
 void core1_main_3(void)
 {
   static int bIsaEn = 0;
-  static int bDataEn = 0;
   static int isDataEn = 0;
   static int bIsa = 0;
   static int bit_no = 0;
@@ -455,21 +454,16 @@ void core1_main_3(void)
   CModule *mp = NULL;
   volatile Bus_t *pBus = &bus[data_wr];
   static uint8_t perph = 0;
-  static uint8_t ramad = 0;
+  static uint16_t ramad = 0;
   static bool bSelPa = false;
   static bool bSelRam = false;
   static bool bErr = false;
   static uint16_t iCnt = 0;
   bool bPrt = false;
-  static int nAlm = 0;
-  static int outB = 0;
-  static int outBSize = 0x7F;
-  static int bwr = 0;
-  static int busyCnt = 0;
-  static bool bPrtClk = true;
 
-  memset((void*)blinky, 0, 16*sizeof(uint64_t));
-  memset((void*)blinkyRAM, 0, 16*sizeof(uint64_t));
+  memset((void*)&blinky, 0, sizeof(Blinky_t));
+//  memset((void*)blinky, 0, 16*sizeof(uint64_t));
+//  memset((void*)blinkyRAM, 0, 16*sizeof(uint64_t));
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -563,14 +557,18 @@ void core1_main_3(void)
       memset((void*)pBus, 0, sizeof(Bus_t));
       break;
 
-    case 7:
+    case 7: // 8 first bits are read ...
       if( bSelPa ) {
         // Get the selected peripheral
         perph = data56 & 0xFF;
         bSelPa = false;
-      } else if( bSelRam ) {
+      }
+      break;
+
+    case 9: // 10 first bits are read ...
+      if( bSelRam ) {
         // Get the selected peripheral
-        ramad = data56 & 0xFF;
+        ramad = data56 & 0x3FF;
         bSelRam = false;
       }
       break;
@@ -598,15 +596,16 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-3:
       // Check blinky timer counter
-      if( bPrtClk && nAlm ) {
-        nAlm--;
-        if( !nAlm ) {
-          if( outBSize == 0 ) {
+      if( blinky.nAlm && (blinky.flags & BLINKY_CLK_ENABLE) ) {
+        blinky.nAlm--;
+        if( !blinky.nAlm ) {
+          if( blinky.cntTimer == 0 ) {
             // Set FI flag when counter reaches zero ...
-            setFI(FI_ALM);
+            setFI(FI_PRT_TIMER);
           } else {
-            outBSize--;
-            nAlm = TIMER_CNT;
+            // Decrement and continue conting ...
+            blinky.cntTimer--;
+            blinky.nAlm = TIMER_CNT;
           }
         }
       }
@@ -621,8 +620,14 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-1:
       // Report next FI signal to trace ...
+#if 1
       pBus->fi = getFI();
+#else
       //pBus->fi = ramad;
+      //pBus->fi = (blinky.nAlm & 0xFF) << 8;
+      //pBus->fi |= blinky.cntTimer & 0xFF;
+      //pBus->fi = blinky.flags;
+#endif
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
       // Turn off MLDL-led ...
@@ -634,7 +639,6 @@ void core1_main_3(void)
       // the display and anything else it needs to
 
       // Assume no data drive any more ...
-      bDataEn = 0;
       output_data = 0;
 
       if( pBus->addr || isa || pBus->cmd ) {
@@ -646,9 +650,15 @@ void core1_main_3(void)
         pBus->isa = isa;
 #endif
 
-        if( bwr ) {
-          blinkyRAM[bwr-1] = pBus->data;
-          bwr = 0;
+        if( blinky.bwr ) {
+          blinky.bwr--;
+          if( blinky.bwr == BLINKY_ADDR ) {
+            // This is a special DATA WRITE to reg 0x20
+            blinky.reg[14] = pBus->data >> 48LL;
+            blinky.flags = blinky.reg[14] & 0xFF;
+          } else
+            blinky.ram[blinky.bwr&0xF] = pBus->data;
+          blinky.bwr = 0;
         }
 
         if( bPrt ) {
@@ -656,74 +666,63 @@ void core1_main_3(void)
             int cmd = (pBus->cmd >> 1) & 0x3;
             switch(cmd) {
               case 0b00:  // Write ...
+                blinky.reg[r] = pBus->data;
                 switch(r) {
+                case  8:
+                  if( blinky.reg[8] & 0x80 )
+                    blinky.flags |= BLINKY_ENABLE;
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
-                  blinky[r] = pBus->data;
-                  outBSize = blinky[r] & 0xFFF;
-                  if( bPrtClk )
-                    outBSize--;
+                  blinky.cntTimer = blinky.reg[10] & 0xFF;
+                  if( blinky.flags & BLINKY_CLK_ENABLE )
+                    blinky.cntTimer--;
                   // Writing results in clearing of FI[12]
-                  clrFI(FI_TFAIL);
-                  clrFI(FI_ALM);
-                  nAlm = TIMER_CNT;  // Set flag after some cycles
+                  clrFI(FI_PRT_BUSY);
+                  clrFI(FI_PRT_TIMER);
+                  blinky.nAlm = TIMER_CNT;  // Set flag after some cycles
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
                   // Write to out buffer - set buffer flag
-                  blinky[r] = pBus->data & 0xFF;
-                  prtBuf[wprt++] = (uint8_t)(pBus->data & 0xFF);
-                  if( busyCnt ) // Already busy ... ?
-                    setFI(FI_TFAIL);
-                  outB++;
-                  busyCnt = 8;
+                  prtBuf[wprt++] = (uint8_t)(blinky.reg[11] & 0xFF);
+                  if( blinky.busyCnt ) // Already busy ... ?
+                    setFI(FI_PRT_BUSY);
+                  blinky.busyCnt = BUSY_CNT;
                   break;
                 default:
-                  blinky[r] = pBus->data;
+                  blinky.reg[r] = pBus->data;
                 }
                 break;
               case 0b01:  // Read ...
                 // Enable data driver ...
-                output_data = bDataEn = 1;
-                data56_out = blinky[r];
-                if( r == 10 )
-                  data56_out = (data56_out & ~0xFFF) | outBSize;
+                DATA_OUTPUT(blinky.reg[r]);
+                switch(r) {
+                case 10:  data56_out = (data56_out & ~0xFFLL) | blinky.cntTimer; break;
+                case 14:  data56_out = (data56_out & ~0xFFLL) | blinky.flags;    break;
+                }
                 break;
               case 0b10:  // Func ...
                 switch( r ) {
-                case 2: // 0BC 0010 111 10 0 r = 2
-                  bPrtClk = true;   // Enable timer clock
-                  blinky[14] |= BLINKY_CLK_ENABLE;
-                case 4: // 13C 0100 111 10 0 r = 4
-                  // This result in that r[14] == 0b11.1....
-                  blinky[14] |= BIT_7 | BIT_4;
-                  //blinky[0] |= 0x10000000000000LL;
-                  if( r == 4 )
-                    blinky[10] &= ~0xFFLL;
+                case 2: // Enable timer clock
+                  blinky.flags |= BLINKY_CLK_ENABLE;
                   break;
-                case 3: // 0FC 0011 111 10 0 r = 3
-                  // Disable timer clock
-                  bPrtClk = false;
-                  blinky[14] &= ~BLINKY_CLK_ENABLE; //0b10000000;
-                case 5: // 17C 0101 111 10 0 r = 5
-                  // This result in that r[14] == 0b10.0....
-                  blinky[14] &= ~BIT_4; //0b10000000;
+                case 3: // Disable timer clock
+                  blinky.flags &= ~BLINKY_CLK_ENABLE;
                   break;
-                case 7: // 1FC 0111 111 10 0 r = 7
-                  // Reset
-                  blinky[14] = 0L;
-                  clrFI(FI_TFAIL);
+                case 4: // Enable RAM write
+                  blinky.flags |= BLINKY_RAM_ENABLE;
                   break;
-                case 8: // 23D 1000 111 10 1 r = 8
-                  // Reset
-                  //bPrtClk = true;   // Enable timer clock
-                  blinky[14] = 0; // BIT_7;
-                  clrFI(FI_TFAIL);
-                  clrFI(FI_ALM);
-                  outBSize = 0;
-                  outB = 0;
+                case 5: // Disable RAM write
+                  blinky.flags &= ~BLINKY_RAM_ENABLE;
+                  break;
+                case 7: // Reset
+                  blinky.flags = 0;
+                  clrFI(FI_PRT_BUSY);
+                  break;
+                case 8: // Clear buffer
+                  clrFI(FI_PRT_BUSY);
+                  clrFI(FI_PRT_TIMER);
+                  blinky.cntTimer = 0;
                   break;
                 }
-              case 0b11:  // ???
-                break;
             }
             if( pBus->cmd & 1)
               bPrt = false;
@@ -753,10 +752,8 @@ void core1_main_3(void)
 #ifdef DRIVE_CARRY
           case INST_WANDRD: // READ DATA
             if( perph == WAND_ADDR && cBar.available() && bIsSync  ) {
-              // Enable data driver ...
-              output_data = bDataEn = 1;
-              // Get next byte from the wand-buffer!
-              data56_out = cBar.get();
+              // Output next byte from the wand-buffer!
+              DATA_OUTPUT(cBar.get());
               if( cBar.empty() ) {
                 // Buffer empty, ready to receive next batch of data
                 iGetNextWndData++;
@@ -766,32 +763,25 @@ void core1_main_3(void)
             // Fall trough!!!
 #endif
           default:
-            if( (ramad & 0x3F0) == 0x20 ) {
-              int r = (pBus->cmd >> 6) & 0x0F;
-              switch(pBus->cmd) {
-              case INST_WDATA:
-                if( ramad == 0x020 ) {
-                  //blinky[0] = pBus->data;
-                  blinky[14] &= ~BIT_4;
-                } else
-                bwr = (ramad & 0xF) + 1;
-                break;
-              default:
-                switch( pBus->cmd & 0x3F ) {
-                case 0x38:
-                  // READ
-                  output_data = bDataEn = 1;
-                  data56_out = blinkyRAM[r];
-                  ramad = (ramad & 0x3F0) | r;
-                  break;
-                case 0x28:
-                  // WRITE
-                  if( r == 0 || (blinky[14] & BIT_4) ) //(blinky[0] & 0x10000000000000LL) )
-                  {
-                    bwr = r+1;
-                    ramad = (ramad & 0x3F0) | r;
+            // Look for read/write towards the Blinky RAM
+            if( (ramad & 0x3F0) == BLINKY_ADDR ) {
+              if( pBus->cmd == INST_WDATA ) {
+                // Note!
+                // A write to BLINKY_ADDR (0x20) should be treated special
+                blinky.bwr = ramad + 1;
+              } else {
+                // Handle read (0x38) and write (0x28) instructions
+                if( (pBus->cmd & 0x2F) == 0x28 ) {
+                  int r = (pBus->cmd >> 6) & 0x0F;
+                  ramad = BLINKY_ADDR | r;
+                  if( pBus->cmd & 0x10 ) {
+                    // INST_READ_DATA
+                    DATA_OUTPUT(blinky.ram[r]);
+                  } else {
+                    // INST_WRITE_DATA
+                    if( blinky.flags & BLINKY_RAM_ENABLE)
+                      blinky.bwr = r+1; // Delayed write ...
                   }
-                  break;
                 }
               }
             }
@@ -814,10 +804,10 @@ void core1_main_3(void)
         // Report FI-status to trace ...
         pBus->fi |= iCnt++ << 16;
 #endif
-        if(busyCnt) {
-          busyCnt--;
-          if( !busyCnt )
-            clrFI(FI_TFAIL);
+        if(blinky.busyCnt) {
+          blinky.busyCnt--;
+          if( !blinky.busyCnt )
+            clrFI(FI_PRT_BUSY);
         }
         // Report selected peripheral to trace ...
         //pBus->pa = perph;
@@ -845,8 +835,8 @@ void core1_main_3(void)
         }
       }
       // Enable DATA for next cycle ... ?
-      if( bDataEn != isDataEn ) {
-        isDataEn = bDataEn;
+      if( output_data != isDataEn ) {
+        isDataEn = output_data;
         gpio_put(P_DATA_OE, isDataEn);
       }
       break;
