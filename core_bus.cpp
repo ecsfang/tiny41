@@ -947,6 +947,7 @@ void process_bus(void)
 
 uint64_t dreg_a = 0, dreg_b = 0, dreg_c = 0;
 bool display_on = false;
+int base = 0;
 
 void dump_dregs(void)
 {
@@ -1187,14 +1188,17 @@ void handle_bus(volatile Bus_t *pBus)
   }
 #else
 #if 1
+  char mode = '?';
+  if( base == 10 )  mode = 'd';
+  if( base == 16 )  mode = 'x';
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c %04X (Q%2d:%03X) %03X",
-            cnt, fi, data56, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c%c %04X (Q%2d:%03X) %03X",
+            cnt, fi, data56, sync ? '*':' ', mode, addr, q, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c %04X           %03X",
-            cnt, fi, data56, sync ? '*':' ', addr, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c%c %04X           %03X",
+            cnt, fi, data56, sync ? '*':' ', mode, addr, inst);
   }
 #else
   if( PAGE(addr) < 3 ) {
@@ -1290,6 +1294,12 @@ void handle_bus(volatile Bus_t *pBus)
   // Check for instructions
   if (sync) {
     switch (inst) {
+    case INST_SETHEX:
+      base = 16;
+      break;
+    case INST_SETDEC:
+      base = 10;
+      break;
     case INST_DISPLAY_OFF:
       display_on = !false; // Toggles to false below ...:P
     case INST_DISPLAY_TOGGLE:

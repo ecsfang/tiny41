@@ -29,6 +29,9 @@
 #define INST_WRITE_ANNUNCIATORS        INST_WDATA
 #define INST_READ_ANNUNCIATORS         00570
 
+#define INST_SETHEX                    0x260
+#define INST_SETDEC                    0x2A0
+
 #define INST_SRLDA                     (00000 | INST_WRITE_DATA)
 #define INST_SRLDB                     (00100 | INST_WRITE_DATA)
 #define INST_SRLDC                     (00200 | INST_WRITE_DATA)
