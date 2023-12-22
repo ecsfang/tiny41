@@ -439,31 +439,30 @@ volatile Blinky_t blinky;
 
 void core1_main_3(void)
 {
-  static int bIsaEn = 0;
-  static int isDataEn = 0;
-  static int bIsa = 0;
-  static int bit_no = 0;
-  static uint64_t isa = 0LL;
-  static uint64_t bit = 0LL;
-  int sync = 0;
-  bool bIsSync = false;
-  static uint64_t data56 = 0;
-  static uint16_t dataFI = 0;
-  int last_data_wr;
-  static uint16_t romAddr = 0;
-  CModule *mp = NULL;
-  volatile Bus_t *pBus = &bus[data_wr];
-  static uint8_t perph = 0;
-  static uint16_t ramad = 0;
-  static bool bSelPa = false;
-  static bool bSelRam = false;
-  static bool bErr = false;
-  static uint16_t iCnt = 0;
-  bool bPrt = false;
+  static int bit_no = 0;        // Current bit-number in bus cycle
+  static int bIsaEn = 0;        // True if ISA output is enabled
+  static int isDataEn = 0;      // True if DATA output is enabled
+  static int isFiEn = 0;        // True if FI output is enabled
+  static uint64_t isa = 0LL;    // Current bit-pattern on the ISA bus
+  static uint64_t bit = 0LL;    // Bit mask for current bit in cycle
+  static uint64_t data56 = 0LL; // Current bit-pattern on DATA bus
+  static uint16_t dataFI = 0;   // State of FI to be sent
+  static int sync = 0;          // True if sync detected
+  static bool bIsSync = false;  // True if current cycle have sync
+  static bool bSelPa = false;   // True if peripheral address is in next cycle
+  static uint8_t perph = 0;     // Selected pheripheral
+  static bool bSelRam = false;  // True if RAM address is in next cycle
+  static uint16_t ramad = 0;    // Current RAM pointer
+  static bool bErr = false;     // True if corrupt cycle is detected
+  static bool bPrt = false;     // True if printer is selected
+  static CModule *mp = NULL;    // Pointer to current module (if selected)
+  volatile Bus_t *pBus;         // Pointer into trace buffer
+  static int last_data_wr;      // Keep track of trace overflow
+  static uint16_t iCnt = 0;     // Cycle counter for trace
+
+  pBus = &bus[data_wr];
 
   memset((void*)&blinky, 0, sizeof(Blinky_t));
-//  memset((void*)blinky, 0, 16*sizeof(uint64_t));
-//  memset((void*)blinkyRAM, 0, 16*sizeof(uint64_t));
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -482,7 +481,11 @@ void core1_main_3(void)
 
     // NOTE! Bit numbers are out by one as bit_no hasn't been incremented yet.
 
-    // Drive the FI carry flags (if any ...)
+// Clk1  ____/\_______/\_______/\_______/\_______/\_______/\_______/\_______/\___
+// Clk2  _______/\_______/\_______/\_______/\_______/\_______/\_______/\_______/\___
+// DATA  |  T51   |  T52   |  T53   |  T54   |  T55   |  T0    |  T1    |  T2    |
+
+    // Drive the FI carry flags for each nibble
     if( (bit_no & 0b11) == 0b11 ) {
       gpio_put(P_FI_OE, dataFI & 1);
       dataFI >>= 1;
@@ -603,7 +606,7 @@ void core1_main_3(void)
             // Set FI flag when counter reaches zero ...
             setFI(FI_PRT_TIMER);
           } else {
-            // Decrement and continue conting ...
+            // Decrement and continue counting ...
             blinky.cntTimer--;
             blinky.nAlm = TIMER_CNT;
           }

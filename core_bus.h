@@ -342,12 +342,9 @@ typedef struct {
   uint64_t ram[16];
   uint8_t  flags;
   int nAlm = 0;
-  int outB = 0;
   int cntTimer = 0x7F;
   int bwr = 0;
   int busyCnt = 0;
-  bool bPrtClk = true;
-  int frq;
 } Blinky_t;
 
 #endif//__CORE_BUS_H__
