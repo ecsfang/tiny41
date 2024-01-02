@@ -274,6 +274,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 						pDis = sprintf(disBuf, "WRITE (%d)", r);
 #ifdef DISABLE_DISPRINT
 						//if( r == 5 || r == 10 || r == 11)
+						if( r == 10 )
 							printf("WRITE (%d) <-- %014llX\n", r, data);
 #endif
 						if( r == 11 ) {
@@ -284,6 +285,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 						pDis = sprintf(disBuf, "READ (%d)", r);
 #ifdef DISABLE_DISPRINT
 						//if( r == 5 || r == 10 || r == 11)
+						if( r == 10 )
 						{
 							printf("READ (%d) ", r);
 							bRead = true;	// Fetch data in next cycle ...

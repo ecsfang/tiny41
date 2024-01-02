@@ -1,9 +1,9 @@
-#undef PICO_DEFAULT_I2C_SDA_PIN
-#undef PICO_DEFAULT_I2C_SCL_PIN
+//#undef PICO_DEFAULT_I2C_SDA_PIN
+//#undef PICO_DEFAULT_I2C_SCL_PIN
 //#undef PICO_DEFAULT_I2C
 
-#define PICO_DEFAULT_I2C_SDA_PIN 26
-#define PICO_DEFAULT_I2C_SCL_PIN 27
+//#define PICO_DEFAULT_I2C_SDA_PIN 26
+//#define PICO_DEFAULT_I2C_SCL_PIN 27
 //#define PICO_DEFAULT_I2C 1
 
 #define CF_DUMP_DBG_DREGS 0
@@ -32,6 +32,7 @@
 #endif
 
 
+#ifdef PIMORONI_TINY2040_8MB
 #define PIN_A2  28
 #define PIN_A3  29
 
@@ -66,13 +67,37 @@
 #define P_CLK2      5
 #define P_CLK1      6
 #endif
+#endif
+#ifdef PIMORONI_PICOLIPO_16MB
+#define P_DATA      16
+#define P_DATA_DRV  20
+#define P_DATA_OE   21
+
+#define P_ISA       14
+#define P_ISA_DRV   18
+#define P_ISA_OE    19
+
+#define P_FI_OE     22
+
+#define P_PWO       17
+#define P_SYNC      15
+#define P_CLK2      13
+#define P_CLK1      12
+#endif
+
 
 #define LED_ON    0
 #define LED_OFF   1
 
+#ifdef PIMORONI_PICOLIPO_16MB
+#define LED_PIN_B PICO_DEFAULT_LED_PIN
+#endif
+
+#ifdef PIMORONI_TINY2040_8MB
 #define LED_PIN_R TINY2040_LED_R_PIN
 #define LED_PIN_G TINY2040_LED_G_PIN
 #define LED_PIN_B TINY2040_LED_B_PIN
+#endif
 
 #define NR_CHARS  12
 #define NR_ANNUN  12

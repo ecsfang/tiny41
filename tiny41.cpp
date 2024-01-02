@@ -36,6 +36,9 @@ void bus_init(void)
     INIT_PIN(P_SYNC, GPIO_IN, 0);
     INIT_PIN(P_ISA, GPIO_IN, 0);
     INIT_PIN(P_DATA, GPIO_IN, 0);
+#ifdef PIMORONI_PICOLIPO_16MB
+    INIT_PIN(P_PWO, GPIO_IN, 0);
+#endif
     // Init the ISA driver ...
     INIT_PIN(P_ISA_OE, GPIO_OUT, DISABLE_OE);
     INIT_PIN(P_ISA_DRV, GPIO_OUT, 0);
@@ -45,8 +48,13 @@ void bus_init(void)
     // Init the FI driver ...
     INIT_PIN(P_FI_OE, GPIO_OUT, DISABLE_OE);
     // Init leds ...
+#ifdef PIMORONI_PICOLIPO_16MB
+    INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
+#endif
+#ifdef PIMORONI_TINY2040_8MB
     INIT_PIN(LED_PIN_R, GPIO_OUT, LED_OFF);
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
+#endif
 }
 
 
@@ -64,7 +72,12 @@ extern void initRoms(void);
 
 void dispOverflow(bool bOvf)
 {
+#ifdef PIMORONI_PICOLIPO_16MB
+    gpio_put(LED_PIN_B, bOvf ? LED_ON : LED_OFF);
+#endif
+#ifdef PIMORONI_TINY2040_8MB
     gpio_put(LED_PIN_R, bOvf ? LED_ON : LED_OFF);
+#endif
     const char *bErr = bOvf ? "Buffer overflow!" : "                ";
     WriteString(disp41.buf(), 5, (STATUS_START+2)*8, (char *)bErr);
     bRend |= REND_STATUS;
@@ -92,12 +105,15 @@ int main()
     initRoms();
 
     /* Overclock */
+    printf("Overclock ...\n");
     set_sys_clock_khz(OVERCLOCK, 1);
 
+    printf("Init all pins ...\n");
     bus_init();
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
+    printf("Init I2C ...\n");
     i2c_init(i2c_default, SSD1306_I2C_CLK * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
@@ -105,11 +121,14 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
     // run through the complete initialization process
+    printf(" - init OLED display\n");
     SSD1306_init();
 
+    printf("Launch CORE 1 ...\n");
     multicore_launch_core1(core1_main_3);
 
     // zero the entire display
+    printf("Clear and init display ...\n");
     memset(disp41.buf(), 0, SSD1306_BUF_LEN);
     disp41.rend(REND_ALL);
     disp41.render();
@@ -184,6 +203,9 @@ int main()
     IGNORE_LOOP(0xF3E0);
     // Ignore MEMLFT routine (calculate free memory)
     IGNORE_FUNC(0x05A1, 0x05B6);
+
+    // Timer (CX)
+    IGNORE_LOOP(0x5546);
 
     // Ignore loop in Blinky ...
     IGNORE_LOOP_COND(0x6F42, 0x66CA);

@@ -422,6 +422,8 @@ bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
+char cpuXbuf[256];
+int nCpuX = 0;
 
 extern void dispOverflow(bool bOvf);
 
@@ -506,8 +508,14 @@ void core1_main_3(void)
       switch (bit_no) {
       case 43-1:
         // Blue led indicates external rom-reading ...
-        if( !bErr )
+        if( !bErr ) {
+#ifdef PIMORONI_PICOLIPO_16MB
           gpio_put(LED_PIN_B, LED_ON);
+#endif
+#ifdef PIMORONI_TINY2040_8MB
+          gpio_put(LED_PIN_B, LED_ON);
+#endif
+        }
         // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_isa & 1);
         break;
@@ -623,12 +631,12 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-1:
       // Report next FI signal to trace ...
-#if 1
+#if 0
       pBus->fi = getFI();
 #else
       //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      //pBus->fi |= blinky.cntTimer & 0xFF;
+      pBus->fi |= blinky.cntTimer & 0xFF;
       //pBus->fi = blinky.flags;
 #endif
       // Remember last queue write pointer ...
@@ -659,8 +667,11 @@ void core1_main_3(void)
             // This is a special DATA WRITE to reg 0x20
             blinky.reg[14] = pBus->data >> 48LL;
             blinky.flags = blinky.reg[14] & 0xFF;
-          } else
+//            nCpuX += sprintf(cpuXbuf+nCpuX, "-->REG[14]\n");
+          } else {
             blinky.ram[blinky.bwr&0xF] = pBus->data;
+//            nCpuX += sprintf(cpuXbuf+nCpuX, "-->RAM[%d]\n", blinky.bwr);
+          }
           blinky.bwr = 0;
         }
 
@@ -674,8 +685,10 @@ void core1_main_3(void)
                 case  8:
                   if( blinky.reg[8] & 0x80 )
                     blinky.flags |= BLINKY_ENABLE;
+                  break;
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
-                  blinky.cntTimer = blinky.reg[10] & 0xFF;
+                  blinky.cntTimer = blinky.reg[10] & 0xFFF;
+//                  nCpuX += sprintf(cpuXbuf+nCpuX, "TMR=\n");
                   if( blinky.flags & BLINKY_CLK_ENABLE )
                     blinky.cntTimer--;
                   // Writing results in clearing of FI[12]
@@ -698,7 +711,7 @@ void core1_main_3(void)
                 // Enable data driver ...
                 DATA_OUTPUT(blinky.reg[r]);
                 switch(r) {
-                case 10:  data56_out = (data56_out & ~0xFFLL) | blinky.cntTimer; break;
+                case 10:  data56_out = (data56_out & ~0xFFFLL) | blinky.cntTimer; break;
                 case 14:  data56_out = (data56_out & ~0xFFLL) | blinky.flags;    break;
                 }
                 break;
@@ -1132,6 +1145,7 @@ void handle_bus(volatile Bus_t *pBus)
     oCnt = ++oCnt & 0xFFFF;
     if( oCnt != cnt ) {
       nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED %d TRACE CYCLES #########################\n", skipClk);
+      pending_data_inst = 0;
       oCnt = cnt;
     }
   }
@@ -1148,11 +1162,12 @@ void handle_bus(volatile Bus_t *pBus)
     bStat = blinky[0];
   }
 #endif
-#ifdef CPU2_PRT
+#define CPUX_PRT
+#ifdef CPUX_PRT
   // Any printouts from the other CPU ... ?
-  if (cpu2buf[0]) {
-    printf("\n[%s]", cpu2buf);
-    cpu2buf[0] = 0;
+  if (cpuXbuf[0]) {
+    printf("\nCPUX[%s]", cpuXbuf);
+    cpuXbuf[0] = 0;
   }
 #endif
 
