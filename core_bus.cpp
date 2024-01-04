@@ -3,6 +3,8 @@
 #include <time.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
+#include "hardware/pio.h"
+#include "hardware/clocks.h"
 #include "pico/multicore.h"
 #include "tiny41.h"
 #include "core_bus.h"
@@ -11,6 +13,9 @@
 #include <malloc.h>
 #ifdef USE_FLASH
 #include "hardware/flash.h"
+#endif
+#ifdef USE_PIO
+#include "ir_led.h"
 #endif
 
 //#define RESET_FLASH
@@ -382,9 +387,6 @@ volatile int output_data = 0;     // Output ongoing on DATA...
 // The data we drive
 uint16_t drive_isa = 0;
 
-volatile int embed_seen = 0;
-volatile int sync_count = 0;
-
 void handle_bus(volatile Bus_t *pBus);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -438,6 +440,7 @@ void reset_bus_buffer(void)
 }
 
 volatile Blinky_t blinky;
+volatile XMem_t xmem;
 
 void core1_main_3(void)
 {
@@ -465,6 +468,7 @@ void core1_main_3(void)
   pBus = &bus[data_wr];
 
   memset((void*)&blinky, 0, sizeof(Blinky_t));
+  memset((void*)&xmem, 0, sizeof(XMem_t));
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -509,12 +513,7 @@ void core1_main_3(void)
       case 43-1:
         // Blue led indicates external rom-reading ...
         if( !bErr ) {
-#ifdef PIMORONI_PICOLIPO_16MB
           gpio_put(LED_PIN_B, LED_ON);
-#endif
-#ifdef PIMORONI_TINY2040_8MB
-          gpio_put(LED_PIN_B, LED_ON);
-#endif
         }
         // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_isa & 1);
@@ -536,7 +535,8 @@ void core1_main_3(void)
     }
 
     // Wait for CLK1 to have a falling edge
-    WAIT_FALLING(P_CLK1);
+    //WAIT_FALLING(P_CLK1);
+    WAIT_RISING(P_CLK1);
 
     // Another bit, check SYNC to find bit number
     sync = GPIO_PIN(P_SYNC);
@@ -544,7 +544,6 @@ void core1_main_3(void)
     // Increment the bit number (or sync ...)
     if (sync && !last_sync) {
       bIsSync = true;
-      sync_count++;
       bit_no = ISA_SHIFT;
     } else {
       bit_no = (bit_no >= LAST_CYCLE) ? 0 : bit_no+1;
@@ -595,7 +594,6 @@ void core1_main_3(void)
 #ifdef DRIVE_ISA
       // Check if we should emulate any modules ...
       if (mp->isInserted()) {
-        embed_seen++;
         pBus->cmd = drive_isa = (*mp)[pBus->addr];
         drive_isa_flag = 1;
       }
@@ -607,16 +605,20 @@ void core1_main_3(void)
       break;
     case LAST_CYCLE-3:
       // Check blinky timer counter
+      // Timer is clocked by a 85Hz clock, which means that the
+      // timer value should decrement every ~75th bus cycle.
+      // nAlm keeps track of the bus cycle counting, and when 0
+      // timer value is decremented and nAlm restored.
+      // If timervalue is 0, then FI 12 is set
       if( blinky.nAlm && (blinky.flags & BLINKY_CLK_ENABLE) ) {
-        blinky.nAlm--;
-        if( !blinky.nAlm ) {
-          if( blinky.cntTimer == 0 ) {
-            // Set FI flag when counter reaches zero ...
-            setFI(FI_PRT_TIMER);
-          } else {
+        if( --blinky.nAlm == 0 ) {
+          if( blinky.cntTimer ) {
             // Decrement and continue counting ...
             blinky.cntTimer--;
             blinky.nAlm = TIMER_CNT;
+          } else {
+            // Set FI flag when counter reaches zero ...
+            setFI(FI_PRT_TIMER);
           }
         }
       }
@@ -630,8 +632,8 @@ void core1_main_3(void)
       }
       break;
     case LAST_CYCLE-1:
+#if 0 // Select FI or debug info in fi-field
       // Report next FI signal to trace ...
-#if 0
       pBus->fi = getFI();
 #else
       //pBus->fi = ramad;
@@ -661,20 +663,38 @@ void core1_main_3(void)
         pBus->isa = isa;
 #endif
 
+        // If bwr != 0, then update Blinky
         if( blinky.bwr ) {
+          // bwr is incremented to distinguish it from zero (0)
           blinky.bwr--;
           if( blinky.bwr == BLINKY_ADDR ) {
             // This is a special DATA WRITE to reg 0x20
             blinky.reg[14] = pBus->data >> 48LL;
             blinky.flags = blinky.reg[14] & 0xFF;
-//            nCpuX += sprintf(cpuXbuf+nCpuX, "-->REG[14]\n");
           } else {
             blinky.ram[blinky.bwr&0xF] = pBus->data;
-//            nCpuX += sprintf(cpuXbuf+nCpuX, "-->RAM[%d]\n", blinky.bwr);
           }
           blinky.bwr = 0;
         }
 
+        // If bwr != 0, then update X-memory
+        if( xmem.bwr ) {
+          switch( xmem.bwr & 0x300 ) {
+          case 0x000: // XF
+            xmem.fm[xmem.bwr-XMEM_XF_START] = pBus->data;
+            break;
+          case 0x200: // XMem1
+            xmem.m1[xmem.bwr-XMEM_XM1_START] = pBus->data;
+            break;
+          case 0x300: // XMem2
+            xmem.m2[xmem.bwr-XMEM_XM2_START] = pBus->data;
+            break;
+          }
+
+          xmem.bwr = 0;
+        }
+
+        // Handle the printer if it is selected
         if( bPrt ) {
             int r = (pBus->cmd >> 6) & 0x0F;
             int cmd = (pBus->cmd >> 1) & 0x3;
@@ -688,13 +708,13 @@ void core1_main_3(void)
                   break;
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
                   blinky.cntTimer = blinky.reg[10] & 0xFFF;
-//                  nCpuX += sprintf(cpuXbuf+nCpuX, "TMR=\n");
                   if( blinky.flags & BLINKY_CLK_ENABLE )
                     blinky.cntTimer--;
                   // Writing results in clearing of FI[12]
                   clrFI(FI_PRT_BUSY);
                   clrFI(FI_PRT_TIMER);
-                  blinky.nAlm = TIMER_CNT;  // Set flag after some cycles
+                  // Reset timer countdown
+                  blinky.nAlm = TIMER_CNT;
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
                   // Write to out buffer - set buffer flag
@@ -740,6 +760,7 @@ void core1_main_3(void)
                   break;
                 }
             }
+            // Check if return-bit is set
             if( pBus->cmd & 1)
               bPrt = false;
         } else {
@@ -758,12 +779,11 @@ void core1_main_3(void)
             bPrt = true;
             break;
           case INST_ENBANK1:
-            if( bIsSync )
-              mp->bank(0);
-            break;
           case INST_ENBANK2:
+          case INST_ENBANK3:
+          case INST_ENBANK4:
             if( bIsSync )
-              mp->bank(1);
+              mp->bank(pBus->cmd);
             break;
 #ifdef DRIVE_CARRY
           case INST_WANDRD: // READ DATA
@@ -781,13 +801,14 @@ void core1_main_3(void)
           default:
             // Look for read/write towards the Blinky RAM
             if( (ramad & 0x3F0) == BLINKY_ADDR ) {
+              // Accessing RAM 0x20-0x2F
               if( pBus->cmd == INST_WDATA ) {
                 // Note!
                 // A write to BLINKY_ADDR (0x20) should be treated special
-                blinky.bwr = ramad + 1;
+                blinky.bwr = ramad + 1; // bwr = [0x21,0x30]
               } else {
                 // Handle read (0x38) and write (0x28) instructions
-                if( (pBus->cmd & 0x2F) == 0x28 ) {
+                if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
                   int r = (pBus->cmd >> 6) & 0x0F;
                   ramad = BLINKY_ADDR | r;
                   if( pBus->cmd & 0x10 ) {
@@ -796,7 +817,36 @@ void core1_main_3(void)
                   } else {
                     // INST_WRITE_DATA
                     if( blinky.flags & BLINKY_RAM_ENABLE)
-                      blinky.bwr = r+1; // Delayed write ...
+                      blinky.bwr = r+1; // Delayed write ... bwr = [0x01,0x10]
+                  }
+                }
+              }
+            }
+            if( ramad >= XMEM_XM1_START || (ramad >= XMEM_XF_START && ramad < XMEM_XF_END) ) {
+              // X-Function module
+              if( pBus->cmd == INST_WDATA ) {
+                xmem.bwr = ramad;
+              } else {
+                // Handle read (0x38) and write (0x28) instructions
+                if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
+                  int r = (pBus->cmd >> 6) & 0x0F;
+                  ramad = (ramad & 0xFF0) | r;
+                  if( pBus->cmd & 0x10 ) {
+                    // INST_READ_DATA
+                    switch( ramad & 0x300 ) {
+                    case 0x000: // XF
+                      DATA_OUTPUT(xmem.fm[ramad-XMEM_XF_START]);
+                      break;
+                    case 0x200: // XMem1
+                      DATA_OUTPUT(xmem.m1[ramad-XMEM_XM1_START]);
+                      break;
+                    case 0x300: // XMem2
+                      DATA_OUTPUT(xmem.m2[ramad-XMEM_XM2_START]);
+                      break;
+                    }
+                  } else {
+                    // INST_WRITE_DATA
+                    xmem.bwr = ramad;
                   }
                 }
               }
@@ -872,7 +922,7 @@ void post_handling(uint16_t addr)
     wand_scan();
   }
   if (wprt != rprt) {
-    char c = prtBuf[rprt++];
+    uint8_t c = prtBuf[rprt++];
     switch(c) {
       case 0x04:
       case 0x0A: printf("\n"); break;
@@ -883,6 +933,9 @@ void post_handling(uint16_t addr)
         else
           printf("%c", c);
     }
+#ifdef USE_PIO
+    send_to_printer(c);
+#endif
   }
 }
 
@@ -1383,3 +1436,4 @@ void handle_bus(volatile Bus_t *pBus)
     }
   }
 }
+

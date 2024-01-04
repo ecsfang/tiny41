@@ -17,7 +17,15 @@ add_executable(tiny41
   core_bus.cpp
   disasm.cpp
   serial.cpp
+  ir_led.cpp
 )
+
+# Create C header file with the name <pio program>.pio.h
+pico_generate_pio_header(tiny41
+  ../ir_pio/hp41_pio_irout.pio
+)
+
+#pico_set_linker_script(tiny41 ${CMAKE_SOURCE_DIR}/memmap_custom.ld)
 
 pico_enable_stdio_usb(tiny41 1)
 pico_enable_stdio_uart(tiny41 0)
@@ -31,5 +39,6 @@ target_link_libraries(
   hardware_clocks
 	hardware_adc
   pico_multicore
+  hardware_pio
 #  hardware_flash
 )

@@ -51,8 +51,10 @@
 
 #define INST_PRPH_SLCT                 01760 // CPFAD
 #define INST_RAM_SLCT                  01160 // CDADD
-#define INST_SEL_PRT                   01144 // Select printer
 #define INST_POWOFF                    00140
+
+#define INST_SELP                      00044 // Select peripherial
+#define INST_SEL_PRT                   ((9<<6) | INST_SELP) // Select printer
 
 #define INST_FLLDA                     (00000 | INST_READ_DATA)
 #define INST_FLLDB                     (00100 | INST_READ_DATA)

@@ -105,8 +105,10 @@ enum {
     IMG_DIRTY = 0x04
 };
 
+static uint8_t nBank[4] = {0,2,1,3};
+
 class CModule {
-  uint16_t  *m_banks[2];
+  uint16_t  *m_banks[4];
   uint16_t  *m_img;
   uint16_t  m_flgs;
   int       m_bank;
@@ -123,6 +125,8 @@ public:
     m_flgs = IMG_INSERTED;
   }
   void bank(int bank) {
+    // Convert from instruction to bank #
+    bank = nBank[(bank>>6)&0b11];
     if(m_banks[bank])
       m_img = m_banks[bank];
   }
@@ -255,15 +259,13 @@ public:
 #define GPIO_PIN_RD(x) ((gpio_states = sio_hw->gpio_in) & (1 << x))
 #define FI(x) GPIO_PIN_RD(x)
 #define WAIT_FALLING(x) do { while(FI(x) == LOW ) {} while(FI(x) == HIGH ) {} } while(0)
+#define WAIT_RISING(x) do { while(FI(x) == LOW ) {} } while(0)
 #define LOW 0
 #define HIGH 1
 
 extern void core1_main_3(void);
 
 extern void process_bus(void);
-
-extern volatile int sync_count;
-extern volatile int embed_seen;
 
 extern volatile int data_wr;
 extern volatile int data_rd;
@@ -331,20 +333,32 @@ public:
   }
 };
 
-// Set breakpoint on given address
-//void setBrk(uint16_t addr);     // Start trace
-//void stopBrk(uint16_t addr);    // Stop trace
-// Clear breakpoint on given address
-//void clrBrk(uint16_t addr);
-
+// Memory and registers for Blinky module
 typedef struct {
   uint64_t reg[16];
   uint64_t ram[16];
   uint8_t  flags;
-  int nAlm = 0;
-  int cntTimer = 0x7F;
-  int bwr = 0;
-  int busyCnt = 0;
+  int nAlm;
+  int cntTimer;
+  int bwr;
+  int busyCnt;
 } Blinky_t;
+
+#define XMEM_XF_START   0x40
+#define XMEM_XF_END     0xC0
+#define XMEM_XF_SIZE    (XMEM_XF_END-XMEM_XF_START)
+#define XMEM_XM1_START  0x201
+#define XMEM_XM1_END    0x2F0
+#define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START)
+#define XMEM_XM2_START  0x301
+#define XMEM_XM2_END    0x3F0
+#define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
+// Memory for Extended Memory module
+typedef struct {
+  uint64_t fm[XMEM_XF_SIZE];
+  uint64_t m1[XMEM_XM1_SIZE];
+  uint64_t m2[XMEM_XM2_SIZE];
+  int bwr;
+} XMem_t;
 
 #endif//__CORE_BUS_H__

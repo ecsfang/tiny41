@@ -7,6 +7,7 @@
 #include "core_bus.h"
 #include "serial.h"
 #include "disasm.h"
+#include "ir_led.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -16,7 +17,7 @@
 
 // #define OVERCLOCK 135000
 // #define OVERCLOCK 200000
-#define OVERCLOCK 270000
+#define OVERCLOCK 270000        // 270 MHz
 // #define OVERCLOCK 360000
 
 // #define DEBUG_ANALYZER
@@ -36,22 +37,22 @@ void bus_init(void)
     INIT_PIN(P_SYNC, GPIO_IN, 0);
     INIT_PIN(P_ISA, GPIO_IN, 0);
     INIT_PIN(P_DATA, GPIO_IN, 0);
-#ifdef PIMORONI_PICOLIPO_16MB
-    INIT_PIN(P_PWO, GPIO_IN, 0);
-#endif
     // Init the ISA driver ...
-    INIT_PIN(P_ISA_OE, GPIO_OUT, DISABLE_OE);
+    INIT_PIN(P_ISA_OE,  GPIO_OUT, DISABLE_OE);
     INIT_PIN(P_ISA_DRV, GPIO_OUT, 0);
     // Init the ISA driver ...
-    INIT_PIN(P_DATA_OE, GPIO_OUT, DISABLE_OE);
+    INIT_PIN(P_DATA_OE,  GPIO_OUT, DISABLE_OE);
     INIT_PIN(P_DATA_DRV, GPIO_OUT, 0);
     // Init the FI driver ...
     INIT_PIN(P_FI_OE, GPIO_OUT, DISABLE_OE);
-    // Init leds ...
 #ifdef PIMORONI_PICOLIPO_16MB
+    // Init leds ...
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
+    INIT_PIN(P_IR_LED, GPIO_OUT, LED_OFF);
+    INIT_PIN(P_PWO, GPIO_IN, 0);
 #endif
 #ifdef PIMORONI_TINY2040_8MB
+    // Init leds ...
     INIT_PIN(LED_PIN_R, GPIO_OUT, LED_OFF);
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
 #endif
@@ -110,6 +111,11 @@ int main()
 
     printf("Init all pins ...\n");
     bus_init();
+
+#ifdef USE_PIO
+    // Init IR-led for printer
+    init_ir();
+#endif
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
@@ -216,6 +222,9 @@ int main()
     IGNORE_LOOP(0x6768);    // Bank 1
 
     bool bErr = false;
+
+//    send_to_printer((char *)"Hello from Tiny2040!\n");
+
     while (1)
     {
         process_bus();
@@ -238,20 +247,8 @@ int main()
 
 #ifdef DEBUG_ANALYZER
         WriteString(buf, 5, STATUS_ROW, (char *)(CHK_GPIO(P_POW)?"    ":"IDLE"));
-        if (oSync != sync_count || oEmbed != embed_seen)
-        {
-            sprintf(sBuf, "S:%d E:%d", sync_count, embed_seen);
-            WriteString(buf, 5, (STATUS_START+1)*8, sBuf);
-            oSync = sync_count;
-            oEmbed = embed_seen;
-        }
-        if (oDin != data_in || oDout != data_out)
-        {
-            sprintf(sBuf, "I:%d O:%d", data_in, data_out);
-            WriteString(buf, 5, (STATUS_START+2)*8, sBuf);
-            oDin = data_in;
-            oDout = data_out;
-        }
+        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
+        WriteString(buf, 5, (STATUS_START+2)*8, sBuf);
         bRend = REND_ALL;
 #endif // DEBUG_ANALYZER
         // Need to update the display ... ?
