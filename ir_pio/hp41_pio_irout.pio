@@ -1,0 +1,114 @@
+.program hp41_pio_irout
+
+; ****************************************
+; **   HP41 PIO interface
+; **   state machine for IR output to the infrared LED
+; **   (C) 2023 Meindert Kuipers
+; ****************************************
+
+; **
+; ** autopull the bits from the TX FIFO, threshold set at 30
+; ** normally 27 half-bits are sent, allow for 3 extra half bits for the inter-frame delay
+; ** bit order for output is MSB first (left shifts out first)
+
+; ** pins used:     
+; **    inputs:     CLK01       GPIO12  GPIO07  HP41 CLK01 signal
+; **                CLK02       GPIO13  GPIO08  HP41 CLK02 signal
+; **                DATA        GPIO16  GPIO09  HP41 DATA signal
+; **                ISA         GPIO14  GPIO10  HP41 ISA signal
+; **                SYNC        GPIO15  GPIO11  HP41 SYNC signal
+; **                T0_TIME     GPIO26, active low signal!
+; **                                    is active low during DATA bit D0 between the rising edges of CLK02
+; **                                    used to end DATA cycle and to issue the ISA carry bit when requested
+; **                                    used for timing FI flag output
+; **                SYNC_TIME   GPIO27, active during ISA INSTRUCTION, same as SYNC but at all cycles
+; **                                    used for timing ISA INSTRUCTION output
+; **   output:      IR_LED      GPIO2,  Infrared LED, this is a sideset output! TEMPORARY!
+
+; **    
+; ** out base will be IR_LED (GPIO2 TEMPORARY)
+
+; ** define the fixed signals (cannot be parameters)
+
+.side_set 1                                     ; just one sideset for the IR output
+
+lolo:                                           ; send out the first lo cycle
+        nop                     side 0  [13]    ; delay to be timed at 14* 15,2588 usec
+
+.wrap_target         
+        nop                     side 0  [11]    ; always the 2nd lo cycle, 
+                                                ; delay to be timed at 14* 15,2588 usec
+
+public ir_start:  
+        out x,1                 side 0          ; read from TX FIFO into x
+        jmp !x, lolo            side 0          ; when X = 0, a lolo sequence is done
+                                                ; when x <> 0, a hilo sequence is done
+hilo:                                           ; hilo sends out 7 IR pulses, and 7 bit times low
+        set x,6                 side 0          ; set X to send out 7 bits
+hilo_loop: 
+        nop                     side 1          ; send out high IR pulse of 15,2588 usecs
+        jmp x--, hilo_loop      side 0          ; send out low IR pulse of 15,2588 usecs
+
+        .wrap                                   ; free jump to .wrap_target for lo cycle
+
+; 7 instructions
+
+//
+// helper functions for hp41_pio_irout
+//
+
+% c-sdk {
+static inline void hp41_pio_irout_program_init(PIO pio, uint sm, uint offset, 
+        uint out_base_pin,              // base for output pin (not used)
+        uint sideset_base_pin,          // base for sideset outputs IR_LED
+        uint jmp_pin)                   // not used
+    
+{
+    pio_sm_config c = hp41_pio_irout_program_get_default_config(offset);
+
+    // set correct pin direction for outputs
+    // pio_sm_set_consecutive_pindirs(pio, sm, out_base_pin, 1, true);          // not used
+    pio_sm_set_consecutive_pindirs(pio, sm, sideset_base_pin, 1, true);         // pin direction for IR_LED and IR_HELP
+
+
+    // sm_config_set_out_pins(&c, out_base_pin, 1);             // no outputs
+    sm_config_set_sideset_pins(&c, sideset_base_pin);           // side set is our IR_LED
+    // sm_config_set_jmp_pin(&c, jmp_pin);                      // not used
+
+    // Configure Output Shift Register OSR
+    // Shifting to left is our desired bit order, msb sent out first!
+    // autopull is needed for constant output
+    sm_config_set_out_shift(
+        &c,
+        false,  // Shift-to-right = false, MSB is sent out first!
+        true,   // Autopull = true
+        30      // Autopull threshold = 27 !!
+                // normally total 27 half-bits are sent
+                // allow 3 additional half bits for the inter-frame delay
+    );
+
+    // configure the clock to run at 12.5 MHz, clock divider is 100
+    // one clockcycle is now 800 ns
+    // CPU speed is 125.000.000 Hz (125 MHz)
+    // target clock rate is 2*32768 Hz
+    //`resulting clock divider is 1907,3486
+
+    // float clkdiv = 100;
+    // float clkdiv = 1964.0;  // original
+    float clkdiv = 4120.0;  // To match 270MHz CPU speed
+    // float clkdiv = 1000;  // testing
+    sm_config_set_clkdiv(&c, clkdiv);
+
+    // connect the pins to the PIO for output
+    // pio_gpio_init(pio, out_base_pin);               // not used
+    pio_gpio_init(pio, sideset_base_pin);               // IR_LED
+    // pio_gpio_init(pio, sideset_base_pin + 1);           // IR_HELP
+
+    // load the configuration and jump to the start of the program
+    pio_sm_init(pio, sm, offset + hp41_pio_irout_offset_ir_start, &c);                 // must use the ir_start entry
+
+    // and start the pio state machine
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
