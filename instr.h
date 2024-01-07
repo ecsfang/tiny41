@@ -7,6 +7,7 @@
 #define INST_WRITE_DATA                00050    // 0000 0010 1000   0x28
 #define INST_READ_DATA                 00070    // 0000 0011 1000   0x38
 
+#define INST_READ_OR_WRITE             INST_READ_DATA
 #define INST_RDATA                     INST_READ_DATA
 #define INST_WDATA                     01360    // 001 011 110 000   0x2F0
 

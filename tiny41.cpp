@@ -103,7 +103,10 @@ int main()
 
 
     // Must read flash before we goto highspeed ...
+    printf("Init ROMs ...\n");
     initRoms();
+
+    printf("Init XMemory ...\n");
 
     /* Overclock */
     printf("Overclock ...\n");
@@ -225,6 +228,7 @@ int main()
 
 //    send_to_printer((char *)"Hello from Tiny2040!\n");
 
+    int pwo = 0;
     while (1)
     {
         process_bus();
@@ -247,8 +251,8 @@ int main()
 
 #ifdef DEBUG_ANALYZER
         WriteString(buf, 5, STATUS_ROW, (char *)(CHK_GPIO(P_POW)?"    ":"IDLE"));
-        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
-        WriteString(buf, 5, (STATUS_START+2)*8, sBuf);
+//        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
+//        WriteString(buf, 5, (STATUS_START+2)*8, sBuf);
         bRend = REND_ALL;
 #endif // DEBUG_ANALYZER
         // Need to update the display ... ?

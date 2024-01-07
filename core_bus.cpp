@@ -27,6 +27,8 @@
 
 extern CDisplay    disp41;
 
+CXFM xmem;
+
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
 #define FLASH_TARGET_OFFSET (512 * 1024)
@@ -237,14 +239,18 @@ void readPort(int n, uint16_t *data)
   }
 }
 // Read flash into ram for wand use
-void read8Port(int n, uint8_t *data)
+void read8Data(int p, uint8_t *data, uint16_t size)
 {
   // Point at the wanted flash image ...
-  const uint8_t *fp = (uint8_t*)(XIP_BASE + PAGE1(n));
-  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
-    // Swap order to get right endian of 16-bit word ...
+  const uint8_t *fp = (uint8_t*)(XIP_BASE + p);
+  for (uint16_t i = 0; i < size; ++i) {
     data[i] = *fp++;
   }
+}
+// Read flash into ram for wand use
+void read8Port(int n, uint8_t *data)
+{
+  read8Data(PAGE1(n), data, FLASH_SECTOR_SIZE);
 }
 #endif
 
@@ -269,6 +275,24 @@ void saveRam(int port, int ovr = 0)
   } else {
       printf("Invalid page! [%X]\n", port);
   }
+}
+void saveXMem(int bank = 0)
+{
+  uint32_t ints = save_and_disable_interrupts();
+  int port = bank ? PAGE2(NR_PAGES+1) : PAGE1(NR_PAGES+1);
+  flash_range_erase(port, FLASH_SECTOR_SIZE);
+  if( bank == 0 )
+    flash_range_program(port, (uint8_t*)xmem.fm, sizeof(uint64_t)*(XMEM_XF_SIZE+XMEM_XM1_SIZE));
+  else
+    flash_range_program(port, (uint8_t*)xmem.m2, sizeof(uint64_t)*(XMEM_XM2_SIZE));
+  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
+  if( bank == 0 ) {
+    memcpy((void*)xmem._fm, (void*)xmem.fm, sizeof(uint64_t)*(XMEM_XF_SIZE));
+    memcpy((void*)xmem._m1, (void*)xmem.m1, sizeof(uint64_t)*(XMEM_XM1_SIZE));
+  } else {
+    memcpy((void*)xmem._m2, (void*)xmem.m2, sizeof(uint64_t)*(XMEM_XM2_SIZE));
+  }
+  printf("Saved XMemory(%d) to flash!\n", bank);
 }
 #endif
 
@@ -324,6 +348,29 @@ void loadPage(int page, uint16_t *img, int bank = 0)
   }
 }
 
+void initXMem(volatile CXFM *pXmem)
+{
+  uint8_t xd[PAGE_SIZE];
+  int xPage = NR_PAGES+1;
+  int p = 0;
+
+  read8Data(PAGE1(xPage), xd, sizeof(uint64_t)*(XMEM_XF_SIZE+XMEM_XM1_SIZE));
+
+  memcpy((void*)pXmem->fm, xd, sizeof(uint64_t)*(XMEM_XF_SIZE));
+  memcpy((void*)pXmem->_fm, xd, sizeof(uint64_t)*(XMEM_XF_SIZE));
+  pXmem->bFm = false;
+  p += sizeof(uint64_t)*(XMEM_XF_SIZE);
+  memcpy((void*)pXmem->m1, xd+p, sizeof(uint64_t)*(XMEM_XM1_SIZE));
+  memcpy((void*)pXmem->_m1, xd+p, sizeof(uint64_t)*(XMEM_XM1_SIZE));
+  pXmem->bM1 = false;
+
+  p = 0;
+  read8Data(PAGE2(xPage), xd, sizeof(uint64_t)*(XMEM_XM2_SIZE));
+  memcpy((void*)pXmem->m2, xd+p, sizeof(uint64_t)*(XMEM_XM2_SIZE));
+  memcpy((void*)pXmem->_m2, xd+p, sizeof(uint64_t)*(XMEM_XM2_SIZE));
+  pXmem->bM2 = false;
+}
+
 void initRoms()
 {
 #ifdef USE_FLASH
@@ -362,6 +409,8 @@ void initRoms()
   loadPage(6, bank_page, 1);
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
+
+  initXMem(&xmem);
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
@@ -440,7 +489,7 @@ void reset_bus_buffer(void)
 }
 
 volatile Blinky_t blinky;
-volatile XMem_t xmem;
+//volatile XMem_t xmem;
 
 void core1_main_3(void)
 {
@@ -468,7 +517,7 @@ void core1_main_3(void)
   pBus = &bus[data_wr];
 
   memset((void*)&blinky, 0, sizeof(Blinky_t));
-  memset((void*)&xmem, 0, sizeof(XMem_t));
+  //memset((void*)&xmem, 0, sizeof(XMem_t));
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -636,9 +685,9 @@ void core1_main_3(void)
       // Report next FI signal to trace ...
       pBus->fi = getFI();
 #else
-      //pBus->fi = ramad;
+      pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      pBus->fi |= blinky.cntTimer & 0xFF;
+      //pBus->fi |= blinky.cntTimer & 0xFF;
       //pBus->fi = blinky.flags;
 #endif
       // Remember last queue write pointer ...
@@ -682,15 +731,19 @@ void core1_main_3(void)
           switch( xmem.bwr & 0x300 ) {
           case 0x000: // XF
             xmem.fm[xmem.bwr-XMEM_XF_START] = pBus->data;
+            xmem.bFm = true;
             break;
+#ifdef XMEM_MODULE            
           case 0x200: // XMem1
             xmem.m1[xmem.bwr-XMEM_XM1_START] = pBus->data;
+            xmem.bM1 = true;
             break;
           case 0x300: // XMem2
             xmem.m2[xmem.bwr-XMEM_XM2_START] = pBus->data;
+            xmem.bM2 = true;
             break;
+#endif//XMEM_MODULE            
           }
-
           xmem.bwr = 0;
         }
 
@@ -822,31 +875,39 @@ void core1_main_3(void)
                 }
               }
             }
-            if( ramad >= XMEM_XM1_START || (ramad >= XMEM_XF_START && ramad < XMEM_XF_END) ) {
-              // X-Function module
-              if( pBus->cmd == INST_WDATA ) {
-                xmem.bwr = ramad;
-              } else {
-                // Handle read (0x38) and write (0x28) instructions
-                if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
-                  int r = (pBus->cmd >> 6) & 0x0F;
-                  ramad = (ramad & 0xFF0) | r;
-                  if( pBus->cmd & 0x10 ) {
-                    // INST_READ_DATA
-                    switch( ramad & 0x300 ) {
-                    case 0x000: // XF
-                      DATA_OUTPUT(xmem.fm[ramad-XMEM_XF_START]);
-                      break;
-                    case 0x200: // XMem1
-                      DATA_OUTPUT(xmem.m1[ramad-XMEM_XM1_START]);
-                      break;
-                    case 0x300: // XMem2
-                      DATA_OUTPUT(xmem.m2[ramad-XMEM_XM2_START]);
-                      break;
+//            if( ramad >= XMEM_XM1_START || (ramad >= XMEM_XF_START && ramad < XMEM_XF_END) ) {
+            if( ramad >= XMEM_XF_START && ramad < XMEM_XF_END ) {
+              if( perph == 0 ) {
+                // X-Function module
+                if( pBus->cmd == INST_WDATA ) {
+                  xmem.bwr = ramad;
+                } else {
+                  // Handle read (0x38) and write (0x28) instructions
+                  if( (pBus->cmd & 0x2F) == INST_READ_OR_WRITE ) {
+                    int r = (pBus->cmd >> 6) & 0x0F;
+                    if(pBus->cmd != INST_READ_DATA) {
+                      // Don't update ramad if inst READ DATA (0x38)
+                      ramad = (ramad & 0xFF0) | r;
                     }
-                  } else {
-                    // INST_WRITE_DATA
-                    xmem.bwr = ramad;
+                    if( pBus->cmd & 0x10 ) {
+                      // INST_READ_DATA
+                      switch( ramad & 0x300 ) {
+                      case 0x000: // XF
+                        DATA_OUTPUT(xmem.fm[ramad-XMEM_XF_START]);
+                        break;
+#ifdef XMEM_MODULE            
+                      case 0x200: // XMem1
+                        DATA_OUTPUT(xmem.m1[ramad-XMEM_XM1_START]);
+                        break;
+                      case 0x300: // XMem2
+                        DATA_OUTPUT(xmem.m2[ramad-XMEM_XM2_START]);
+                        break;
+#endif//XMEM_MODULE            
+                      }
+                    } else {
+                      // INST_WRITE_DATA
+                      xmem.bwr = ramad;
+                    }
                   }
                 }
               }
@@ -980,6 +1041,12 @@ void process_bus(void)
     dumpCycle(pb);
 #else
     // Handle the bus traffic
+    if( pb->addr < 0x3000 ) {
+      if( IS_TRACE() )
+        skipClk = 0;
+      END_TRACE();
+    } else
+      START_TRACE();
     br = brk.isBrk(pb->addr);
     if( br == BRK_START )
       START_TRACE();
@@ -1400,6 +1467,12 @@ void handle_bus(volatile Bus_t *pBus)
           saveRam(p);
           printf("Updated QRAM in page #X\n", p);
         }
+      }
+      if( xmem.dirtyFM() || xmem.dirtyM1() ) {
+        saveXMem(0);
+      }
+      if( xmem.dirtyM2() ) {
+        saveXMem(1);
       }
       break;
     }

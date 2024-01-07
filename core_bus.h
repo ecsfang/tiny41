@@ -347,18 +347,34 @@ typedef struct {
 #define XMEM_XF_START   0x40
 #define XMEM_XF_END     0xC0
 #define XMEM_XF_SIZE    (XMEM_XF_END-XMEM_XF_START)
-#define XMEM_XM1_START  0x201
-#define XMEM_XM1_END    0x2F0
-#define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START)
-#define XMEM_XM2_START  0x301
-#define XMEM_XM2_END    0x3F0
-#define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
+#define XMEM_XM1_START  0x200
+#define XMEM_XM1_END    0x2FF
+#define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START+1)
+#define XMEM_XM2_START  0x300
+#define XMEM_XM2_END    0x3FF
+#define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START+1)
 // Memory for Extended Memory module
-typedef struct {
-  uint64_t fm[XMEM_XF_SIZE];
-  uint64_t m1[XMEM_XM1_SIZE];
-  uint64_t m2[XMEM_XM2_SIZE];
+class CXFM {
+public:
+  uint64_t _fm[XMEM_XF_SIZE];
+  uint64_t _m1[XMEM_XM1_SIZE];
+  uint64_t _m2[XMEM_XM2_SIZE];
+  bool bFm;
+  bool bM1;
+  bool bM2;
+  volatile uint64_t fm[XMEM_XF_SIZE];
+  volatile uint64_t m1[XMEM_XM1_SIZE];
+  volatile uint64_t m2[XMEM_XM2_SIZE];
   int bwr;
-} XMem_t;
+  bool dirtyFM() {
+    return memcmp((void*)fm, (void*)_fm, sizeof(fm))?true:false;
+  }
+  bool dirtyM1() {
+    return memcmp((void*)m1, (void*)_m1, sizeof(m1))?true:false;
+  }
+  bool dirtyM2() {
+    return memcmp((void*)m2, (void*)_m2, sizeof(m2))?true:false;
+  }
+};
 
 #endif//__CORE_BUS_H__
