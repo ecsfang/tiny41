@@ -615,7 +615,7 @@ void core1_main_3(void)
           if( blinky.cntTimer ) {
             // Decrement and continue counting ...
             blinky.cntTimer--;
-            blinky.nAlm = TIMER_CNT;
+            blinky.nAlm = blinky.reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
           } else {
             // Set FI flag when counter reaches zero ...
             setFI(FI_PRT_TIMER);
@@ -632,7 +632,7 @@ void core1_main_3(void)
       }
       break;
     case LAST_CYCLE-1:
-#if 0 // Select FI or debug info in fi-field
+#if 1 // Select FI or debug info in fi-field
       // Report next FI signal to trace ...
       pBus->fi = getFI();
 #else
@@ -714,7 +714,8 @@ void core1_main_3(void)
                   clrFI(FI_PRT_BUSY);
                   clrFI(FI_PRT_TIMER);
                   // Reset timer countdown
-                  blinky.nAlm = TIMER_CNT;
+                  //blinky.nAlm = TIMER_CNT;
+                  blinky.nAlm = blinky.reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
                   // Write to out buffer - set buffer flag

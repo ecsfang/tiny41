@@ -33,7 +33,8 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
-#define TIMER_CNT   75
+#define TIMER_CNT1  75
+#define TIMER_CNT2  825
 #define BUSY_CNT    8
 
 enum {
