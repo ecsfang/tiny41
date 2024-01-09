@@ -54,8 +54,8 @@ enum {
     BIT_13  = 1 << 13
 };
 
-#define BLINKY_RAM_ENABLE   BIT_6
-#define BLINKY_CLK_ENABLE   BIT_4
+#define BLINKY_RAM_ENABLE   BIT_4
+#define BLINKY_CLK_ENABLE   BIT_6
 #define BLINKY_ENABLE       BIT_7
 
 enum {
@@ -345,20 +345,26 @@ typedef struct {
   int busyCnt;
 } Blinky_t;
 
+#define USE_XFUNC
+#define USE_XMEM1
+#define USE_XMEM2
+
 #define XMEM_XF_START   0x40
 #define XMEM_XF_END     0xC0
 #define XMEM_XF_SIZE    (XMEM_XF_END-XMEM_XF_START)
+#define XMEM_XF_OFFS    0x000
 #define XMEM_XM1_START  0x201
 #define XMEM_XM1_END    0x2F0
 #define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START)
+#define XMEM_XM1_OFFS   XMEM_XF_SIZE
 #define XMEM_XM2_START  0x301
 #define XMEM_XM2_END    0x3F0
 #define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
+#define XMEM_XM2_OFFS   (XMEM_XF_SIZE+XMEM_XM1_SIZE)
+
 // Memory for Extended Memory module
 typedef struct {
-  uint64_t fm[XMEM_XF_SIZE];
-  uint64_t m1[XMEM_XM1_SIZE];
-  uint64_t m2[XMEM_XM2_SIZE];
+  uint64_t mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
   int bwr;
 } XMem_t;
 

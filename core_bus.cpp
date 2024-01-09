@@ -439,6 +439,40 @@ void reset_bus_buffer(void)
   }
 }
 
+bool isXmemAddr(uint16_t addr)
+{
+#if defined(USE_XFUNC)
+  if( (addr >= XMEM_XF_START && addr < XMEM_XF_END) )
+    return true;
+#if defined(USE_XMEM1) || defined(USE_XMEM2)
+  if( (addr >= XMEM_XM1_START && addr < XMEM_XM1_END) )
+    return true;
+#endif
+#if defined(USE_XMEM2)
+  if( (addr >= XMEM_XM2_START && addr < XMEM_XM2_END) )
+    return true;
+#endif
+#endif
+  return false;
+}
+
+int getXmemAddr(uint16_t addr)
+{
+#if defined(USE_XFUNC)
+  if( (addr >= XMEM_XF_START && addr < XMEM_XF_END) )
+    return addr - XMEM_XF_START + 1;
+#if defined(USE_XMEM1) || defined(USE_XMEM2)
+  if( (addr >= XMEM_XM1_START && addr < XMEM_XM1_END) )
+    return addr - XMEM_XM1_START + XMEM_XM1_OFFS + 1;
+#endif
+#if defined(USE_XMEM2)
+  if( (addr >= XMEM_XM2_START && addr < XMEM_XM2_END) )
+    return addr - XMEM_XM2_START + XMEM_XM2_OFFS + 1;
+#endif
+#endif
+  return 0;
+}
+
 volatile Blinky_t blinky;
 volatile XMem_t xmem;
 
@@ -457,13 +491,15 @@ void core1_main_3(void)
   static bool bSelPa = false;   // True if peripheral address is in next cycle
   static uint8_t perph = 0;     // Selected pheripheral
   static bool bSelRam = false;  // True if RAM address is in next cycle
-  static uint16_t ramad = 0;    // Current RAM pointer
+  static uint32_t ramad = 0;    // Current RAM pointer
   static bool bErr = false;     // True if corrupt cycle is detected
   static bool bPrt = false;     // True if printer is selected
   static CModule *mp = NULL;    // Pointer to current module (if selected)
   volatile Bus_t *pBus;         // Pointer into trace buffer
   static int last_data_wr;      // Keep track of trace overflow
   static uint16_t iCnt = 0;     // Cycle counter for trace
+  static uint32_t xmAddr = 0;
+  //static bool isXMem = false;
 
   pBus = &bus[data_wr];
 
@@ -580,6 +616,25 @@ void core1_main_3(void)
         // Get the selected peripheral
         ramad = data56 & 0x3FF;
         bSelRam = false;
+        if( perph )
+          xmAddr = 0;
+        else
+          xmAddr = getXmemAddr(ramad);  // Address = [1..XF_END+1]
+        //isXMem = isXmemAddr(ramad);
+/*
+#if defined(USE_XFUNC)
+        if( (ramad >= XMEM_XF_START && ramad < XMEM_XF_END) )
+          xmAddr = ramad - XMEM_XF_START + 1;
+#if defined(USE_XMEM1) || defined(USE_XMEM2)
+        if( (ramad >= XMEM_XM1_START && ramad < XMEM_XM1_END) )
+          xmAddr = ramad - XMEM_XM1_START + XMEM_XM1_OFFS + 1;
+#endif
+#if defined(USE_XMEM2)
+        if( (ramad >= XMEM_XM2_START && ramad < XMEM_XM2_END) )
+          xmAddr = ramad - XMEM_XM2_START + XMEM_XM2_OFFS + 1;
+#endif
+#endif
+*/
       }
       break;
 
@@ -632,13 +687,23 @@ void core1_main_3(void)
       }
       break;
     case LAST_CYCLE-1:
-#if 1 // Select FI or debug info in fi-field
+#if 0 // Select FI or debug info in fi-field
       // Report next FI signal to trace ...
       pBus->fi = getFI();
 #else
+      if( xmAddr && !perph ) {
+        pBus->fi = (xmAddr-1);
+        if( pBus->fi >= XMEM_XM2_OFFS )
+          pBus->fi += XMEM_XM2_START-XMEM_XM2_OFFS;
+        else if( pBus->fi >= XMEM_XM1_OFFS )
+          pBus->fi += XMEM_XM1_START-XMEM_XM1_OFFS;
+        else
+          pBus->fi += XMEM_XF_START;
+      } else
+        pBus->fi = 0;
       //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      pBus->fi |= blinky.cntTimer & 0xFF;
+      //pBus->fi |= blinky.cntTimer & 0xFF;
       //pBus->fi = blinky.flags;
 #endif
       // Remember last queue write pointer ...
@@ -679,18 +744,7 @@ void core1_main_3(void)
 
         // If bwr != 0, then update X-memory
         if( xmem.bwr ) {
-          switch( xmem.bwr & 0x300 ) {
-          case 0x000: // XF
-            xmem.fm[xmem.bwr-XMEM_XF_START] = pBus->data;
-            break;
-          case 0x200: // XMem1
-            xmem.m1[xmem.bwr-XMEM_XM1_START] = pBus->data;
-            break;
-          case 0x300: // XMem2
-            xmem.m2[xmem.bwr-XMEM_XM2_START] = pBus->data;
-            break;
-          }
-
+          xmem.mem[xmem.bwr-1] = pBus->data;
           xmem.bwr = 0;
         }
 
@@ -800,54 +854,51 @@ void core1_main_3(void)
             // Fall trough!!!
 #endif
           default:
-            // Look for read/write towards the Blinky RAM
-            if( (ramad & 0x3F0) == BLINKY_ADDR ) {
-              // Accessing RAM 0x20-0x2F
-              if( pBus->cmd == INST_WDATA ) {
-                // Note!
-                // A write to BLINKY_ADDR (0x20) should be treated special
-                blinky.bwr = ramad + 1; // bwr = [0x21,0x30]
-              } else {
-                // Handle read (0x38) and write (0x28) instructions
-                if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
-                  int r = (pBus->cmd >> 6) & 0x0F;
-                  ramad = BLINKY_ADDR | r;
-                  if( pBus->cmd & 0x10 ) {
-                    // INST_READ_DATA
-                    DATA_OUTPUT(blinky.ram[r]);
-                  } else {
-                    // INST_WRITE_DATA
-                    if( blinky.flags & BLINKY_RAM_ENABLE)
-                      blinky.bwr = r+1; // Delayed write ... bwr = [0x01,0x10]
+            if( !perph ) {
+              // Look for read/write towards the Blinky RAM
+              if( (ramad & 0x3F0) == BLINKY_ADDR ) {
+                // Accessing RAM 0x20-0x2F
+                if( pBus->cmd == INST_WDATA ) {
+                  // Note!
+                  // A write to BLINKY_ADDR (0x20) should be treated special
+                  blinky.bwr = ramad + 1; // bwr = [0x21,0x30]
+                } else {
+                  // Handle read (0x38) and write (0x28) instructions
+                  if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
+                    int r = (pBus->cmd >> 6) & 0x0F;
+                    if( pBus->cmd != INST_READ_DATA )
+                      ramad = BLINKY_ADDR | r;  // Update ram select pointer
+                    if( pBus->cmd & 0x10 ) {
+                      // INST_READ_DATA
+                      DATA_OUTPUT(blinky.ram[r]);
+                    } else {
+                      // INST_WRITE_DATA
+                      if( blinky.flags & BLINKY_RAM_ENABLE)
+                        blinky.bwr = r+1; // Delayed write ... bwr = [0x01,0x10]
+                    }
                   }
                 }
-              }
-            }
-            if( ramad >= XMEM_XM1_START || (ramad >= XMEM_XF_START && ramad < XMEM_XF_END) ) {
-              // X-Function module
-              if( pBus->cmd == INST_WDATA ) {
-                xmem.bwr = ramad;
-              } else {
-                // Handle read (0x38) and write (0x28) instructions
-                if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
-                  int r = (pBus->cmd >> 6) & 0x0F;
-                  ramad = (ramad & 0xFF0) | r;
-                  if( pBus->cmd & 0x10 ) {
-                    // INST_READ_DATA
-                    switch( ramad & 0x300 ) {
-                    case 0x000: // XF
-                      DATA_OUTPUT(xmem.fm[ramad-XMEM_XF_START]);
-                      break;
-                    case 0x200: // XMem1
-                      DATA_OUTPUT(xmem.m1[ramad-XMEM_XM1_START]);
-                      break;
-                    case 0x300: // XMem2
-                      DATA_OUTPUT(xmem.m2[ramad-XMEM_XM2_START]);
-                      break;
+              } else if( xmAddr ) {
+                // X-Function module
+                if( pBus->cmd == INST_WDATA ) {
+                  xmem.bwr = xmAddr;
+                } else {
+                  // Handle read (0x38) and write (0x28) instructions
+                  if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
+                    int r = (pBus->cmd >> 6) & 0x0F;
+                    if( pBus->cmd != INST_READ_DATA ) {
+                      // Update ram select pointer
+                      ramad = (ramad & 0xFF0) | r;
                     }
-                  } else {
-                    // INST_WRITE_DATA
-                    xmem.bwr = ramad;
+                    xmAddr = getXmemAddr(ramad);
+                    if( pBus->cmd & 0x10 ) {
+                      // INST_READ_DATA
+                      DATA_OUTPUT(xmem.mem[xmAddr-1]);
+                      //xmAddr = 0;
+                    } else {
+                      // INST_WRITE_DATA
+                      xmem.bwr = xmAddr;
+                    }
                   }
                 }
               }

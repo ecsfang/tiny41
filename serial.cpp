@@ -151,6 +151,39 @@ void dump_blinky(void)
   }
   printf("\n");
 }
+
+extern volatile XMem_t xmem;
+
+void dump_xmem(void)
+{
+#ifdef USE_XMEM2
+  printf("XMemory Module 2\n=====================================\n");
+  for(int i=XMEM_XM2_SIZE-1; i>=0; i--) {
+    printf("Reg %03X: %014llx\n", i+XMEM_XM2_START, xmem.mem[i+XMEM_XM2_OFFS]);
+  }
+  printf("\n");
+#endif
+#ifdef USE_XMEM1
+  printf("XMemory Module 1\n=====================================\n");
+  for(int i=XMEM_XM1_SIZE-1; i>=0; i--) {
+    printf("Reg %03X: %014llx\n", i+XMEM_XM1_START, xmem.mem[i+XMEM_XM1_OFFS]);
+  }
+  printf("\n");
+#endif
+#ifdef USE_XFUNC
+  printf("XFunction Memory\n=====================================\n");
+  for(int i=XMEM_XF_SIZE-1; i>=0; i--) {
+    printf("Reg %03X: %014llx\n", i+XMEM_XF_START, xmem.mem[i]);
+  }
+  printf("\n");
+#endif
+}
+void clr_xmem(void)
+{
+  printf("Clear XMemory\n");
+  memset((void*)xmem.mem,0,sizeof(xmem.mem));
+}
+
 extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -161,6 +194,8 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'b', listBreakpoints,   "List breakpoints"  },
   { 'B', set_brk,           "Set breakpoint"  },
   { 'E', end_brk,           "End breakpoint"  },
+  { 'f', dump_xmem,         "Dump XMemory"  },
+  { 'F', clr_xmem,          "Clear XMemory"  },
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
