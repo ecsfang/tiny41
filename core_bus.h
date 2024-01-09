@@ -366,17 +366,18 @@ typedef struct {
 class CXFM {
   uint64_t _mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
 public:
-  volatile uint64_t mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+//  volatile uint64_t mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+  volatile uint64_t *mem;
   bool bDirty;
   int bwr;
   bool dirty() {
-    return memcmp((void*)mem, (void*)_mem, sizeof(mem))?true:false;
+    return memcmp((void*)mem, (void*)_mem, sizeof(_mem))?true:false;
   }
   void saveMem(void) {
-    memcpy((void*)_mem, (void*)mem, sizeof(mem));
+    memcpy((void*)_mem, (void*)mem, sizeof(_mem));
   }
   int size(void) {
-    return (int)sizeof(mem);
+    return (int)sizeof(_mem);
   }
 };
 

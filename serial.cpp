@@ -181,7 +181,7 @@ void dump_xmem(void)
 void clr_xmem(void)
 {
   printf("Clear XMemory\n");
-  memset((void*)xmem.mem,0,sizeof(xmem.mem));
+  memset((void*)xmem.mem,0,xmem.size());
   xmem.saveMem();
 }
 

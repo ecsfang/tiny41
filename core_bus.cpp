@@ -29,6 +29,8 @@ extern CDisplay    disp41;
 
 CXFM xmem;
 
+static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
 #define FLASH_TARGET_OFFSET (512 * 1024)
@@ -282,16 +284,19 @@ void saveXMem(void)
   int port2 = PAGE2(NR_PAGES+1);
   int sz1 = xmem.size() > FLASH_SECTOR_SIZE ? FLASH_SECTOR_SIZE : xmem.size();
   int sz2 = xmem.size() > FLASH_SECTOR_SIZE ? xmem.size()-FLASH_SECTOR_SIZE : 0;
-  uint32_t ints = save_and_disable_interrupts();
-  flash_range_erase(port1, FLASH_SECTOR_SIZE);
-  flash_range_program(port1, (uint8_t*)xmem.mem, sz1);
-  if( sz2 ) {
-    flash_range_erase(port2, FLASH_SECTOR_SIZE);
-    flash_range_program(port2, ((uint8_t*)xmem.mem) + sz1, sz2);
-  }
-  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
+  uint8_t *xp = (uint8_t*)__mem;
   xmem.saveMem();
-  printf("Saved XMemory(%d bytes) to flash!\n", sz1+sz2);
+  uint32_t ints = save_and_disable_interrupts();
+  // Erase flash area
+  flash_range_erase(port1, FLASH_SECTOR_SIZE);
+  if( sz2 )
+    flash_range_erase(port2, FLASH_SECTOR_SIZE);
+  // Save XMemory to flash
+  flash_range_program(port1, xp, sz1);
+  if( sz2 )
+    flash_range_program(port2, xp + sz1, sz2);
+  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
+  printf("Saved XMemory(%d+%d bytes) to flash!\n", sz1, sz2);
 }
 #endif
 
@@ -405,6 +410,7 @@ void initRoms()
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
 
+  xmem.mem = __mem;
   initXMem(&xmem);
 }
 
@@ -918,12 +924,12 @@ void core1_main_3(void)
                     if( pBus->cmd != INST_READ_DATA ) {
                       // Update ram select pointer
                       ramad = (ramad & 0xFF0) | r;
+                      xmAddr = getXmemAddr(ramad);
                     }
-                    xmAddr = getXmemAddr(ramad);
                     if( pBus->cmd & 0x10 ) {
                       // INST_READ_DATA
                       DATA_OUTPUT(xmem.mem[xmAddr-1]);
-                      xmAddr = 0;
+                      //xmAddr = 0;
                     } else {
                       // INST_WRITE_DATA
                       xmem.bwr = xmAddr;
