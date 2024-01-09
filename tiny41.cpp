@@ -216,6 +216,9 @@ int main()
     // Timer (CX)
     IGNORE_LOOP(0x5546);
 
+    // XFunction
+    IGNORE_LOOP(0xCC51);
+
     // Ignore loop in Blinky ...
     IGNORE_LOOP_COND(0x6F42, 0x66CA);
     // Waiting for carry in Blinky
