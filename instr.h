@@ -7,7 +7,8 @@
 #define INST_WRITE_DATA                00050    // 0000 0010 1000   0x28
 #define INST_READ_DATA                 00070    // 0000 0011 1000   0x38
 
-#define INST_READ_OR_WRITE             INST_READ_DATA
+#define INST_RW_MASK                   0x2F
+#define INST_READ_OR_WRITE             (INST_READ_DATA & INST_WRITE_DATA)
 #define INST_RDATA                     INST_READ_DATA
 #define INST_WDATA                     01360    // 001 011 110 000   0x2F0
 
@@ -90,5 +91,9 @@
 #define WAND_ADDR                      0xFE   // The Wand
 #define BLINKY_ADDR                    0x20   // The IR printer module
 #define NONE_ADDR                      0x00   // None ...
+
+#define NPIC_IR_PRT_WRITE               0b00
+#define NPIC_IR_PRT_READ                0b01
+#define NPIC_IR_PRT_CMD                 0b10
 
 #endif//__INSTR_H__

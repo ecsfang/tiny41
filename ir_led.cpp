@@ -29,9 +29,9 @@ void send_to_printer(uint8_t pByte)
   uint32_t ir_frame = construct_frame(ir_code);
   send_ir_frame(ir_frame);
   // line below for debugging the construction of the IR frame
-  printf("IR char = %02X, code = %04X, frame = ", pByte, ir_code);
-  dump_frame(ir_frame);
-  printf("\n");
+//  printf("IR char = %02X, code = %04X, frame = ", pByte, ir_code);
+//  dump_frame(ir_frame);
+//  printf("\n");
 }
 
 PIO pio;

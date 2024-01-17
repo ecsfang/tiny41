@@ -203,16 +203,52 @@ extern const char *inst70disp[16];
 #define PAGE2(n) PAGEn(n,1)
 
 #ifdef USE_FLASH
-void erasePort(int n)
+// Writing to flash can only be done page wise!
+int pageAdjust(int addr)
 {
-  printf("\nErasing target region %X ", n);
-  printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
+  if( addr % FLASH_PAGE_SIZE ) {
+    addr |= FLASH_PAGE_SIZE-1;
+    addr++;
+  }
+  return addr;
+}
+
+void erasePort(int n, bool bPrt=true)
+{
+  if( bPrt ) {
+    printf("\nErasing target region %X ", n);
+    printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
+  }
   uint32_t ints = save_and_disable_interrupts();
   flash_range_erase(PAGE1(n), FLASH_SECTOR_SIZE);
   flash_range_erase(PAGE2(n), FLASH_SECTOR_SIZE);
   restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
-  printf("Done!\n");
+  if( bPrt ) {
+    printf("Done!\n");
+  }
 }
+
+void writeFlash(int offs, uint8_t *data, int sz)
+{
+  uint32_t ints = save_and_disable_interrupts();
+  flash_range_program(offs, data, sz);
+  restore_interrupts(ints);
+  printf(" --> Write flash @ %08X %d bytes\n", offs, sz);
+}
+
+// Write data to given flash port
+// Max 2*FLASH_SECTOR_SIZE of bytes to be written
+void write8Port(int n, uint8_t *data, int sz)
+{
+  int sz1 = sz > FLASH_SECTOR_SIZE ? FLASH_SECTOR_SIZE : sz;
+  sz1 = pageAdjust(sz1);
+  int sz2 = sz > FLASH_SECTOR_SIZE ? sz-FLASH_SECTOR_SIZE : 0;
+  sz2 = pageAdjust(sz2);
+  writeFlash(PAGE1(n), data, sz1);
+  if( sz2 )
+    writeFlash(PAGE2(n), data + sz1, sz2);
+}
+
 
 void writePort(int n, uint16_t *data)
 {
@@ -221,38 +257,33 @@ void writePort(int n, uint16_t *data)
   uint8_t *dp = (uint8_t*)data;
   printf("\nProgramming target region %X ", n);
   printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
-  uint32_t ints = save_and_disable_interrupts();
-  flash_range_program(PAGE1(n), dp, FLASH_SECTOR_SIZE);
-  flash_range_program(PAGE2(n), dp + FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
-  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
-  // Swap back ...
+  write8Port(n, (uint8_t*)data, 2*FLASH_SECTOR_SIZE);
   swapRam(data, FLASH_SECTOR_SIZE);
   printf("Done!\n");
+}
+
+const uint8_t *flashPointer(int offs)
+{
+  return (const uint8_t*)(XIP_BASE + offs);
 }
 
 // Read flash into ram with right endian
 void readPort(int n, uint16_t *data)
 {
   // Point at the wanted flash image ...
-  const uint16_t *fp = (uint16_t*)(XIP_BASE + PAGE1(n));
+  const uint16_t *fp = (uint16_t*)flashPointer(PAGE1(n));
   for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
     // Swap order to get right endian of 16-bit word ...
     data[i] = swap16(*fp++);
   }
 }
 // Read flash into ram for wand use
-void read8Data(int p, uint8_t *data, uint16_t size)
+void readFlash(int offs, uint8_t *data, uint16_t size)
 {
   // Point at the wanted flash image ...
-  const uint8_t *fp = (uint8_t*)(XIP_BASE + p);
-  for (uint16_t i = 0; i < size; ++i) {
-    data[i] = *fp++;
-  }
-}
-// Read flash into ram for wand use
-void read8Port(int n, uint8_t *data)
-{
-  read8Data(PAGE1(n), data, FLASH_SECTOR_SIZE);
+  const uint8_t *fp = flashPointer(offs);
+  memcpy(data, fp, size);
+  printf(" <-- Read flash @ %08X %d bytes\n", offs, size);
 }
 #endif
 
@@ -270,7 +301,7 @@ void saveRam(int port, int ovr = 0)
   if( port >= FIRST_PAGE && port < NR_PAGES ) {
     if (ovr || modules.isDirty(port)) {
       modules.clear(port);
-      erasePort(port);
+      erasePort(port, false);
       writePort(port, rom_pages[port - FIRST_PAGE]);
       printf("Wrote RAM[%X] to flash\n", port);
     }
@@ -278,26 +309,42 @@ void saveRam(int port, int ovr = 0)
       printf("Invalid page! [%X]\n", port);
   }
 }
-void saveXMem(void)
+
+void saveXMem(int xpg)
 {
-  int port1 = PAGE1(NR_PAGES+1);
-  int port2 = PAGE2(NR_PAGES+1);
-  int sz1 = xmem.size() > FLASH_SECTOR_SIZE ? FLASH_SECTOR_SIZE : xmem.size();
-  int sz2 = xmem.size() > FLASH_SECTOR_SIZE ? xmem.size()-FLASH_SECTOR_SIZE : 0;
-  uint8_t *xp = (uint8_t*)__mem;
+  xpg += XF_PAGE;
+  // Save copy - clear dirty ...
+  uint8_t pg[FLASH_PAGE_SIZE];
   xmem.saveMem();
-  uint32_t ints = save_and_disable_interrupts();
-  // Erase flash area
-  flash_range_erase(port1, FLASH_SECTOR_SIZE);
-  if( sz2 )
-    flash_range_erase(port2, FLASH_SECTOR_SIZE);
-  // Save XMemory to flash
-  flash_range_program(port1, xp, sz1);
-  if( sz2 )
-    flash_range_program(port2, xp + sz1, sz2);
-  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
-  printf("Saved XMemory(%d+%d bytes) to flash!\n", sz1, sz2);
+  erasePort(xpg);
+  // Save all XMemory ...
+  write8Port(xpg, (uint8_t*)xmem.mem, xmem.size());
+  // Save checksum too ...
+  int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
+  pg[0] = xmem.chkSum();
+  writeFlash(chkAddr, pg, FLASH_PAGE_SIZE);
+  printf(" -- Saved XMemory (%d bytes [%02X]) to flash!\n", xmem.size(), xmem.chkSum());
 }
+
+void initXMem(int xpg)
+{
+  xpg += XF_PAGE;
+  xmem.mem = __mem;
+  uint8_t chk = 0;
+  int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
+  readFlash(PAGE1(xpg), (uint8_t*)xmem.mem, xmem.size());
+  readFlash(chkAddr, &chk, 1);
+  printf(" -- Read XMemory (%d bytes [%02X]) from flash!\n", xmem.size(), chk);
+  // Save copy - clear dirty - check checksum ...
+  xmem.saveMem();
+  if( xmem.chkSum() != chk ) {
+    printf("XMem checksum failure: %02X != %02X!\n", chk, xmem.chkSum());
+    printf("ERROR: MEMORY LOST of XMemory!\n");
+    memset((void*)xmem.mem, 0, xmem.size());
+    xmem.saveMem();
+  }
+}
+
 #endif
 
 // Swap 16-bit word (n - number of 16-bit words)
@@ -352,29 +399,11 @@ void loadPage(int page, uint16_t *img, int bank = 0)
   }
 }
 
-void initXMem(CXFM *pXmem)
-{
-  uint8_t xd[PAGE_SIZE];
-  int xPage = NR_PAGES+1;
-
-  int sz1 = pXmem->size() > FLASH_SECTOR_SIZE ? FLASH_SECTOR_SIZE : pXmem->size();
-  int sz2 = pXmem->size() > FLASH_SECTOR_SIZE ? pXmem->size()-FLASH_SECTOR_SIZE : 0;
-
-  read8Data(PAGE1(xPage), xd, sz1);
-  memcpy((void*)pXmem->mem, xd, sz1);
-
-  if( sz2 ) {
-    read8Data(PAGE2(xPage), xd, sz2);
-    memcpy(((uint8_t*)pXmem->mem)+sz1, xd, sz2);
-  }
-
-  pXmem->saveMem();
-}
-
 void initRoms()
 {
 #ifdef USE_FLASH
   printf("Flash offset: 0x%X\n", FLASH_TARGET_OFFSET);
+  printf("XIP_BASE:     0x%X\n", XIP_BASE);
   printf("Sector size:  0x%X (%d)\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
   printf("Page size:    0x%X (%d)\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
 #endif
@@ -403,15 +432,12 @@ void initRoms()
     loadPage(port, rom_pages[pIdx]);
   }
 #ifdef WAND_EMU
-    read8Port(NR_PAGES, wand_page);
+    readFlash(PAGE1(NR_PAGES), wand_page, FLASH_SECTOR_SIZE);
 #endif
   // Load second bank of printer-ROM (if available)
   loadPage(6, bank_page, 1);
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
-
-  xmem.mem = __mem;
-  initXMem(&xmem);
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
@@ -524,7 +550,6 @@ int getXmemAddr(uint16_t addr)
 }
 
 volatile Blinky_t blinky;
-//volatile XMem_t xmem;
 
 void core1_main_3(void)
 {
@@ -549,7 +574,6 @@ void core1_main_3(void)
   static int last_data_wr;      // Keep track of trace overflow
   static uint16_t iCnt = 0;     // Cycle counter for trace
   static uint32_t xmAddr = 0;
-  //static bool isXMem = false;
 
   pBus = &bus[data_wr];
 
@@ -779,7 +803,7 @@ void core1_main_3(void)
 
         // If bwr != 0, then update X-memory
         if( xmem.bwr ) {
-          xmem.mem[xmem.bwr-1] = pBus->data;
+          __mem[xmem.bwr-1] = pBus->data;
           xmem.bwr = 0;
         }
 
@@ -788,11 +812,11 @@ void core1_main_3(void)
             int r = (pBus->cmd >> 6) & 0x0F;
             int cmd = (pBus->cmd >> 1) & 0x3;
             switch(cmd) {
-              case 0b00:  // Write ...
+              case NPIC_IR_PRT_WRITE:  // Write ...
                 blinky.reg[r] = pBus->data;
                 switch(r) {
                 case  8:
-                  if( blinky.reg[8] & 0x80 )
+                  if( blinky.reg[8] & BLINKY_ENABLE )
                     blinky.flags |= BLINKY_ENABLE;
                   break;
                 case 10:  // 2B9 - 1010 111 00 1 r = 10
@@ -807,25 +831,34 @@ void core1_main_3(void)
                   blinky.nAlm = blinky.reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
                   break;
                 case 11:  // 2F9 - 1011 111 00 1 r = 11
-                  // Write to out buffer - set buffer flag
-                  prtBuf[wprt++] = (uint8_t)(blinky.reg[11] & 0xFF);
-                  if( blinky.busyCnt ) // Already busy ... ?
-                    setFI(FI_PRT_BUSY);
-                  blinky.busyCnt = BUSY_CNT;
+                  if( blinky.flags & BLINKY_CLK_ENABLE ) {
+                    // Write to out buffer - set buffer flag
+                    // Maybe we should just keep 8 LSB
+                    uint8_t ch = (uint8_t)(blinky.reg[11] &= 0xFFL);
+                    prtBuf[wprt++] = ch;
+                    if( blinky.busyCnt ) // Already busy ... ?
+                      setFI(FI_PRT_BUSY);
+                    blinky.busyCnt = BUSY_CNT;
+                  }
                   break;
                 default:
                   blinky.reg[r] = pBus->data;
                 }
                 break;
-              case 0b01:  // Read ...
+              case NPIC_IR_PRT_READ:  // Read ...
+                // Update hardware registers
+                switch(r) {
+                case 10:  // Timer register
+                  blinky.reg[10] = (blinky.reg[10] & ~0xFFFLL) | blinky.cntTimer;
+                  break;
+                case 14:  // HW flag register
+                  blinky.reg[14] = (blinky.reg[14] & ~0x0FFLL) | blinky.flags;
+                  break;
+                }
                 // Enable data driver ...
                 DATA_OUTPUT(blinky.reg[r]);
-                switch(r) {
-                case 10:  data56_out = (data56_out & ~0xFFFLL) | blinky.cntTimer; break;
-                case 14:  data56_out = (data56_out & ~0xFFLL) | blinky.flags;    break;
-                }
                 break;
-              case 0b10:  // Func ...
+              case NPIC_IR_PRT_CMD:  // Func ...
                 switch( r ) {
                 case 2: // Enable timer clock
                   blinky.flags |= BLINKY_CLK_ENABLE;
@@ -889,6 +922,7 @@ void core1_main_3(void)
             // Fall trough!!!
 #endif
           default:
+            // If perph == 0 then RAM is accessible
             if( !perph ) {
               // Look for read/write towards the Blinky RAM
               if( (ramad & 0x3F0) == BLINKY_ADDR ) {
@@ -896,10 +930,11 @@ void core1_main_3(void)
                 if( pBus->cmd == INST_WDATA ) {
                   // Note!
                   // A write to BLINKY_ADDR (0x20) should be treated special
+                  // Should be interpreted as a Write Status instruction
                   blinky.bwr = ramad + 1; // bwr = [0x21,0x30]
                 } else {
                   // Handle read (0x38) and write (0x28) instructions
-                  if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
+                  if( (pBus->cmd & INST_RW_MASK) == INST_READ_OR_WRITE ) {
                     int r = (pBus->cmd >> 6) & 0x0F;
                     if( pBus->cmd != INST_READ_DATA )
                       ramad = BLINKY_ADDR | r;  // Update ram select pointer
@@ -919,8 +954,10 @@ void core1_main_3(void)
                   xmem.bwr = xmAddr;
                 } else {
                   // Handle read (0x38) and write (0x28) instructions
-                  if( (pBus->cmd & 0x2F) == INST_WRITE_DATA ) {
+                  if( (pBus->cmd & INST_RW_MASK) == INST_READ_OR_WRITE ) {
                     int r = (pBus->cmd >> 6) & 0x0F;
+                    // READ_DATA (0x038) and WRITE_DATA (0x2F0)
+                    // does not update the RAM pointer (ramad)
                     if( pBus->cmd != INST_READ_DATA ) {
                       // Update ram select pointer
                       ramad = (ramad & 0xFF0) | r;
@@ -928,7 +965,7 @@ void core1_main_3(void)
                     }
                     if( pBus->cmd & 0x10 ) {
                       // INST_READ_DATA
-                      DATA_OUTPUT(xmem.mem[xmAddr-1]);
+                      DATA_OUTPUT(__mem[xmAddr-1]);
                       //xmAddr = 0;
                     } else {
                       // INST_WRITE_DATA
@@ -963,7 +1000,6 @@ void core1_main_3(void)
             clrFI(FI_PRT_BUSY);
         }
         // Report selected peripheral to trace ...
-        //pBus->pa = perph;
         pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
 
         if( bIsSync )
@@ -1067,12 +1103,12 @@ void process_bus(void)
     dumpCycle(pb);
 #else
     // Handle the bus traffic
-    if( pb->addr < 0x3000 ) {
+/*    if( pb->addr < 0x3000 ) {
       if( IS_TRACE() )
         skipClk = 0;
       END_TRACE();
     } else
-      START_TRACE();
+      START_TRACE();*/
     br = brk.isBrk(pb->addr);
     if( br == BRK_START )
       START_TRACE();
@@ -1495,7 +1531,7 @@ void handle_bus(volatile Bus_t *pBus)
         }
       }
       if( xmem.dirty() ) {
-        saveXMem();
+        saveXMem(0);
       }
       break;
     }

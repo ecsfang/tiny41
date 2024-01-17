@@ -69,8 +69,6 @@ void Render(int r)
     disp41.rend(r);
 }
 
-extern void initRoms(void);
-
 void dispOverflow(bool bOvf)
 {
 #ifdef PIMORONI_PICOLIPO_16MB
@@ -107,6 +105,8 @@ int main()
     initRoms();
 
     printf("Init XMemory ...\n");
+    initXMem(0);
+
 
     /* Overclock */
     printf("Overclock ...\n");

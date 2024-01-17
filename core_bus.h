@@ -361,24 +361,45 @@ typedef struct {
 #define XMEM_XM2_END    0x3F0
 #define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
 #define XMEM_XM2_OFFS   (XMEM_XF_SIZE+XMEM_XM1_SIZE)
+#define XF_PAGE         (NR_PAGES+1)
 
 // Memory for Extended Memory module
 class CXFM {
-  uint64_t _mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+  uint64_t m_mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+  uint8_t m_chksum;
 public:
 //  volatile uint64_t mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
   volatile uint64_t *mem;
   bool bDirty;
   int bwr;
   bool dirty() {
-    return memcmp((void*)mem, (void*)_mem, sizeof(_mem))?true:false;
+    return memcmp((void*)mem, (void*)m_mem, sizeof(m_mem))?true:false;
   }
   void saveMem(void) {
-    memcpy((void*)_mem, (void*)mem, sizeof(_mem));
+    memcpy((void*)m_mem, (void*)mem, sizeof(m_mem));
+    doChksum();
   }
   int size(void) {
-    return (int)sizeof(_mem);
+    return (int)sizeof(m_mem);
+  }
+  void doChksum(void) {
+    uint8_t *p = (uint8_t*)m_mem;
+    m_chksum = 0;
+    for(int i=0; i<size()/sizeof(uint8_t); i++)
+      m_chksum += *p++;
+  }
+  uint8_t *pChkSum(void) {
+    return (uint8_t*)&m_chksum;
+  }
+  uint8_t chkSum(void) {
+    return m_chksum;
+  }
+  int chkSize(void) {
+    return (int)sizeof(m_chksum);
   }
 };
+
+void initRoms(void);
+void initXMem(int xpg);
 
 #endif//__CORE_BUS_H__

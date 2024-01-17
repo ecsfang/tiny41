@@ -196,7 +196,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'B', set_brk,           "Set breakpoint"  },
   { 'E', end_brk,           "End breakpoint"  },
   { 'f', dump_xmem,         "Dump XMemory"  },
-  { 'F', clr_xmem,          "Clear XMemory"  },
+  { 'X', clr_xmem,          "Clear XMemory"  },
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
