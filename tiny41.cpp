@@ -217,7 +217,7 @@ int main()
     IGNORE_LOOP(0x5546);
 
     // XFunction
-    IGNORE_LOOP(0xCC51);
+    IGNORE_LOOP(0xCC52);
 
     // Ignore loop in Blinky ...
     IGNORE_LOOP_COND(0x6F42, 0x66CA);

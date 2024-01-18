@@ -138,16 +138,18 @@ void clrBreakpoints(void)
   brk.clrAllBrk();
 }
 
-extern volatile Blinky_t blinky;
+//extern volatile Blinky_t blinky;
+extern CBlinky blinky;
 
 void dump_blinky(void)
 {
+  int i;
   printf("Blinky registers and RAM\n=====================================\n");
-  for(int i=0; i<0x10; i++) {
-    printf("Reg%02d: %014llx\n", i, blinky.reg[i]);
+  for(i=0; i<0x08; i++) {
+    printf("Reg%02d: %014llx (56)\n", i, blinky.reg[i]);
   }
-  for(int i=0; i<0x10; i++) {
-    printf("Mem 0x%02X: %014llx\n", 0x20+i, blinky.ram[i]);
+  for(; i<0x10; i++) {
+    printf("Reg%02d: %12.12c%02x  (8)\n", i, ' ', blinky.reg8[i]);
   }
   printf("\n");
 }
@@ -159,21 +161,39 @@ void dump_xmem(void)
 #ifdef USE_XMEM2
   printf("XMemory Module 2\n=====================================\n");
   for(int i=XMEM_XM2_SIZE-1; i>=0; i--) {
-    printf("Reg %03X: %014llx\n", i+XMEM_XM2_START, xmem.mem[i+XMEM_XM2_OFFS]);
+    if( xmem.mem[i+XMEM_XM2_OFFS] || xmem.m_mem[i+XMEM_XM2_OFFS] ) {
+    printf("Reg %03X: %014llx %014llx", i+XMEM_XM2_START,
+          xmem.mem[i+XMEM_XM2_OFFS], xmem.m_mem[i+XMEM_XM2_OFFS]);
+    if( xmem.mem[i+XMEM_XM2_OFFS] != xmem.m_mem[i+XMEM_XM2_OFFS] )
+      printf(" ***");
+    printf("\n");
+    }
   }
   printf("\n");
 #endif
 #ifdef USE_XMEM1
   printf("XMemory Module 1\n=====================================\n");
   for(int i=XMEM_XM1_SIZE-1; i>=0; i--) {
-    printf("Reg %03X: %014llx\n", i+XMEM_XM1_START, xmem.mem[i+XMEM_XM1_OFFS]);
+    if( xmem.mem[i+XMEM_XM1_OFFS] || xmem.m_mem[i+XMEM_XM1_OFFS] ) {
+    printf("Reg %03X: %014llx %014llx", i+XMEM_XM1_START,
+          xmem.mem[i+XMEM_XM1_OFFS], xmem.m_mem[i+XMEM_XM1_OFFS]);
+    if( xmem.mem[i+XMEM_XM1_OFFS] != xmem.m_mem[i+XMEM_XM1_OFFS] )
+      printf(" ***");
+    printf("\n");
+    }
   }
   printf("\n");
 #endif
 #ifdef USE_XFUNC
   printf("XFunction Memory\n=====================================\n");
   for(int i=XMEM_XF_SIZE-1; i>=0; i--) {
-    printf("Reg %03X: %014llx\n", i+XMEM_XF_START, xmem.mem[i]);
+    if( xmem.mem[i] || xmem.m_mem[i] ) {
+    printf("Reg %03X: %014llx %014llx", i+XMEM_XF_START,
+          xmem.mem[i], xmem.m_mem[i]);
+    if( xmem.mem[i] != xmem.m_mem[i] )
+      printf(" ***");
+    printf("\n");
+    }
   }
   printf("\n");
 #endif

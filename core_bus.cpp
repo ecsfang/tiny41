@@ -94,15 +94,6 @@ void _clrFI_PBSY(void)
   bPBusy = false;
 }
 
-// Set FI flag (T0-T13)
-inline void setFI(int flag)
-{
-  carry_fi |= flag;
-}
-inline void clrFI(int flag = FI_MASK)
-{
-  carry_fi &= ~flag;
-}
 inline uint16_t getFI(int flag)
 {
   return carry_fi & flag;
@@ -488,7 +479,7 @@ volatile uint64_t data56_out = 0;
 
 volatile Bus_t bus[NUM_BUS_T];
 
-volatile uint8_t prtBuf[256];
+volatile uint8_t prtBuf[PRT_BUF_LEN];
 volatile uint8_t wprt = 0;
 volatile uint8_t rprt = 0;
 
@@ -532,6 +523,7 @@ bool isXmemAddr(uint16_t addr)
   return false;
 }
 
+// Return XMemAddress in range [1..MaxAddr+1]
 int getXmemAddr(uint16_t addr)
 {
 #if defined(USE_XFUNC)
@@ -549,7 +541,9 @@ int getXmemAddr(uint16_t addr)
   return 0;
 }
 
-volatile Blinky_t blinky;
+CBlinky blinky;
+volatile uint64_t  CBlinky::reg[8];    // First 8 registers
+volatile uint8_t   CBlinky::reg8[16];  // Last 8 registers (0-7 not used)
 
 void core1_main_3(void)
 {
@@ -574,11 +568,9 @@ void core1_main_3(void)
   static int last_data_wr;      // Keep track of trace overflow
   static uint16_t iCnt = 0;     // Cycle counter for trace
   static uint32_t xmAddr = 0;
+  static uint8_t r = 0;
 
   pBus = &bus[data_wr];
-
-  memset((void*)&blinky, 0, sizeof(Blinky_t));
-  //memset((void*)&xmem, 0, sizeof(XMem_t));
 
   irq_set_mask_enabled(0xffffffff, false);
 
@@ -675,6 +667,9 @@ void core1_main_3(void)
 #endif
       pBus = &bus[data_wr];
       memset((void*)pBus, 0, sizeof(Bus_t));
+
+      // Check if still busy ...
+      blinky.busy();
       break;
 
     case 7: // 8 first bits are read ...
@@ -724,17 +719,9 @@ void core1_main_3(void)
       // nAlm keeps track of the bus cycle counting, and when 0
       // timer value is decremented and nAlm restored.
       // If timervalue is 0, then FI 12 is set
-      if( blinky.nAlm && (blinky.flags & BLINKY_CLK_ENABLE) ) {
-        if( --blinky.nAlm == 0 ) {
-          if( blinky.cntTimer ) {
-            // Decrement and continue counting ...
-            blinky.cntTimer--;
-            blinky.nAlm = blinky.reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
-          } else {
-            // Set FI flag when counter reaches zero ...
-            setFI(FI_PRT_TIMER);
-          }
-        }
+      if( blinky.tick() ) {
+        // Set FI flag when counter reaches zero ...
+        setFI(FI_PRT_TIMER);
       }
       break;
     case LAST_CYCLE-2:
@@ -750,16 +737,7 @@ void core1_main_3(void)
       // Report next FI signal to trace ...
       pBus->fi = getFI();
 #else
-      if( xmAddr && !perph ) {
-        pBus->fi = (xmAddr-1);
-        if( pBus->fi >= XMEM_XM2_OFFS )
-          pBus->fi += XMEM_XM2_START-XMEM_XM2_OFFS;
-        else if( pBus->fi >= XMEM_XM1_OFFS )
-          pBus->fi += XMEM_XM1_START-XMEM_XM1_OFFS;
-        else
-          pBus->fi += XMEM_XF_START;
-      } else
-        pBus->fi = 0;
+      pBus->fi = xmAddr-1;
       //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
       //pBus->fi |= blinky.cntTimer & 0xFF;
@@ -778,11 +756,12 @@ void core1_main_3(void)
       // Assume no data drive any more ...
       output_data = 0;
 
-      if( pBus->addr || isa || pBus->cmd ) {
+      if( 1 ) { //pBus->addr || isa || pBus->cmd ) {
         // Is instruction fetched from flash?
         if( !pBus->cmd )
           pBus->cmd = (isa >> ISA_SHIFT) & INST_MASK;
         pBus->data = data56 & MASK_56_BIT;
+        r = (pBus->cmd >> 6) & 0x0F;
 #ifdef TRACE_ISA
         pBus->isa = isa;
 #endif
@@ -793,10 +772,16 @@ void core1_main_3(void)
           blinky.bwr--;
           if( blinky.bwr == BLINKY_ADDR ) {
             // This is a special DATA WRITE to reg 0x20
-            blinky.reg[14] = pBus->data >> 48LL;
-            blinky.flags = blinky.reg[14] & 0xFF;
+            blinky.wrStatus((uint8_t)((pBus->data >> 48LL) & 0xFF));
           } else {
-            blinky.ram[blinky.bwr&0xF] = pBus->data;
+            /*if( blinky.bwr < 8 ) {
+              // 56 bit register
+              blinky.reg[blinky.bwr] = data;
+            } else {
+              // 8 bit register
+              blinky.reg8[blinky.bwr] = (uint8_t)(data & 0xFF);
+            }*/
+            blinky.write(blinky.bwr, pBus->data, true);
           }
           blinky.bwr = 0;
         }
@@ -807,86 +792,7 @@ void core1_main_3(void)
           xmem.bwr = 0;
         }
 
-        // Handle the printer if it is selected
-        if( bPrt ) {
-            int r = (pBus->cmd >> 6) & 0x0F;
-            int cmd = (pBus->cmd >> 1) & 0x3;
-            switch(cmd) {
-              case NPIC_IR_PRT_WRITE:  // Write ...
-                blinky.reg[r] = pBus->data;
-                switch(r) {
-                case  8:
-                  if( blinky.reg[8] & BLINKY_ENABLE )
-                    blinky.flags |= BLINKY_ENABLE;
-                  break;
-                case 10:  // 2B9 - 1010 111 00 1 r = 10
-                  blinky.cntTimer = blinky.reg[10] & 0xFFF;
-                  if( blinky.flags & BLINKY_CLK_ENABLE )
-                    blinky.cntTimer--;
-                  // Writing results in clearing of FI[12]
-                  clrFI(FI_PRT_BUSY);
-                  clrFI(FI_PRT_TIMER);
-                  // Reset timer countdown
-                  //blinky.nAlm = TIMER_CNT;
-                  blinky.nAlm = blinky.reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
-                  break;
-                case 11:  // 2F9 - 1011 111 00 1 r = 11
-                  if( blinky.flags & BLINKY_CLK_ENABLE ) {
-                    // Write to out buffer - set buffer flag
-                    // Maybe we should just keep 8 LSB
-                    uint8_t ch = (uint8_t)(blinky.reg[11] &= 0xFFL);
-                    prtBuf[wprt++] = ch;
-                    if( blinky.busyCnt ) // Already busy ... ?
-                      setFI(FI_PRT_BUSY);
-                    blinky.busyCnt = BUSY_CNT;
-                  }
-                  break;
-                default:
-                  blinky.reg[r] = pBus->data;
-                }
-                break;
-              case NPIC_IR_PRT_READ:  // Read ...
-                // Update hardware registers
-                switch(r) {
-                case 10:  // Timer register
-                  blinky.reg[10] = (blinky.reg[10] & ~0xFFFLL) | blinky.cntTimer;
-                  break;
-                case 14:  // HW flag register
-                  blinky.reg[14] = (blinky.reg[14] & ~0x0FFLL) | blinky.flags;
-                  break;
-                }
-                // Enable data driver ...
-                DATA_OUTPUT(blinky.reg[r]);
-                break;
-              case NPIC_IR_PRT_CMD:  // Func ...
-                switch( r ) {
-                case 2: // Enable timer clock
-                  blinky.flags |= BLINKY_CLK_ENABLE;
-                  break;
-                case 3: // Disable timer clock
-                  blinky.flags &= ~BLINKY_CLK_ENABLE;
-                  break;
-                case 4: // Enable RAM write
-                  blinky.flags |= BLINKY_RAM_ENABLE;
-                  break;
-                case 5: // Disable RAM write
-                  blinky.flags &= ~BLINKY_RAM_ENABLE;
-                  break;
-                case 7: // Reset
-                  blinky.flags = 0;
-                  clrFI(FI_PRT_BUSY);
-                  break;
-                case 8: // Clear buffer
-                  clrFI(FI_PRT_BUSY);
-                  clrFI(FI_PRT_TIMER);
-                  blinky.cntTimer = 0;
-                  break;
-                }
-            }
-            // Check if return-bit is set
-            if( pBus->cmd & 1)
-              bPrt = false;
-        } else {
+        if( bIsSync ) {
           switch( pBus->cmd ) {
           case INST_RAM_SLCT:
             // Fetch selected RAM in the next run ...
@@ -905,12 +811,12 @@ void core1_main_3(void)
           case INST_ENBANK2:
           case INST_ENBANK3:
           case INST_ENBANK4:
-            if( bIsSync )
+            //if( bIsSync )
               mp->bank(pBus->cmd);
             break;
 #ifdef DRIVE_CARRY
           case INST_WANDRD: // READ DATA
-            if( perph == WAND_ADDR && cBar.available() && bIsSync  ) {
+            if( perph == WAND_ADDR && cBar.available() /*&& bIsSync*/  ) {
               // Output next byte from the wand-buffer!
               DATA_OUTPUT(cBar.get());
               if( cBar.empty() ) {
@@ -931,16 +837,22 @@ void core1_main_3(void)
                   // Note!
                   // A write to BLINKY_ADDR (0x20) should be treated special
                   // Should be interpreted as a Write Status instruction
-                  blinky.bwr = ramad + 1; // bwr = [0x21,0x30]
+                  if( ramad == BLINKY_ADDR )
+                    blinky.bwr = BLINKY_ADDR + 1; // bwr = [0x21,0x30]
+                  else
+                    blinky.bwr = (ramad & 0xF) + 1; // bwr = [0x21,0x30]
                 } else {
                   // Handle read (0x38) and write (0x28) instructions
                   if( (pBus->cmd & INST_RW_MASK) == INST_READ_OR_WRITE ) {
-                    int r = (pBus->cmd >> 6) & 0x0F;
+                    //int r = (pBus->cmd >> 6) & 0x0F;
                     if( pBus->cmd != INST_READ_DATA )
                       ramad = BLINKY_ADDR | r;  // Update ram select pointer
                     if( pBus->cmd & 0x10 ) {
                       // INST_READ_DATA
-                      DATA_OUTPUT(blinky.ram[r]);
+                      if( r < 8 )
+                        DATA_OUTPUT(blinky.reg[r]);
+                      else
+                        DATA_OUTPUT(blinky.reg8[r]);
                     } else {
                       // INST_WRITE_DATA
                       if( blinky.flags & BLINKY_RAM_ENABLE)
@@ -948,14 +860,14 @@ void core1_main_3(void)
                     }
                   }
                 }
-              } else if( xmAddr ) {
+              } else if( xmAddr && !perph ) {
                 // X-Function module
                 if( pBus->cmd == INST_WDATA ) {
                   xmem.bwr = xmAddr;
                 } else {
                   // Handle read (0x38) and write (0x28) instructions
                   if( (pBus->cmd & INST_RW_MASK) == INST_READ_OR_WRITE ) {
-                    int r = (pBus->cmd >> 6) & 0x0F;
+                    //int r = (pBus->cmd >> 6) & 0x0F;
                     // READ_DATA (0x038) and WRITE_DATA (0x2F0)
                     // does not update the RAM pointer (ramad)
                     if( pBus->cmd != INST_READ_DATA ) {
@@ -976,6 +888,27 @@ void core1_main_3(void)
               }
             }
           }
+        } else {
+          // No real instruction .. (no sync)
+          // Handle the printer if it is selected
+          if( bPrt ) {
+            //int r = (pBus->cmd >> 6) & 0x0F;
+            int cmd = (pBus->cmd >> 1) & 0x3;
+            switch(cmd) {
+              case NPIC_IR_PRT_WRITE:  // Write ...
+                blinky.write(r, pBus->data);
+                break;
+              case NPIC_IR_PRT_READ:  // Read ...
+                DATA_OUTPUT(blinky.read(r));
+                break;
+              case NPIC_IR_PRT_CMD:  // Func ...
+                blinky.func(r);
+                break;
+            }
+            // Check if return-bit is set
+            if( pBus->cmd & 1)
+              bPrt = false;
+          }
         }
 #ifdef MEASURE_TIME
         {
@@ -987,18 +920,14 @@ void core1_main_3(void)
             bErr = true;
             break;
           }
+          pBus->fi = dt;
         }
         bErr = false;
 #endif
 #ifdef MEASURE_COUNT
         // Report FI-status to trace ...
-        pBus->fi |= iCnt++ << 16;
+        pBus->cnt |= iCnt++;
 #endif
-        if(blinky.busyCnt) {
-          blinky.busyCnt--;
-          if( !blinky.busyCnt )
-            clrFI(FI_PRT_BUSY);
-        }
         // Report selected peripheral to trace ...
         pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
 
@@ -1309,8 +1238,8 @@ void handle_bus(volatile Bus_t *pBus)
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
   int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
-  int fi = pBus->fi & 0xFFFF;
-  int cnt = (pBus->fi>>16) & 0xFFFF;
+  int fi   = pBus->fi;
+  int cnt  = pBus->cnt;
   uint64_t data56 = pBus->data & MASK_56_BIT;
 #ifdef TRACE_ISA
   uint64_t isa = pBus->isa;
@@ -1531,6 +1460,8 @@ void handle_bus(volatile Bus_t *pBus)
         }
       }
       if( xmem.dirty() ) {
+        extern void dump_xmem(void);
+        dump_xmem();
         saveXMem(0);
       }
       break;
