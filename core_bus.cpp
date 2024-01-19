@@ -892,7 +892,6 @@ void core1_main_3(void)
           // No real instruction .. (no sync)
           // Handle the printer if it is selected
           if( bPrt ) {
-            //int r = (pBus->cmd >> 6) & 0x0F;
             int cmd = (pBus->cmd >> 1) & 0x3;
             switch(cmd) {
               case NPIC_IR_PRT_WRITE:  // Write ...

@@ -80,10 +80,12 @@
 #define INST_ENBANK3                   0x140
 #define INST_ENBANK4                   0x1C0
 
-#define INST_ENROM1                    0x1500
-#define INST_ENROM2                    0x1980
-#define INST_ENROM3                    0x1D40
+#define INST_ENROM1                    0x150
+#define INST_ENROM2                    0x198
+#define INST_ENROM3                    0x1D4
 #define INST_ENROM4                    0x1C0
+
+#define INST_EADD_C                    0x000  // new instruction to access Expanded Memory (above 0x400)
 
 #define TIMR_ADDR                      0xFB   // The Timer
 #define CRDR_ADDR                      0xFC   // The Card Reader
