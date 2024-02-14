@@ -84,6 +84,7 @@ void swapRam(uint16_t *dta, int n);
 // Keep track of FI flags (0-13)
 volatile uint16_t carry_fi = 0;
 volatile bool bPBusy = false;
+volatile bool bClrPBusy = false;
 
 // Indicate to set PBSY next time ...
 void _setFI_PBSY(void)
@@ -92,10 +93,11 @@ void _setFI_PBSY(void)
 }
 void _clrFI_PBSY(void)
 {
-  bPBusy = false;
+  //bPBusy = false;
+  bClrPBusy = true;
 }
 
-inline uint16_t getFI(int flag)
+inline uint16_t chkFI(int flag)
 {
   return carry_fi & flag;
 }
@@ -105,6 +107,10 @@ inline uint16_t getFI(void)
     setFI(FI_PBSY);
   else
     clrFI(FI_PBSY);
+  if( bClrPBusy ) {
+    bPBusy = false;
+    bClrPBusy = false;
+  }
   return carry_fi & FI_MASK;
 }
 
@@ -153,8 +159,16 @@ int barRow(int r)
   return bc;
 }
 
+bool bWdata = false;
+
 void wand_scan(void)
 {
+  if( bWdata ) {
+    // Clear Wand carry
+    _clrFI_PBSY();
+    bWdata = false;
+    return;
+  }
   if( wand_page[0] > 0 && wand_page[0] <= BAR_MAXLEN ) {
     if( wp == 0 ) {
       // Start with first row!
@@ -189,7 +203,8 @@ void wand_data(unsigned char *dta)
   // Set carry to service the wand
   _setFI_PBSY();
   cBar.set(dta);
-  _clrFI_PBSY();
+  bWdata = true;
+  //_clrFI_PBSY();
 }
 
 #if CF_DBG_DISP_INST
@@ -978,7 +993,7 @@ void post_handling(uint16_t addr)
   // Check if we have more data to send and that the buffer is empty ...
   // cBar.empty() if all data in buffer have been read
   // FI_WNDB (T2) is low if buffer is empty
-  if( (iGetNextWndData > iSendNextWndData) && cBar.empty() && !getFI(FI_WNDB) ) {
+  if( (iGetNextWndData > iSendNextWndData) && cBar.empty() && !chkFI(FI_WNDB) ) {
     // We have more data to send!
     iSendNextWndData++;
     wand_scan();

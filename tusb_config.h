@@ -26,13 +26,19 @@
 // #endif
 
 // Enable Device stack
-#define CFG_TUD_ENABLED       5
+#ifdef  CFG_TUD_ENABLED
+#undef  CFG_TUD_ENABLED
+#endif
+#define CFG_TUD_ENABLED       4
 
 // #define CFG_TUD_EP_MAX 16
 
 #define CFG_TUSB_RHPORT0_MODE OPT_MODE_DEVICE
 
-#define CFG_TUD_CDC 5
+#ifdef  CFG_TUD_CDC
+#undef  CFG_TUD_CDC
+#endif
+#define CFG_TUD_CDC 4
 #define CFG_TUD_CDC_RX_BUFSIZE 1024
 #define CFG_TUD_CDC_TX_BUFSIZE 1024
 

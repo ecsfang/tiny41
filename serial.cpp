@@ -240,15 +240,12 @@ void clr_xmem(void)
 }
 
 void rp2040_bootsel()
-
 {
-
-  printf("\n RESETTING THE RP2040-TUP to BOOTSEL mode!!");
-
+  cdc_send_console((char*)"\n\r RESETTING THE RP2040-TUP to BOOTSEL mode!!\n\r");
+  cdc_flush_console();
   sleep_ms(1000);
 
-   // reboots the RP2040, uses the standard LED for activity monitoring
-
+  // reboots the RP2040, uses the standard LED for activity monitoring
   reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
 

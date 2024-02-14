@@ -8,7 +8,7 @@
 #include "serial.h"
 #include "disasm.h"
 #include "ir_led.h"
-#include "usb/tusb_config.h"
+#include "tusb_config.h"
 #include <tusb.h>
 //#include <cdc_device.h>
 #include "usb/cdc_helper.h"
@@ -94,7 +94,7 @@ typedef enum {
 WState_e wState = W_IDLE;
 
 char cc[32];
-char ccb[32];
+char ccb[128];
 int wn = 0;
 
 int main()
@@ -113,25 +113,28 @@ int main()
 
     sleep_ms(2000);
 
-    cdc_send_console((char*)"\n*************");
-    cdc_send_console((char*)"\n*  Tiny 41  *");
-    cdc_send_console((char*)"\n*************");
-    cdc_send_console((char*)"\n");
+    while( cdc_read_byte(ITF_CONSOLE) != -1 )
+        ;
+
+//    cdc_send_console((char*)"\n\r*************");
+//    cdc_send_console((char*)"\n\r*  Tiny 41  *");
+//    cdc_send_console((char*)"\n\r*************");
+//    cdc_send_console((char*)"\n\r");
 
 
     // Must read flash before we goto highspeed ...
-    printf("Init ROMs ...\n");
+//    cdc_send_console((char*)"Init ROMs ...\n\r");
     initRoms();
 
-    printf("Init XMemory ...\n");
+//    cdc_send_console((char*)"Init XMemory ...\n\r");
     initXMem(0);
 
 
     /* Overclock */
-    printf("Overclock ...\n");
+//    cdc_send_console((char*)"Overclock ...\n\r");
     set_sys_clock_khz(OVERCLOCK, 1);
 
-    printf("Init all pins ...\n");
+//    cdc_send_console((char*)"Init all pins ...\n\r");
     bus_init();
 
 #ifdef USE_PIO
@@ -141,7 +144,7 @@ int main()
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
-    printf("Init I2C ...\n");
+//    cdc_send_console((char*)"Init I2C ...\n\r");
     i2c_init(i2c_default, SSD1306_I2C_CLK * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
@@ -149,14 +152,14 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
     // run through the complete initialization process
-    printf(" - init OLED display\n");
+//    cdc_send_console((char*)" - init OLED display\n\r");
     SSD1306_init();
 
-    printf("Launch CORE 1 ...\n");
+//    cdc_send_console((char*)"Launch CORE 1 ...\n\r");
     multicore_launch_core1(core1_main_3);
 
     // zero the entire display
-    printf("Clear and init display ...\n");
+//    cdc_send_console((char*)"Clear and init display ...\n\r");
     memset(disp41.buf(), 0, SSD1306_BUF_LEN);
     disp41.rend(REND_ALL);
     disp41.render();
@@ -250,15 +253,23 @@ int main()
 
 //    send_to_printer((char *)"Hello from Tiny2040!\n");
 
+    while( cdc_read_byte(ITF_CONSOLE) != -1 )
+        ;
+//    while( !tud_cdc_n_connected(ITF_CONSOLE) )
+//        sleep_ms(100);
+//    cdc_send_console((char*)"\n\rStarting Tiny 41!\n\r");
+//    cdc_flush(ITF_CONSOLE);
+
     int pwo = 0;
     int w;
     while (1)
     {
+        // Process the USB interfaces
+        tud_task();
+
         process_bus();
         // Update the USB CLI
         serial_loop();
-        // Process the USB interfaces
-        tud_task();
 
         extern int queue_overflow;
         if( queue_overflow ) {
@@ -290,7 +301,14 @@ int main()
                     break;
                 wState = W_DONE;
             case W_DONE:
-                cdc_send_console((char*)"Got barcode!\n\r");
+                cdc_send_console((char*)"Got barcode: ");
+                {
+                    int n = sprintf(ccb,"[");
+                    for( int i=0; i<cc[0]; i++ )
+                        n += sprintf(ccb+n,"%02X.", cc[i+1]);
+                    sprintf(ccb+n-1,"]\n\r");
+                    cdc_send_console(ccb);
+                }
                 cdc_send_string(ITF_WAND, (char*)"OK", 2);
                 cdc_flush(ITF_WAND);
                 wState = W_IDLE;
@@ -378,8 +396,8 @@ void UpdateAnnun(uint16_t ann, bool nl)
 
     if( IS_TRACE() ) {
         if( nl )
-            printf("\n");
-        printf("\n[%s] (%d)\n", sBuf, cAnn);
+            printf("\n\r");
+        printf("\n[%s] (%d)\n\r", sBuf, cAnn);
     }
 
     WriteString(disp41.buf(), 0, ANNUN_ROW, sBuf);
