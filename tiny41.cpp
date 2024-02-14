@@ -8,6 +8,10 @@
 #include "serial.h"
 #include "disasm.h"
 #include "ir_led.h"
+#include "usb/tusb_config.h"
+#include <tusb.h>
+//#include <cdc_device.h>
+#include "usb/cdc_helper.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -82,6 +86,17 @@ void dispOverflow(bool bOvf)
     bRend |= REND_STATUS;
 }
 
+typedef enum {
+    W_IDLE,
+    W_DATA,
+    W_DONE
+} WState_e;
+WState_e wState = W_IDLE;
+
+char cc[32];
+char ccb[32];
+int wn = 0;
+
 int main()
 {
 #if OVERCLOCK > 270000
@@ -92,12 +107,16 @@ int main()
 
     stdio_init_all();
 
+    // initialize the USB CDC devices
+    usbd_serial_init();
+    tusb_init();
+
     sleep_ms(2000);
 
-    printf("\n*************");
-    printf("\n*  Tiny 41  *");
-    printf("\n*************");
-    printf("\n");
+    cdc_send_console((char*)"\n*************");
+    cdc_send_console((char*)"\n*  Tiny 41  *");
+    cdc_send_console((char*)"\n*************");
+    cdc_send_console((char*)"\n");
 
 
     // Must read flash before we goto highspeed ...
@@ -232,11 +251,14 @@ int main()
 //    send_to_printer((char *)"Hello from Tiny2040!\n");
 
     int pwo = 0;
+    int w;
     while (1)
     {
         process_bus();
         // Update the USB CLI
         serial_loop();
+        // Process the USB interfaces
+        tud_task();
 
         extern int queue_overflow;
         if( queue_overflow ) {
@@ -249,6 +271,31 @@ int main()
             if( bErr ) {
                 dispOverflow(false);
                 bErr = false;
+            }
+        }
+
+        w = cdc_read_byte(ITF_WAND);
+        if( w != -1 ) {
+            switch( wState ) {
+            case W_IDLE:    // Got length
+                cc[0] = w;
+                sprintf(ccb, "Got len: %d\n\r", cc[0]);
+                cdc_send_console(ccb);
+                wState = W_DATA;
+                wn = 0;
+                break;
+            case W_DATA:
+                cc[1+wn++] = w;
+                if( wn < cc[0] )
+                    break;
+                wState = W_DONE;
+            case W_DONE:
+                cdc_send_console((char*)"Got barcode!\n\r");
+                cdc_send_string(ITF_WAND, (char*)"OK", 2);
+                cdc_flush(ITF_WAND);
+                wState = W_IDLE;
+                extern void wand_data(unsigned char *dta);
+                wand_data((unsigned char*)cc);
             }
         }
 

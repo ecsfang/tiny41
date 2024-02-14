@@ -9,9 +9,29 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "pico/multicore.h"
+#include "pico/bootrom.h"
 #include "tiny41.h"
 #include "serial.h"
 #include "core_bus.h"
+#include "usb/cdc_helper.h"
+
+#define CON_PRINTF cdc_printf_console
+//#define CON_PRINTF printf
+
+char cbuff[CDC_PRINT_BUFFER_SIZE];
+
+/*void xxcdc_printf_console(const char *format, ...) {
+
+    char buffer[CDC_PRINT_BUFFER_SIZE];
+
+   va_list arg_ptr;                                                             
+                                                                                
+   va_start(arg_ptr, format);                                                      
+   vsprintf(buffer, format, arg_ptr);                                              
+   va_end(arg_ptr); 
+
+  cdc_send_console(buffer);
+}*/
 
 int pcount = 0;
 extern CModules modules;
@@ -36,38 +56,42 @@ void toggle_trace(void)
 {
   bTrace ^= TRACE_ON;
   if( bTrace & TRACE_ON ) bTrace |= TRACE_BRK;
-  printf("Turn trace %s\n", bTrace & TRACE_ON ? "on":"off");
+  sprintf(cbuff,"Turn trace %s\n\r", bTrace & TRACE_ON ? "on":"off");
+  cdc_send_console(cbuff);
 }
 // Toggle disassembler (on -> call disassembler if trace is on)
 void toggle_disasm(void)
 {
   bTrace ^= TRACE_DISASM;
-  printf("Turn disassemble %s\n", IS_DISASM() ? "on":"off");
+  sprintf(cbuff,"Turn disassemble %s\n\r", IS_DISASM() ? "on":"off");
+  cdc_send_console(cbuff);
 }
-#define BAR() printf("+------+------+------+-----+-----+\n")
+#define BAR()   cdc_send_console((char*)"+------+------+------+-----+-----+\n\r")
 
 void list_modules(void)
 {
   extern CModules modules;
+  int n;
 
-  printf("\nLoaded modules\n");
+  cdc_send_console((char*)"\n\rLoaded modules\n\r");
   BAR();
-  printf("| Page | Port | XROM | RAM | Bank|\n");
+  cdc_send_console((char*)"| Page | Port | XROM | RAM | Bank|\n\r");
   BAR();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
-    printf("|  #%X  | ", i);
+    n = sprintf(cbuff,"|  #%X  | ", i);
     if( i>=8)
-      printf("%d %s | ", (i-6)/2, i&1 ? "Hi":"Lo");
+      n += sprintf(cbuff+n,"%d %s | ", (i-6)/2, i&1 ? "Hi":"Lo");
     else 
-      printf("     | ");
+      n += sprintf(cbuff+n,"     | ");
 
     if( modules.isInserted(i) ) {
-      printf(" %02X  | ", (*modules[i])[0]);
-      printf("%3.3s |", modules.isRam(i) ? "Yes" : "" );
+      n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
+      n += sprintf(cbuff+n,"%3.3s |", modules.isRam(i) ? "Yes" : "" );
     } else {
-      printf(" --  |     |");
+      n += sprintf(cbuff+n," --  |     |");
     }
-    printf(" %3.3s |\n", modules[i]->haveBank() ? "Yes" : "" );
+    n += sprintf(cbuff+n," %3.3s |\n\r", modules[i]->haveBank() ? "Yes" : "" );
+    cdc_send_console(cbuff);
   }
   BAR();
 }
@@ -95,11 +119,11 @@ static void sbrkpt(BrkMode_e b)
 {
   brk_mode = b;
   switch(b) {
-  case BRK_START: printf("\nStart"); break;
-  case BRK_END:   printf("\nEnd"); break;
-  case BRK_CLR:   printf("\nClear"); break;
+  case BRK_START: cdc_send_console((char*)"\n\rStart"); break;
+  case BRK_END:   cdc_send_console((char*)"\n\rEnd"); break;
+  case BRK_CLR:   cdc_send_console((char*)"\n\rClear"); break;
   }
-  printf(" breakpoint: ----\b\b\b\b");
+  cdc_send_console((char*)" breakpoint: ----\b\b\b\b");
   sBrk = 0;
   nBrk = 1;
   state = ST_BRK; // Expect 4 nibble addres
@@ -119,13 +143,13 @@ void clr_brk(void)
 
 void sel_qram(void)
 {
-  printf("\nSelect QRAM page: -\b");
+  cdc_send_console((char*)"\n\rSelect QRAM page: -\b");
   state = ST_QRAM;  // Expect port address
 }
 
 void plug_unplug(void)
 {
-  printf("\nSelect page to plug or unplug: -\b");
+  cdc_send_console((char*)"\n\rSelect page to plug or unplug: -\b");
   state = ST_PLUG;  // Expect port address
 }
 
@@ -144,65 +168,88 @@ extern CBlinky blinky;
 void dump_blinky(void)
 {
   int i;
-  printf("Blinky registers and RAM\n=====================================\n");
+  cdc_send_console((char*)"Blinky registers and RAM\n\r=====================================\n\r");
   for(i=0; i<0x08; i++) {
-    printf("Reg%02d: %014llx (56)\n", i, blinky.reg[i]);
+    sprintf(cbuff,"Reg%02d: %014llx (56)\n\r", i, blinky.reg[i]);
+    cdc_send_console(cbuff);
   }
   for(; i<0x10; i++) {
-    printf("Reg%02d: %12.12c%02x  (8)\n", i, ' ', blinky.reg8[i]);
+    sprintf(cbuff,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
+    cdc_send_console(cbuff);
   }
-  printf("\n");
+  cdc_send_console((char*)"\n\r\r");
 }
 
 extern CXFM xmem;
 
 void dump_xmem(void)
 {
+  int n;
 #ifdef USE_XMEM2
-  printf("XMemory Module 2\n=====================================\n");
+
+  cdc_send_console((char*)"XMemory Module 2\n\r=====================================\n\r");
   for(int i=XMEM_XM2_SIZE-1; i>=0; i--) {
+    n = 0;
     if( xmem.mem[i+XMEM_XM2_OFFS] || xmem.m_mem[i+XMEM_XM2_OFFS] ) {
-    printf("Reg %03X: %014llx %014llx", i+XMEM_XM2_START,
+      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XM2_START,
           xmem.mem[i+XMEM_XM2_OFFS], xmem.m_mem[i+XMEM_XM2_OFFS]);
-    if( xmem.mem[i+XMEM_XM2_OFFS] != xmem.m_mem[i+XMEM_XM2_OFFS] )
-      printf(" ***");
-    printf("\n");
+      if( xmem.mem[i+XMEM_XM2_OFFS] != xmem.m_mem[i+XMEM_XM2_OFFS] )
+        n += sprintf(cbuff+n," ***");
+      sprintf(cbuff+n,"\n\r");
+      cdc_send_console(cbuff);
     }
   }
-  printf("\n");
+  cdc_send_console((char*)"\n\r");
 #endif
 #ifdef USE_XMEM1
-  printf("XMemory Module 1\n=====================================\n");
+  sprintf(cbuff,"XMemory Module 1\n\r=====================================\n\r");
   for(int i=XMEM_XM1_SIZE-1; i>=0; i--) {
+    n = 0;
     if( xmem.mem[i+XMEM_XM1_OFFS] || xmem.m_mem[i+XMEM_XM1_OFFS] ) {
-    printf("Reg %03X: %014llx %014llx", i+XMEM_XM1_START,
+      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XM1_START,
           xmem.mem[i+XMEM_XM1_OFFS], xmem.m_mem[i+XMEM_XM1_OFFS]);
-    if( xmem.mem[i+XMEM_XM1_OFFS] != xmem.m_mem[i+XMEM_XM1_OFFS] )
-      printf(" ***");
-    printf("\n");
+      if( xmem.mem[i+XMEM_XM1_OFFS] != xmem.m_mem[i+XMEM_XM1_OFFS] )
+        n += sprintf(cbuff+n," ***");
+      n += sprintf(cbuff+n,"\n\r");
+      cdc_send_console(cbuff);
     }
   }
-  printf("\n");
+  cdc_send_console((char*)"\n\r");
 #endif
 #ifdef USE_XFUNC
-  printf("XFunction Memory\n=====================================\n");
+  sprintf(cbuff,"XFunction Memory\n\r=====================================\n\r");
   for(int i=XMEM_XF_SIZE-1; i>=0; i--) {
+    n = 0;
     if( xmem.mem[i] || xmem.m_mem[i] ) {
-    printf("Reg %03X: %014llx %014llx", i+XMEM_XF_START,
+      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XF_START,
           xmem.mem[i], xmem.m_mem[i]);
-    if( xmem.mem[i] != xmem.m_mem[i] )
-      printf(" ***");
-    printf("\n");
+      if( xmem.mem[i] != xmem.m_mem[i] )
+        n += sprintf(cbuff+n," ***");
+      n += sprintf(cbuff+n,"\n\r");
+      cdc_send_console(cbuff);
     }
   }
-  printf("\n");
+  cdc_send_console((char*)"\n\r");
 #endif
 }
 void clr_xmem(void)
 {
-  printf("Clear XMemory\n");
+  cdc_send_console((char*)"Clear XMemory\n\r");
   memset((void*)xmem.mem,0,xmem.size());
   xmem.saveMem();
+}
+
+void rp2040_bootsel()
+
+{
+
+  printf("\n RESETTING THE RP2040-TUP to BOOTSEL mode!!");
+
+  sleep_ms(1000);
+
+   // reboots the RP2040, uses the standard LED for activity monitoring
+
+  reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
 
 extern void reset_bus_buffer(void);
@@ -221,6 +268,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
+  { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
   { 'w', wand_scan,         "Wand scan"  },
   { 'q', sel_qram,          "Select QRAM page"  },
@@ -232,12 +280,14 @@ const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
 
 void serial_help(void)
 {
-  printf("\nCmd | Description");
-  printf("\n----+-----------------");
-  for (int i = 0; i < helpSize; i++)
-    printf("\n  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
-  printf("\n----+-----------------");
-  printf("\n");
+  int n = sprintf(cbuff,"\n\rCmd | Description");
+  n += sprintf(cbuff+n,"\n\r----+-----------------");
+  cdc_send_console(cbuff);
+  for (int i = 0; i < helpSize; i++) {
+    sprintf(cbuff,"\n\r  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
+    cdc_send_console(cbuff);
+  }
+  cdc_send_console((char*)"\n\r----+-----------------\n\r");
 }
 
 int getHexKey(int ky)
@@ -255,15 +305,17 @@ int getHexKey(int ky)
 
 void serial_loop(void)
 {
-  int key = getchar_timeout_us(1000);
+//  int key = getchar_timeout_us(1000);
+//  if( key != PICO_ERROR_TIMEOUT ) {
 
-  if( key != PICO_ERROR_TIMEOUT ) {
+  int key = cdc_read_byte(ITF_CONSOLE);
+  if( key != -1 ) {
     if( state != ST_NONE ) {
       // Assume input of some kind.
       if( key == 0x1b ) { // ESC - abort any key sequence ...
         state = ST_NONE;
         nBrk = sBrk = 0;
-        printf("\nAbort!\n");
+        cdc_send_console((char*)"\n\rAbort!\n\r");
       } else {
         // Input of hex-digit ... ?
         int x = getHexKey(key);
@@ -273,43 +325,47 @@ void serial_loop(void)
           case ST_QRAM:
             if( m->isLoaded() ) {
               m->toggleRam();
-              printf("\rModule in page #%X marked as %s", x, m->isRam() ? "QRAM" : "ROM");
+              sprintf(cbuff,"\rModule in page #%X marked as %s", x, m->isRam() ? "QRAM" : "ROM");
             } else {
-              printf("\rNo image at page #%X!!", x);
+              sprintf(cbuff,"\rNo image at page #%X!!", x);
             }
-            printf("              \n");  // Clean previous content on page ...
+            cdc_send_console(cbuff);
+            cdc_send_console((char*)"              \n\r");  // Clean previous content on page ...
             state = ST_NONE;
             break;
           case ST_PLUG:
             if( m->isLoaded() ) {
               m->togglePlug();
-              printf("\rModule in page #%X %s", x, m->isInserted() ? "inserted":"removed");
+              sprintf(cbuff,"\rModule in page #%X %s", x, m->isInserted() ? "inserted":"removed");
             } else {
-              printf("\rNo image at page #%X!!", x);
+              sprintf(cbuff,"\rNo image at page #%X!!", x);
             }
-            printf("              \n");  // Clean previous content on page ...
+            cdc_send_console(cbuff);
+            cdc_send_console((char*)"              \n\r");  // Clean previous content on page ...
             state = ST_NONE;
             break;
           case ST_BRK:
             sBrk <<= 4;
             sBrk |= x;
             nBrk++;
-            printf("%X", x);
+            sprintf(cbuff,"%X", x);
+            cdc_send_console(cbuff);
             if( nBrk > 4 ) {
               switch(brk_mode) {
               case BRK_START:
-                printf("\rStart breakpoint @ %04X\n", sBrk);
+                sprintf(cbuff,"\rStart breakpoint @ %04X\n\r", sBrk);
                 brk.setBrk(sBrk);
                 break;
               case BRK_END:
-                printf("\rEnd breakpoint @ %04X\n", sBrk);
+                sprintf(cbuff,"\rEnd breakpoint @ %04X\n\r", sBrk);
                 brk.stopBrk(sBrk);
                 break;
               case BRK_CLR:
-                printf("\rClear breakpoint @ %04X\n", sBrk);
+                sprintf(cbuff,"\rClear breakpoint @ %04X\n\r", sBrk);
                 brk.clrBrk(sBrk);
                 break;
               }
+              cdc_send_console(cbuff);
               brk_mode = BRK_NONE;
               sBrk = nBrk = 0;
               state = ST_NONE;
@@ -332,7 +388,8 @@ void serial_loop(void)
     // otherwise I get lockups on the serial communications.
     // So, if we get a timeout we send a space and backspace it. And
     // flush the stdio, but that didn't fix the problem but seems like a good idea.
-    stdio_flush();
-//    printf(" \b");
+    cdc_flush_console();
+    //stdio_flush();
+//    sprintf(cbuff," \b");
   }
 }

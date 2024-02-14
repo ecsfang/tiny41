@@ -97,7 +97,7 @@ typedef struct {
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T (0x1000/2)
+#define NUM_BUS_T (0x1000/4)
 #endif
 
 enum {

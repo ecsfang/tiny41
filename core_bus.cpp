@@ -17,6 +17,7 @@
 #ifdef USE_PIO
 #include "ir_led.h"
 #endif
+#include "usb/cdc_helper.h"
 
 //#define RESET_FLASH
 //#define RESET_RAM
@@ -179,6 +180,16 @@ void wand_scan(void)
   } else {
     printf("No barcode to scan in flash memory!!\n");
   }
+}
+
+void wand_data(unsigned char *dta)
+{
+  // Start with first row!
+  _power_on();
+  // Set carry to service the wand
+  _setFI_PBSY();
+  cBar.set(dta);
+  _clrFI_PBSY();
 }
 
 #if CF_DBG_DISP_INST
@@ -976,14 +987,18 @@ void post_handling(uint16_t addr)
     uint8_t c = prtBuf[rprt++];
     switch(c) {
       case 0x04:
-      case 0x0A: printf("\n"); break;
-      case 0x86: printf("*"); break;
+      case 0x0A:
+        cdc_send_printport('\n');
+        cdc_send_printport('\r');
+        break;
+      case 0x86: cdc_send_printport('*'); break;
       default:
-        if( c < 0x20 || c > 0x7F )
-          printf("%02X ", c);
-        else
-          printf("%c", c);
+//        if( c < 0x20 || c > 0x7F )
+//          printf("%02X ", c);
+//        else
+          cdc_send_printport(c);
     }
+    //cdc_send_printport(c);
 #ifdef USE_PIO
     send_to_printer(c);
 #endif
@@ -1063,6 +1078,7 @@ void process_bus(void)
         disp41.render();
     }
   }
+  cdc_flush(ITF_TRACE);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1254,7 +1270,7 @@ void handle_bus(volatile Bus_t *pBus)
       oCnt = cnt-1;
     oCnt = ++oCnt & 0xFFFF;
     if( oCnt != cnt ) {
-      nCpu2 += sprintf(cpu2buf+nCpu2, "\n\n###### SKIPPED %d TRACE CYCLES #########################\n", skipClk);
+      nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r\n\r###### SKIPPED %d TRACE CYCLES #########################\n\r", skipClk);
       pending_data_inst = 0;
       oCnt = cnt;
     }
@@ -1263,12 +1279,12 @@ void handle_bus(volatile Bus_t *pBus)
 #if 0
   for( int i=0; i<16; i++ ) {
     if( rr[i] != blinkyRAM[i] ) {
-      printf("\nBLKR%d: %014llX\n", i, blinkyRAM[i]);
+      printf("\n\rBLKR%d: %014llX\n\r", i, blinkyRAM[i]);
       rr[i] = blinkyRAM[i];
     }
   }
   if( bStat != blinky[0] ) {
-    printf("\nBLINKY Stat: %014llX\n", blinky[0]);
+    printf("\n\rBLINKY Stat: %014llX\n\r", blinky[0]);
     bStat = blinky[0];
   }
 #endif
@@ -1285,19 +1301,19 @@ void handle_bus(volatile Bus_t *pBus)
 #if 1
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
-  nCpu2 += sprintf(cpu2buf+nCpu2, "\n%c", queue_overflow ? '#' : ' ');
+  nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r%c", queue_overflow ? '#' : ' ');
 #else
-  nCpu2 += sprintf(cpu2buf+nCpu2, "\n");
+  nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r");
 #endif
 #else
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
   if( queue_overflow )
-    nCpu2 += sprintf(cpu2buf+nCpu2, "\n[****]");
+    nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r[****]");
   else
-    nCpu2 += sprintf(cpu2buf+nCpu2, "\n[%4d]", remaining);
+    nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r[%4d]", remaining);
 #else
-  nCpu2 += sprintf(cpu2buf+nCpu2, "\n");
+  nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r");
 #endif
 #endif
 
@@ -1356,9 +1372,9 @@ void handle_bus(volatile Bus_t *pBus)
       if (ram->isLoaded() && ram->isRam()) {
         // Page active and defined as ram - update!
         ram->write(wAddr, wDat);
-        nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X !!\n", wDat, wAddr);
+        nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X !!\n\r", wDat, wAddr);
       } else {
-        nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X (Not RAM!)\n", wDat, wAddr);
+        nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X (Not RAM!)\n\r", wDat, wAddr);
       }
     }
     break;
@@ -1378,8 +1394,11 @@ void handle_bus(volatile Bus_t *pBus)
   }
 
 #ifndef DISABLE_DISPRINT
-  if( IS_TRACE() )
-    printf("%s", cpu2buf);
+  if( IS_TRACE() ) {
+    //printf("%s", cpu2buf);
+    cdc_printf_(ITF_TRACE, "%s", cpu2buf);
+    //cdc_send_console(cpu2buf);
+  }
 #endif
   cpu2buf[0] = 0;
   nCpu2 = 0;
@@ -1388,7 +1407,7 @@ void handle_bus(volatile Bus_t *pBus)
   switch (pending_data_inst) {
   case INST_WRITE_ANNUNCIATORS:
 #if CF_DBG_DISP_INST
-    printf("\n%s %03llX", "WRTEN", data56 & 0xFFF);
+    printf("\n\r%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
     UpdateAnnun((uint16_t)(data56 & 0xFFF), true);
     break;
@@ -1440,7 +1459,7 @@ void handle_bus(volatile Bus_t *pBus)
 #if CF_DBG_SLCT
     case INST_PRPH_SLCT:
     case INST_RAM_SLCT:
-      printf("\n%s_SLCT: PA=%02X", inst == INST_PRPH_SLCT ? "PRPH" : "RAM", pa);
+      printf("\n\r%s_SLCT: PA=%02X", inst == INST_PRPH_SLCT ? "PRPH" : "RAM", pa);
       break;
 #endif
     case INST_WRITE:
@@ -1455,7 +1474,7 @@ void handle_bus(volatile Bus_t *pBus)
         CModule *m = modules[p];
         if( m->isLoaded() && m->isRam() && m->isDirty() ) {
           saveRam(p);
-          printf("Updated QRAM in page #X\n", p);
+          printf("Updated QRAM in page #X\n\r", p);
         }
       }
       if( xmem.dirty() ) {
@@ -1482,13 +1501,13 @@ void handle_bus(volatile Bus_t *pBus)
         switch (inst & 000077) {
         case 000050:
 #if CF_DBG_DISP_INST
-          printf("\n%s", inst50disp[inst >> 6]);
+          printf("\n\r%s", inst50disp[inst >> 6]);
 #endif
           pending_data_inst = inst;
           break;
         case 000070:
 #if CF_DBG_DISP_INST
-          printf("\n%s", inst70disp[inst >> 6]);
+          printf("\n\r%s", inst70disp[inst >> 6]);
 #endif
           rotateDispReg(inst >> 6);
           break;
