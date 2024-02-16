@@ -76,6 +76,7 @@ void cdc_printf_(int itf, const char *format, ...) {
     len = sprintf(buffer, format);
     if (len >= 0) 
     {
+        wait_for_write(itf, len);
         tud_cdc_n_write(itf, buffer, len);
     }
 }

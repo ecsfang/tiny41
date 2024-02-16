@@ -374,6 +374,10 @@ public:
   int       busyCnt;
   uint8_t   timerCnt() { return reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1; }
   int       tick() {
+    // Timer is clocked by a 85Hz (or XXX Hz) or clock, which means that the
+    // timer value should decrement every ~75th (or 825) bus cycle.
+    // nAlm keeps track of the bus cycle counting, and when 0
+    // timer value is decremented and nAlm restored.
     if( nAlm && (flags & BLINKY_CLK_ENABLE) ) {
       if( --nAlm == 0 ) {
         if( cntTimer ) {
@@ -386,6 +390,7 @@ public:
         }
       }
     }
+    // Timer idle or still running ...
     return 0;
   }
   void wrStatus(uint8_t st) {

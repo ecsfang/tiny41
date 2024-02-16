@@ -99,7 +99,20 @@ void list_modules(void)
 extern void list_brks(void);
 extern void clrAllBrk(void);
 extern void power_on(void);
-extern void wand_scan(void);
+extern void wand_data(uint8_t *);
+
+uint8_t barTest[] = {
+  //Hello world!
+  0x0E, 0xdd, 0x7c, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21
+  //0x05, 0xFC, 0x6A, 0x6B, 0x14, 0x13
+  //0x02, 0xE0, 0x86
+};
+
+void wand_test(void)
+{
+  cdc_send_console((char*)"Send barcode!\n\r");
+  wand_data(barTest);
+}
 
 static uint16_t sBrk = 0;
 static uint16_t nBrk = 0;
@@ -249,6 +262,14 @@ void rp2040_bootsel()
   reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
 
+void quit_log()
+{
+  cdc_send_console((char*)"\n\r Stopping logging\n\r");
+  cdc_flush_console();
+  cdc_send_string(ITF_TRACE, (char*)"\nQuit\n", 6);
+  cdc_flush(ITF_TRACE);
+}
+
 extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -267,8 +288,9 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
-  { 'w', wand_scan,         "Wand scan"  },
+  { 'w', wand_test,         "Example bar code"  },
   { 'q', sel_qram,          "Select QRAM page"  },
+  { 'Q', quit_log,          "Stop logging"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
 };
