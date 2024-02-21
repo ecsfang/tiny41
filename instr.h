@@ -27,13 +27,22 @@
 #define INST_DISPLAY_OFF               01340
 #define INST_DISPLAY_TOGGLE            01440
 #define INST_COMPENSATION_INSTRUCTION  01774
-#define INST_C_PFAD                    01760
+//#define INST_C_PFAD                    01760
 #define INST_WRITE_ANNUNCIATORS        INST_WDATA
 #define INST_READ_ANNUNCIATORS         00570
 
 #define INST_SETHEX                    0x260
 #define INST_SETDEC                    0x2A0
 
+
+#define INST_PRPH_SLCT                 01760 // CPFAD
+#define INST_RAM_SLCT                  01160 // CDADD
+#define INST_POWOFF                    00140
+
+#define INST_SELP                      00044 // Select peripherial
+#define INST_SEL_PRT                   ((9<<6) | INST_SELP) // Select printer
+
+// Display
 #define INST_SRLDA                     (00000 | INST_WRITE_DATA)
 #define INST_SRLDB                     (00100 | INST_WRITE_DATA)
 #define INST_SRLDC                     (00200 | INST_WRITE_DATA)
@@ -51,13 +60,6 @@
 #define INST_SRSABC                    (01600 | INST_WRITE_DATA)
 #define INST_SLSABC                    (01700 | INST_WRITE_DATA)
 
-#define INST_PRPH_SLCT                 01760 // CPFAD
-#define INST_RAM_SLCT                  01160 // CDADD
-#define INST_POWOFF                    00140
-
-#define INST_SELP                      00044 // Select peripherial
-#define INST_SEL_PRT                   ((9<<6) | INST_SELP) // Select printer
-
 #define INST_FLLDA                     (00000 | INST_READ_DATA)
 #define INST_FLLDB                     (00100 | INST_READ_DATA)
 #define INST_FLLDC                     (00200 | INST_READ_DATA)
@@ -73,6 +75,40 @@
 #define INST_FLSDAB                    (01500 | INST_READ_DATA)
 #define INST_FRSDABC                   (01600 | INST_READ_DATA)
 #define INST_FLSDABC                   (01700 | INST_READ_DATA)
+
+// Timer module
+#define INST_WRTIME                    (00000 | INST_WRITE_DATA)
+#define INST_WDTIME                    (00100 | INST_WRITE_DATA)
+#define INST_WRALM                     (00200 | INST_WRITE_DATA)
+#define INST_WRSTS                     (00300 | INST_WRITE_DATA)
+#define INST_WRSCR                     (00400 | INST_WRITE_DATA)
+#define INST_WSINT                     (00500 | INST_WRITE_DATA)
+//#define INST_                        (00600 | INST_WRITE_DATA)
+#define INST_STPINT                    (00700 | INST_WRITE_DATA)
+#define INST_DSWKUP                    (01000 | INST_WRITE_DATA)
+#define INST_SETTST                    (01100 | INST_WRITE_DATA)
+#define INST_DSALM                     (01200 | INST_WRITE_DATA)
+#define INST_ENALM                     (01300 | INST_WRITE_DATA)
+#define INST_STOPC                     (01400 | INST_WRITE_DATA)
+#define INST_STARTC                    (01500 | INST_WRITE_DATA)
+#define INST_PT_B                      (01600 | INST_WRITE_DATA)
+#define INST_PT_A                      (01700 | INST_WRITE_DATA)
+
+#define INST_RDTIME                    (00000 | INST_READ_DATA)
+#define INST_RCTIME                    (00100 | INST_READ_DATA)
+#define INST_RDALM                     (00200 | INST_READ_DATA)
+#define INST_RDSTS                     (00300 | INST_READ_DATA)
+#define INST_RDSCR                     (00400 | INST_READ_DATA)
+#define INST_RDINT                     (00500 | INST_READ_DATA)
+//#define INST_                     (00700 | INST_READ_DATA)
+//#define INST_                     (01000 | INST_READ_DATA)
+//#define INST_                     (01100 | INST_READ_DATA)
+//#define INST_                     (01200 | INST_READ_DATA)
+//#define INST_                     (01300 | INST_READ_DATA)
+//#define INST_                     (01400 | INST_READ_DATA)
+//#define INST_                     (01500 | INST_READ_DATA)
+//#define INST_                     (01600 | INST_READ_DATA)
+//#define INST_                     (01700 | INST_READ_DATA)
 
 // bank switching instructions
 #define INST_ENBANK1                   0x100

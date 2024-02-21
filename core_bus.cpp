@@ -583,6 +583,12 @@ CBlinky blinky;
 volatile uint64_t  CBlinky::reg[8];    // First 8 registers
 volatile uint8_t   CBlinky::reg8[16];  // Last 8 registers (0-7 not used)
 
+CTime mTime;
+volatile CRegs_t   CTime::reg[2];    // 56 bits time regs
+volatile uint32_t  CTime::interval;  // 20 bits interval timer
+volatile uint16_t  CTime::accuracy;  // 13 bits
+volatile uint16_t  CTime::status;    // 20 bits
+
 void core1_main_3(void)
 {
   static int bit_no = 0;        // Current bit-number in bus cycle
@@ -832,6 +838,12 @@ void core1_main_3(void)
         xmem.bwr = 0;
       }
 
+      // Check for pending writes to XMemory
+      if( mTime.bwr ) {
+        mTime.write(mTime.bwr-1, pBus->data);
+        mTime.bwr = 0;
+      }
+
       if( bIsSync ) {
         switch( cmd ) {
         case INST_RAM_SLCT:
@@ -885,9 +897,21 @@ void core1_main_3(void)
             }
           } else {
             // A peripherial is selected ...
-            if( perph == WAND_ADDR && cmd == INST_WANDRD && cBar.available() ) {
-              // Output next byte from the wand-buffer!
-              DATA_OUTPUT(cBar.get());
+            switch( perph ) {
+            case WAND_ADDR:
+              if( cmd == INST_WANDRD && cBar.available() ) {
+                // Output next byte from the wand-buffer!
+                DATA_OUTPUT(cBar.get());
+              }
+              break;
+            case TIMR_ADDR:
+              if( cmd6 == INST_READ_DATA ) {
+                DATA_OUTPUT(mTime.read(r));
+              } else if( cmd6 == INST_WRITE_DATA ) {
+                // Update ram select pointer
+                mTime.bwr = r+1;
+              }
+              break;
             }
           }
         }

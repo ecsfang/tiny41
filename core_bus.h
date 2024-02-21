@@ -491,6 +491,82 @@ public:
   }
 };
 
+// Memory and registers for Time module
+typedef struct {
+  uint64_t  clock;
+  uint64_t  alarm;
+  uint64_t  scratch;
+} CRegs_t;
+enum {
+  PT_A,
+  PT_B
+};
+
+class CTime {
+public:
+  CTime() {
+    pt = PT_A;
+  }
+  volatile static CRegs_t reg[2];    // 56 bits time regs
+  volatile static uint32_t  interval;  // 20 bits interval timer
+  volatile static uint16_t  accuracy;  // 13 bits
+  volatile static uint16_t  status;    // 20 bits
+  int       pt;   // Current pointer
+  int       bwr;  // Delayed write
+  inline void write(int r, uint64_t data) {
+    switch( r ) {
+    case 000: // WRTIME
+      reg[pt].clock = data;
+      break;
+    case 001: // WDTIME
+      reg[pt].clock = data;
+      break;
+    case 002: // WRALM
+      reg[pt].alarm = data;
+      break;
+    case 003: // WRSTS
+      if( pt == PT_A ) {
+        // Only first 6 bits can be written
+        status &= ~0x3F;
+        status |= data & 0x3F;
+      }
+      break;
+    case 004: // WRSCR
+      reg[pt].scratch = data;
+      break;
+    case 005: // WSINT
+      interval = data & 0xFFFFF;
+      break;
+    case 016: // PT=B
+      pt=PT_B;
+      break;
+    case 017: // PT=A
+      pt=PT_A;
+      break;
+    }
+  }
+  inline uint64_t read(int r) {
+    switch( r ) {
+    case 000: // RDTIME
+      return reg[pt].clock;
+    case 001: // RCTIME
+      return reg[pt].clock;
+    case 002: // RDALM
+      return reg[pt].alarm;
+    case 003: // WRSTS
+      if( pt == PT_A ) {
+        return status & 0x1FFF;
+      }
+      break;
+    case 004: // RDSCR
+      return reg[pt].scratch;
+    case 005: // RDINT
+      return interval & 0xFFFFF;
+    }
+    return 0;
+  }
+};
+
 #define USE_XFUNC
 #define USE_XMEM1
 #define USE_XMEM2
