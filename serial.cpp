@@ -176,10 +176,10 @@ void clrBreakpoints(void)
 }
 
 //extern volatile Blinky_t blinky;
-extern CBlinky blinky;
 
 void dump_blinky(void)
 {
+  extern CBlinky blinky;
   int i;
   cdc_send_console((char*)"Blinky registers and RAM\n\r=====================================\n\r");
   for(i=0; i<0x08; i++) {
@@ -190,6 +190,30 @@ void dump_blinky(void)
     sprintf(cbuff,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
     cdc_send_console(cbuff);
   }
+  cdc_send_console((char*)"\n\r\r");
+}
+
+void dump_time(void)
+{
+  extern CTime mTime;
+  int i;
+  cdc_send_console((char*)"Time Module registers\n\r=====================================\n\r");
+  for(i=0; i<2; i++) {
+    sprintf(cbuff,"Reg %c:\n\r", i==0?'A':'B');
+    cdc_send_console(cbuff);
+    sprintf(cbuff,"  Clock:   %014llx (56)\n\r", mTime.reg[i].clock);
+    cdc_send_console(cbuff);
+    sprintf(cbuff,"  Alarm:   %014llx (56)\n\r", mTime.reg[i].alarm);
+    cdc_send_console(cbuff);
+    sprintf(cbuff,"  Scratch: %014llx (56)\n\r", mTime.reg[i].scratch);
+    cdc_send_console(cbuff);
+  }
+  sprintf(cbuff,"\n\r  Interval: %05X  (20)\n\r", mTime.interval);
+  cdc_send_console(cbuff);
+  sprintf(cbuff,"  Accuracy: %05X  (13)\n\r", mTime.accuracy);
+  cdc_send_console(cbuff);
+  sprintf(cbuff,"  Status:   %05X  (20)\n\r", mTime.status);
+  cdc_send_console(cbuff);
   cdc_send_console((char*)"\n\r\r");
 }
 
@@ -293,6 +317,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'Q', quit_log,          "Stop logging"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
+  { 'T', dump_time,         "Dump Time registers"  },
 };
 
 const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);

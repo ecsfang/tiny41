@@ -225,9 +225,9 @@ bool disAsmPeripheral(int inst)
 		else if( inst == INST_ALM )
 			dBuf = "?ALM";
 		else if( cmd == 0050 )
-			dBuf = inst50disp[mod];
+			dBuf = inst50timer[mod];
 		else if( cmd == 0070 )
-			dBuf = inst70disp[mod];
+			dBuf = inst70timer[mod];
 		break;
 	}
 	if( dBuf ) {

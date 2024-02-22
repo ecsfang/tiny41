@@ -114,8 +114,6 @@ inline uint16_t getFI(void)
 }
 
 volatile int wDelayBuf = 0;
-//volatile uint16_t iGetNextWndData = 0;
-//volatile uint16_t iSendNextWndData = 0;
 
 void _power_on()
 {
@@ -137,66 +135,6 @@ void power_on(void)
 
 bool bWdata = false;
 
-#if 0
-// Dedicated page to contain current flashed barcode
-static uint8_t  wand_page[PAGE_SIZE];
-
-static int row = -1;
-static int wp = 0;
-
-// Get pointer to barcode data for Row r
-int barRow(int r)
-{
-  int bc = 0;
-  uint8_t n;
-  while( r > 1 ) {
-    // Get length of this row
-    n = wand_page[bc];
-    if( n > 0 && n <= BAR_MAXLEN )
-      bc += n+1;
-    else
-      return 0; // End of rows ...
-    r--;
-  }
-  return bc;
-}
-
-
-void wand_scan(void)
-{
-  if( bWdata ) {
-    // Clear Wand carry
-    _clrFI_PBSY();
-    bWdata = false;
-    return;
-  }
-  if( wand_page[0] > 0 && wand_page[0] <= BAR_MAXLEN ) {
-    if( wp == 0 ) {
-      // Start with first row!
-      _power_on();
-      // Set carry to service the wand
-      _setFI_PBSY();
-      // Start with first row ...
-      row = 1;
-      wp = barRow(row);
-    }
-    printf("\nSimulate Wand Barcode scan - Row:%d ... ", row++);
-    // Fill barcode buffer with data for current row ...
-    cBar.set(&wand_page[wp]);
-    // Update pointer to next row of data ...
-    wp = barRow(row);
-    if( wp == 0 ) {
-      printf("Done!");
-      // Clear Wand carry
-      _clrFI_PBSY();
-      row = -1;
-    }
-    printf("\n");
-  } else {
-    printf("No barcode to scan in flash memory!!\n");
-  }
-}
-#endif
 
 void wand_done(void)
 {
@@ -988,6 +926,37 @@ void core1_main_3(void)
   }
 }
 
+static char bcd[14+1];
+void CTime::tick()
+{
+  // 0.01s = 10ms = 10000us
+  int x, n,i, tic;
+  uint64_t  tm1 = time_us_64();
+  if( (tm1 - tm) > 10000 ) {
+    tm1 = tm1-tm;
+    tic = tm1 / 1000;
+    sprintf(bcd, "%014llx", reg[0].clock);
+
+    x = 14;
+    for(i=0; i<x; i++)
+      bcd[i] -= '0';
+    while( tic ) {
+      n = tic % 10;
+      tic /= 10;
+      for( int i = 13; n && i>0; i--) {
+        bcd[i] += n;
+        if( bcd[i] <= 9 )
+          break;
+        bcd[i] -= 10;
+        n = 1;
+      }
+    }
+    reg[0].clock = 0;
+    for( i = 0; i<14; i++ )
+      reg[0].clock = (reg[0].clock<<4) | bcd[i];
+    tm += tm1;
+  }
+}
 void post_handling(uint16_t addr)
 {
   // Check if we have more data to send and that the buffer is empty ...
@@ -1026,6 +995,8 @@ void post_handling(uint16_t addr)
     send_to_printer(c);
 #endif
   }
+  // Update time in Time module
+  mTime.tick();
 }
 
 #ifdef DUMP_CYCLE
