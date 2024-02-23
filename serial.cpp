@@ -14,6 +14,7 @@
 #include "serial.h"
 #include "core_bus.h"
 #include "usb/cdc_helper.h"
+#include "hardware/flash.h"
 
 #define CON_PRINTF cdc_printf_console
 //#define CON_PRINTF printf
@@ -193,6 +194,7 @@ void dump_blinky(void)
   cdc_send_console((char*)"\n\r\r");
 }
 
+#ifdef USE_TIME_MODULE
 void dump_time(void)
 {
   extern CTime mTime;
@@ -216,6 +218,7 @@ void dump_time(void)
   cdc_send_console(cbuff);
   cdc_send_console((char*)"\n\r\r");
 }
+#endif//USE_TIME_MODULE
 
 extern CXFM xmem;
 
@@ -294,11 +297,32 @@ void quit_log()
   cdc_flush(ITF_TRACE);
 }
 
+void info(void)
+{
+  sprintf(cbuff, "Flash offset: 0x%X\r\n", FLASH_TARGET_OFFSET);
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "XIP_BASE:     0x%X\r\n", XIP_BASE);
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "Sector size:  0x%X (%d)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "Page size:    0x%X (%d)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "%d bytes total heap\r\n", getTotalHeap());
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "%d bytes free heap\r\n", getFreeHeap());
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "Trace element: %d bytes\r\n", sizeof(Bus_t));
+  cdc_send_console(cbuff);
+  sprintf(cbuff, "Trace buffer: %d bytes\r\n", sizeof(Bus_t)*NUM_BUS_T);
+  cdc_send_console(cbuff);
+}
+
 extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
   { 'h', serial_help,       "Serial command help"  },
   { '?', serial_help,       "Serial command help"  },
+  { 'i', info,              "Memory info"  },
   { 'd', toggle_disasm,     "Toggle disassembler"  },
   { 't', toggle_trace,      "Toggle trace"  },
   { 'b', listBreakpoints,   "List breakpoints"  },
@@ -317,7 +341,9 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'Q', quit_log,          "Stop logging"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
+#ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
+#endif//USE_TIME_MODULE
 };
 
 const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);

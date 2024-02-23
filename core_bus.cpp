@@ -31,9 +31,6 @@ CXFM xmem;
 
 static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
 
-// We're going to erase and reprogram a region 256k from the start of flash.
-// Once done, we can access this at XIP_BASE + 256k.
-#define FLASH_TARGET_OFFSET (512 * 1024)
 
 uint32_t getTotalHeap(void)
 {
@@ -269,7 +266,8 @@ void saveRam(int port, int ovr = 0)
     if (ovr || modules.isDirty(port)) {
       modules.clear(port);
       erasePort(port, false);
-      writePort(port, rom_pages[port - FIRST_PAGE]);
+//      writePort(port, rom_pages[port - FIRST_PAGE]);
+      writePort(port, modules.image(port,0));
       printf("Wrote RAM[%X] to flash\n", port);
     }
   } else {
@@ -331,9 +329,12 @@ void qRam(int page)
   }
 }
 
-void loadPage(int page, uint16_t *img, int bank = 0)
+void loadPage(int page, int bank = 0)
 {
   // Read flash image
+  uint16_t *img = rom_pages[page-FIRST_PAGE];
+  if( bank )
+    img = bank_page;
   readPort(page+(bank?NR_PAGES:0), img);
   int nErr = 0; // Nr of errors
   int nClr = 0; // Nr of erased words
@@ -361,6 +362,13 @@ void loadPage(int page, uint16_t *img, int bank = 0)
   printf("\n");
 #endif
   if( !nErr ) {
+/*    uint16_t *img = new uint16_t[PAGE_SIZE];
+    if( !img ) {
+      cdc_send_console((char*)"Failed to allocate memory!\n\r");
+      return;
+    }
+    memcpy(img, _f_page, sizeof(uint16_t)*PAGE_SIZE);
+    */
     modules.add(page, img, bank);
     printf("HaveBank: %d\n", modules[page]->haveBank());
   }
@@ -368,6 +376,7 @@ void loadPage(int page, uint16_t *img, int bank = 0)
 
 void initRoms()
 {
+/*
 #ifdef USE_FLASH
   printf("Flash offset: 0x%X\n", FLASH_TARGET_OFFSET);
   printf("XIP_BASE:     0x%X\n", XIP_BASE);
@@ -378,6 +387,7 @@ void initRoms()
   printf("%d bytes free heap\n", getFreeHeap());
   printf("Trace element: %d bytes\n", sizeof(Bus_t));
   printf("Trace buffer: %d bytes\n", sizeof(Bus_t)*NUM_BUS_T);
+*/
 
 #ifdef RESET_RAM
   for (int i = 0; i < RAM_SIZE; i++)
@@ -396,13 +406,13 @@ void initRoms()
   // Check for existing images and load them ...
   for (int port = FIRST_PAGE; port <= LAST_PAGE; port++) {
     int pIdx = port - FIRST_PAGE;
-    loadPage(port, rom_pages[pIdx]);
+    loadPage(port);
   }
 #ifdef WAND_EMU
 //    readFlash(PAGE1(NR_PAGES), wand_page, FLASH_SECTOR_SIZE);
 #endif
   // Load second bank of printer-ROM (if available)
-  loadPage(6, bank_page, 1);
+  loadPage(6, 1);
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
 }
@@ -521,11 +531,13 @@ CBlinky blinky;
 volatile uint64_t  CBlinky::reg[8];    // First 8 registers
 volatile uint8_t   CBlinky::reg8[16];  // Last 8 registers (0-7 not used)
 
+#ifdef USE_TIME_MODULE
 CTime mTime;
 volatile CRegs_t   CTime::reg[2];    // 56 bits time regs
 volatile uint32_t  CTime::interval;  // 20 bits interval timer
 volatile uint16_t  CTime::accuracy;  // 13 bits
 volatile uint16_t  CTime::status;    // 20 bits
+#endif//USE_TIME_MODULE
 
 void core1_main_3(void)
 {
@@ -776,11 +788,13 @@ void core1_main_3(void)
         xmem.bwr = 0;
       }
 
+#ifdef USE_TIME_MODULE
       // Check for pending writes to XMemory
       if( mTime.bwr ) {
         mTime.write(mTime.bwr-1, pBus->data);
         mTime.bwr = 0;
       }
+#endif//USE_TIME_MODULE
 
       if( bIsSync ) {
         switch( cmd ) {
@@ -842,6 +856,7 @@ void core1_main_3(void)
                 DATA_OUTPUT(cBar.get());
               }
               break;
+#ifdef USE_TIME_MODULE
             case TIMR_ADDR:
               if( cmd6 == INST_READ_DATA ) {
                 DATA_OUTPUT(mTime.read(r));
@@ -850,6 +865,7 @@ void core1_main_3(void)
                 mTime.bwr = r+1;
               }
               break;
+#endif//USE_TIME_MODULE
             }
           }
         }
@@ -926,6 +942,7 @@ void core1_main_3(void)
   }
 }
 
+#ifdef USE_TIME_MODULE
 static char bcd[14+1];
 void CTime::tick()
 {
@@ -957,6 +974,8 @@ void CTime::tick()
     tm += tm1;
   }
 }
+#endif//USE_TIME_MODULE
+
 void post_handling(uint16_t addr)
 {
   // Check if we have more data to send and that the buffer is empty ...
@@ -995,8 +1014,10 @@ void post_handling(uint16_t addr)
     send_to_printer(c);
 #endif
   }
+#ifdef USE_TIME_MODULE
   // Update time in Time module
   mTime.tick();
+#endif//USE_TIME_MODULE
 }
 
 #ifdef DUMP_CYCLE

@@ -33,6 +33,13 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
+// We're going to erase and reprogram a region 256k from the start of flash.
+// Once done, we can access this at XIP_BASE + 256k.
+#define FLASH_TARGET_OFFSET (512 * 1024)
+
+uint32_t getTotalHeap(void);
+uint32_t getFreeHeap(void);
+
 #define TIMER_CNT1  75
 #define TIMER_CNT2  825
 #define BUSY_CNT    8
@@ -120,6 +127,8 @@ public:
     m_img = NULL;
     m_bank = 0;
     m_port = 0;
+    for( int i=0; i<4; i++ )
+      m_banks[i] = NULL;
   }
   void set(uint16_t *image, int bank = 0) {
     m_banks[bank] = image;
@@ -131,6 +140,9 @@ public:
     bank = nBank[(bank>>6)&0b11];
     if(m_banks[bank])
       m_img = m_banks[bank];
+  }
+  uint16_t *image(int bank) {
+    return m_banks[bank];
   }
   void port(int p) {
     m_port = p;
@@ -198,6 +210,9 @@ public:
       m_modules[port].set(image, bank);
       printf("Add ROM @ %04X - %04X [bank %d]\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK, bank);
   	} 
+  }
+  uint16_t *image(int port, int bank) {
+    return m_modules[port].image(bank);
   }
   void clearAll() {
     memset(m_modules, 0, sizeof(CModule) * NR_PAGES);
@@ -491,6 +506,7 @@ public:
   }
 };
 
+#ifdef USE_TIME_MODULE
 // Memory and registers for Time module
 typedef struct {
   uint64_t  clock;
@@ -617,6 +633,7 @@ public:
   }
   void tick();
 };
+#endif//USE_TIME_MODULE
 
 #define USE_XFUNC
 #define USE_XMEM1
