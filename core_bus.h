@@ -39,6 +39,7 @@
 
 uint32_t getTotalHeap(void);
 uint32_t getFreeHeap(void);
+const uint8_t *flashPointer(int offs);
 
 #define TIMER_CNT1  75
 #define TIMER_CNT2  825
@@ -119,9 +120,9 @@ static uint8_t nBank[4] = {0,2,1,3};
 class CModule {
   uint16_t  *m_banks[4];
   uint16_t  *m_img;
-  uint16_t  m_flgs;
-  int       m_bank;
-  int       m_port;
+  uint8_t   m_flgs;
+  uint8_t   m_bank;
+  uint8_t   m_port;
 public:
   CModule() {
     m_img = NULL;
@@ -131,6 +132,8 @@ public:
       m_banks[i] = NULL;
   }
   void set(uint16_t *image, int bank = 0) {
+    if( m_banks[bank] )
+      delete[] m_banks[bank];
     m_banks[bank] = image;
     m_img = m_banks[0];
     m_flgs = IMG_INSERTED;
@@ -252,8 +255,11 @@ public:
   void setRom(int port) {
     m_modules[port].setRom();
   }
+  CModule *port(int p) {
+    return &m_modules[p];
+  }
   CModule *at(int addr) {
-    return &m_modules[PAGE(addr)];
+    return port(PAGE(addr));
   }
   CModule *operator [](uint16_t addr) {
     return &m_modules[addr & 0xF];
@@ -349,19 +355,7 @@ public:
       printf("No breakpoints\n");
   }
 };
-/**
-// Memory and registers for Blinky module
-typedef struct {
-  uint64_t reg[8];    // First 8 registers
-  uint8_t  reg8[16];  // Last 8 registers (0-7 not used)
-//  uint64_t ram[16];
-  uint8_t  flags;
-  int nAlm;
-  int cntTimer;
-  int bwr;
-  int busyCnt;
-} Blinky_t;
-**/
+
 extern volatile uint16_t carry_fi;
 
 inline void setFI(int flag) {

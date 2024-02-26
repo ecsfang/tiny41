@@ -18,6 +18,7 @@
 #include "ir_led.h"
 #endif
 #include "usb/cdc_helper.h"
+#include "modfile.h"
 
 //#define RESET_FLASH
 //#define RESET_RAM
@@ -231,32 +232,34 @@ const uint8_t *flashPointer(int offs)
   return (const uint8_t*)(XIP_BASE + offs);
 }
 
+// Make space for information about all flash images
+CModules modules;
+
 // Read flash into ram with right endian
 void readPort(int n, uint16_t *data)
 {
   // Point at the wanted flash image ...
-  const uint16_t *fp = (uint16_t*)flashPointer(PAGE1(n));
+  const char *fp8 = (char*)flashPointer(PAGE1(n));
+  if( get_file_format(fp8) ) {
+    // Read MOD format
+    extract_roms(fp8, modules.port(n));
+    return;
+  }
+  const uint16_t *fp16 = (uint16_t*)fp8;
   for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
     // Swap order to get right endian of 16-bit word ...
-    data[i] = swap16(*fp++);
+    data[i] = swap16(*fp16++);
   }
 }
-// Read flash into ram for wand use
+// Read flash into ram whitout swapping
 void readFlash(int offs, uint8_t *data, uint16_t size)
 {
   // Point at the wanted flash image ...
   const uint8_t *fp = flashPointer(offs);
   memcpy(data, fp, size);
-  printf(" <-- Read flash @ %08X %d bytes\n", offs, size);
+  cdc_printf_(ITF_TRACE, " <-- Read flash @ %08X %d bytes\n", offs, size);
 }
 #endif
-
-// Allocate memory for all flash images ...
-static uint16_t rom_pages[NR_PAGES - FIRST_PAGE][PAGE_SIZE];
-static uint16_t bank_page[PAGE_SIZE];
-
-// Make space for information about all flash images
-CModules modules;
 
 #ifdef USE_FLASH
 // Save a ram image to flash (emulate Q-RAM)
@@ -266,7 +269,6 @@ void saveRam(int port, int ovr = 0)
     if (ovr || modules.isDirty(port)) {
       modules.clear(port);
       erasePort(port, false);
-//      writePort(port, rom_pages[port - FIRST_PAGE]);
       writePort(port, modules.image(port,0));
       printf("Wrote RAM[%X] to flash\n", port);
     }
@@ -332,9 +334,10 @@ void qRam(int page)
 void loadPage(int page, int bank = 0)
 {
   // Read flash image
-  uint16_t *img = rom_pages[page-FIRST_PAGE];
-  if( bank )
-    img = bank_page;
+  uint16_t *img = new uint16_t[PAGE_SIZE];
+  if( !img )
+    return;
+
   readPort(page+(bank?NR_PAGES:0), img);
   int nErr = 0; // Nr of errors
   int nClr = 0; // Nr of erased words
@@ -362,32 +365,14 @@ void loadPage(int page, int bank = 0)
   printf("\n");
 #endif
   if( !nErr ) {
-/*    uint16_t *img = new uint16_t[PAGE_SIZE];
-    if( !img ) {
-      cdc_send_console((char*)"Failed to allocate memory!\n\r");
-      return;
-    }
-    memcpy(img, _f_page, sizeof(uint16_t)*PAGE_SIZE);
-    */
     modules.add(page, img, bank);
-    printf("HaveBank: %d\n", modules[page]->haveBank());
-  }
+     cdc_printf_(ITF_TRACE, "HaveBank: %d\n", modules[page]->haveBank());
+  } else
+    delete[] img;
 }
 
 void initRoms()
 {
-/*
-#ifdef USE_FLASH
-  printf("Flash offset: 0x%X\n", FLASH_TARGET_OFFSET);
-  printf("XIP_BASE:     0x%X\n", XIP_BASE);
-  printf("Sector size:  0x%X (%d)\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
-  printf("Page size:    0x%X (%d)\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
-#endif
-  printf("%d bytes total heap\n", getTotalHeap());
-  printf("%d bytes free heap\n", getFreeHeap());
-  printf("Trace element: %d bytes\n", sizeof(Bus_t));
-  printf("Trace buffer: %d bytes\n", sizeof(Bus_t)*NUM_BUS_T);
-*/
 
 #ifdef RESET_RAM
   for (int i = 0; i < RAM_SIZE; i++)
