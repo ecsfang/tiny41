@@ -20,8 +20,10 @@
 #define USE_40190
 #define MEASURE_TIME
 #define MEASURE_COUNT
+//#define LOG_FI
 
 //#define USE_TIME_MODULE
+#define USE_XF_MODULE
 //#define DISABLE_DISPRINT
 
 #ifdef USE_40190
@@ -134,7 +136,6 @@ enum {
 #define IS_DISASM()     ((bTrace & TRACE_DISASM) == TRACE_DISASM)
 
 //#define TRACE
-#define USE_FLASH
 #define USE_PIO     // Enable IR usage
 
 enum {

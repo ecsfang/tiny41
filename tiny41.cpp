@@ -127,8 +127,9 @@ int main()
     initRoms();
 
 //    cdc_send_console((char*)"Init XMemory ...\n\r");
+#ifdef USE_XFUNC
     initXMem(0);
-
+#endif
 
     /* Overclock */
 //    cdc_send_console((char*)"Overclock ...\n\r");
@@ -248,6 +249,25 @@ int main()
     // Ignore checksum loop in Blinky
     IGNORE_LOOP(0x657D);    // Bank 0
     IGNORE_LOOP(0x6768);    // Bank 1
+
+    // Ignore loop in Service ROM ...
+    IGNORE_LOOP(0x4018);
+    IGNORE_LOOP(0x4032);
+    IGNORE_LOOP(0x4050);
+    IGNORE_LOOP(0x4057);
+    IGNORE_LOOP(0x405A);
+    IGNORE_LOOP(0x41B1);
+    IGNORE_LOOP(0x41D9);
+    IGNORE_LOOP(0x424B);
+    IGNORE_LOOP(0x43E5);
+    IGNORE_LOOP(0x462C);
+    IGNORE_LOOP(0x47E1);
+    IGNORE_LOOP(0x49ED);
+    IGNORE_LOOP(0x49F8);
+    IGNORE_LOOP(0x49F8);
+    IGNORE_FUNC(0x42D8, 0x42E5);
+    IGNORE_FUNC(0x4050, 0x406B);
+    IGNORE_FUNC(0x4C55, 0x4C71);
 
     bool bErr = false;
 

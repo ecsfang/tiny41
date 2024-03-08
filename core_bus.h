@@ -8,6 +8,7 @@
 
 #include "instr.h"
 
+
 #define MASK_64_BIT    (0xFFFFFFFFFFFFFFFFL)
 #define MASK_56_BIT    (0x00FFFFFFFFFFFFFFL)
 #define MASK_48_BIT    (0x0000FFFFFFFFFFFFL)
@@ -17,7 +18,7 @@
 #define PA_SHIFT       56
 
 #define ROTATE_RIGHT(V) {uint64_t t = (V & 0xF); V >>= 4; V |= t<<44;}
-#define  ROTATE_LEFT(V) {uint64_t t = (V>>44) & 0xF; V <<= 4; V |= t;}
+#define ROTATE_LEFT(V)  {uint64_t t = (V>>44) & 0xF; V <<= 4; V |= t;}
 
 // #define EMBED_RAM
 #define RAM_SIZE    0x1000
@@ -41,10 +42,6 @@ uint32_t getTotalHeap(void);
 uint32_t getFreeHeap(void);
 const uint8_t *flashPointer(int offs);
 
-#define TIMER_CNT1  75
-#define TIMER_CNT2  825
-#define BUSY_CNT    8
-
 enum {
     BIT_0   = 1 << 0,
     BIT_1   = 1 << 1,
@@ -61,10 +58,6 @@ enum {
     BIT_12  = 1 << 12,
     BIT_13  = 1 << 13
 };
-
-#define BLINKY_RAM_ENABLE   BIT_4
-#define BLINKY_CLK_ENABLE   BIT_6
-#define BLINKY_ENABLE       BIT_7
 
 enum {
     FI_NONE  = 0,
@@ -105,7 +98,7 @@ typedef struct {
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T (0x1000/4)
+#define NUM_BUS_T (0x1000)
 #endif
 
 enum {
@@ -264,9 +257,7 @@ public:
   CModule *operator [](uint16_t addr) {
     return &m_modules[addr & 0xF];
   }
-
 };
-
 
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
 
@@ -369,321 +360,14 @@ inline void clrFI(int flag = FI_MASK) {
 extern volatile uint8_t prtBuf[PRT_BUF_LEN];
 extern volatile uint8_t wprt;
 
-// Memory and registers for Blinky module
-class CBlinky {
-public:
-  CBlinky() {
-  }
-  volatile static uint64_t  reg[8];    // First 8 registers
-  volatile static uint8_t   reg8[16];  // Last 8 registers (0-7 not used)
-  uint8_t   flags;
-  int       nAlm;
-  int       cntTimer;
-  int       bwr;
-  int       busyCnt;
-  uint8_t   timerCnt() { return reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1; }
-  int       tick() {
-    // Timer is clocked by a 85Hz (or XXX Hz) or clock, which means that the
-    // timer value should decrement every ~75th (or 825) bus cycle.
-    // nAlm keeps track of the bus cycle counting, and when 0
-    // timer value is decremented and nAlm restored.
-    if( nAlm && (flags & BLINKY_CLK_ENABLE) ) {
-      if( --nAlm == 0 ) {
-        if( cntTimer ) {
-          // Decrement and continue counting ...
-          cntTimer--;
-          nAlm = timerCnt(); //reg8[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
-        } else {
-          // Set FI flag when counter reaches zero ...
-          return 1;
-        }
-      }
-    }
-    // Timer idle or still running ...
-    return 0;
-  }
-  void wrStatus(uint8_t st) {
-    flags = reg8[14] = st;
-  }
-  inline void write(int r, uint64_t data, bool bRam = false) {
-    if( r < 8 ) {
-      // 56 bit register
-      reg[r] = data;
-    } else {
-      // 8 bit register
-      reg8[r] = (uint8_t)(data & 0xFF);
-      if( !bRam ) {
-        switch(r) {
-        case  8:
-          if( reg8[8] & BLINKY_ENABLE )
-            set(BLINKY_ENABLE);
-          break;
-        case 10:
-          cntTimer = reg8[10];
-          if( flags & BLINKY_CLK_ENABLE )
-            cntTimer--;
-          // Writing results in clearing of FI[12]
-          clrFI(FI_PRT_BUSY);
-          clrFI(FI_PRT_TIMER);
-          // Reset timer countdown
-          // Flag 6 in reg 8 indicates slow clock
-          nAlm = timerCnt();
-          break;
-        case 11:
-          if( flags & BLINKY_CLK_ENABLE ) {
-            // Write to out buffer - set buffer flag
-            // Maybe we should just keep 8 LSB
-            prtBuf[wprt++] = reg8[11];
-            if( busyCnt ) // Already busy ... ?
-              setFI(FI_PRT_BUSY);
-            busyCnt = BUSY_CNT;
-          }
-          break;
-        }
-      }
-    }
-  }
-  inline uint64_t read(int r) {
-    // Enable data driver ...
-    if( r < 8 ) {
-      return reg[r];
-    } else {
-      // Update hardware registers
-      switch(r) {
-      case 10:  // Timer register
-        reg8[10] = cntTimer;
-        break;
-      case 14:  // HW flag register
-        reg8[14] = flags;
-        break;
-      }
-      return reg8[r];
-    }
-  }
-  void func(int c) {
-    switch( c ) {
-    case 2: // Enable timer clock
-      set(BLINKY_CLK_ENABLE);
-      break;
-    case 3: // Disable timer clock
-      clr(BLINKY_CLK_ENABLE);
-      break;
-    case 4: // Enable RAM write
-      set(BLINKY_RAM_ENABLE);
-      break;
-    case 5: // Disable RAM write
-      clr(BLINKY_RAM_ENABLE);
-      break;
-    case 7: // Reset
-      flags = 0;
-      clrFI(FI_PRT_BUSY);
-      break;
-    case 8: // Clear buffer
-      clrFI(FI_PRT_BUSY);
-      clrFI(FI_PRT_TIMER);
-      cntTimer = 0;
-      break;
-    }
-  }
-  void inline busy(void) {
-    if(busyCnt) {
-      busyCnt--;
-      if( !busyCnt )
-        clrFI(FI_PRT_BUSY);
-    }
-  }  
-  inline void set(uint8_t f) {
-    flags |= f;
-  }
-  inline void clr(uint8_t f) {
-    flags &= ~f;
-  }
-};
-
-#ifdef USE_TIME_MODULE
-// Memory and registers for Time module
-typedef struct {
-  uint64_t  clock;
-  uint64_t  alarm;
-  uint64_t  scratch;
-} CRegs_t;
-enum {
-  PT_A,
-  PT_B
-};
-
-enum {
-  ALMA  = 1<<0,    // 0 set if ALARM A register is the same as CLOCK A 
-  DTZA  = 1<<1,    // 1 set if an overflow has occurred in CLOCK A
-  ALMB  = 1<<2,    // 2 set if ALARM B register is the same as CLOCK B
-  DTZB  = 1<<3,    // 3 set if an overflow has occurred in CLOCK B
-  DTZIT = 1<<4,    // 4 set if the interval timer has counted a whole interval
-  PUS   = 1<<5,    // 5 set if timer chip supply voltage has been low
-  CKAEN = 1<<6,    // 6 set if CLOCK A is counting forwards
-  CKBEN = 1<<7,    // 7 set if CLOCK B is counting forwards
-  ALAEN = 1<<8,    // 8 set if ALARM A is enabled (usually set)
-  ALBEN = 1<<9,    // 9 set if ALARM B is enabled (usually clear)
-  ITEN  = 1<<10,   // 10 set if the interval timer is running
-  TESTB = 1<<11,   // 11 timer is in TEST B mode
-  TESTA = 1<<12    // 12 timer is in TEST A mode
-};
-
-class CTime {
-  uint64_t tm;
-public:
-  CTime() {
-    pt = PT_A;
-    memset((void*)reg, 0xFF, sizeof(CRegs_t)*2);
-    interval = 0x111111;
-    accuracy = 0x222222;
-    status   = PUS;
-    bwr = 0;
-  }
-  volatile static CRegs_t reg[2];    // 56 bits time regs
-  volatile static uint32_t  interval;  // 20 bits interval timer
-  volatile static uint16_t  accuracy;  // 13 bits
-  volatile static uint16_t  status;    // 20 bits
-  int       pt;   // Current pointer
-  int       bwr;  // Delayed write
-  inline void write(int r, uint64_t data) {
-    switch( r ) {
-    case 000: // WRTIME
-      reg[pt].clock = data;
-      tm = time_us_64();
-      break;
-    case 001: // WDTIME
-      reg[pt].clock = data;
-      tm = time_us_64();
-      break;
-    case 002: // WRALM
-      reg[pt].alarm = data;
-      break;
-    case 003: // WRSTS
-      if( pt == PT_A ) {
-        // Only first 6 bits can be cleard, rest untuched ...
-        status &= data | 0x1FC0;
-      } else {
-        accuracy = (data >> 4) & 0x1FFF;
-      }
-      break;
-    case 004: // WRSCR
-      reg[pt].scratch = data;
-      break;
-    case 005: // WSINT
-      interval = data & 0xFFFFF;
-      break;
-    case 007: // Stop interval timer
-      status &= ~ITEN;
-      break;
-    case 010: // Clear test mode
-#define CFLAG(a,b) status &= ~((pt==PT_A)?a:b)
-#define SFLAG(a,b) status |= ((pt==PT_A)?a:b)
-      CFLAG(TESTA,TESTB);
-      break;
-    case 011: // Set test mode
-      SFLAG(TESTA,TESTB);
-      break;
-    case 012: // Disable alarm
-      CFLAG(ALAEN,ALBEN);
-      break;
-    case 013: // Enable alarm
-      SFLAG(ALAEN,ALBEN);
-      break;
-    case 014: // Stop clock
-      CFLAG(CKAEN,CKBEN);
-      break;
-    case 015: // Start clock
-      SFLAG(CKAEN,CKBEN);
-      break;
-    case 016: // PT=B
-      pt=PT_B;
-      break;
-    case 017: // PT=A
-      pt=PT_A;
-      break;
-    }
-  }
-  inline uint64_t read(int r) {
-    switch( r ) {
-    case 000: // RDTIME
-      return reg[pt].clock;
-    case 001: // RCTIME
-      return reg[pt].clock;
-    case 002: // RDALM
-      return reg[pt].alarm;
-    case 003: // WRSTS
-      if( pt == PT_A ) {
-        return status & 0x1FFF;
-      } else {
-        return (accuracy & 0x1FFF)  << 4;
-      }
-      break;
-    case 004: // RDSCR
-      return reg[pt].scratch;
-    case 005: // RDINT
-      return interval & 0xFFFFF;
-    }
-    return 0;
-  }
-  void tick();
-};
-#endif//USE_TIME_MODULE
-
-#define USE_XFUNC
-#define USE_XMEM1
-#define USE_XMEM2
-
-#define XMEM_XF_START   0x40
-#define XMEM_XF_END     0xC0
-#define XMEM_XF_SIZE    (XMEM_XF_END-XMEM_XF_START)
-#define XMEM_XF_OFFS    0x000
-#define XMEM_XM1_START  0x201
-#define XMEM_XM1_END    0x2F0
-#define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START)
-#define XMEM_XM1_OFFS   XMEM_XF_SIZE
-#define XMEM_XM2_START  0x301
-#define XMEM_XM2_END    0x3F0
-#define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
-#define XMEM_XM2_OFFS   (XMEM_XF_SIZE+XMEM_XM1_SIZE)
-#define XF_PAGE         (NR_PAGES+1)
-
-// Memory for Extended Memory module
-class CXFM {
-  uint8_t m_chksum;
-public:
-  uint64_t m_mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
-//  volatile uint64_t mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
-  volatile uint64_t *mem;
-  bool bDirty;
-  int bwr;
-  bool dirty() {
-    return memcmp((void*)mem, (void*)m_mem, sizeof(m_mem))?true:false;
-  }
-  void saveMem(void) {
-    memcpy((void*)m_mem, (void*)mem, sizeof(m_mem));
-    doChksum();
-  }
-  int size(void) {
-    return (int)sizeof(m_mem);
-  }
-  void doChksum(void) {
-    uint8_t *p = (uint8_t*)m_mem;
-    m_chksum = 0;
-    for(int i=0; i<size()/sizeof(uint8_t); i++)
-      m_chksum += *p++;
-  }
-  uint8_t *pChkSum(void) {
-    return (uint8_t*)&m_chksum;
-  }
-  uint8_t chkSum(void) {
-    return m_chksum;
-  }
-  int chkSize(void) {
-    return (int)sizeof(m_chksum);
-  }
-};
-
 void initRoms(void);
-void initXMem(int xpg);
+
+#ifdef USE_XF_MODULE
+#include "xfmem.h"
+#endif
+#ifdef USE_TIME_MODULE
+#include "timemod.h"
+#endif
+#include "blinky.h"
 
 #endif//__CORE_BUS_H__

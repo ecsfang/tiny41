@@ -130,8 +130,8 @@
 #define BLINKY_ADDR                    0x20   // The IR printer module
 #define NONE_ADDR                      0x00   // None ...
 
-#define NPIC_IR_PRT_WRITE               0b00
-#define NPIC_IR_PRT_READ                0b01
-#define NPIC_IR_PRT_CMD                 0b10
+#define NPIC_IR_PRT_WRITE               0b000
+#define NPIC_IR_PRT_READ                0b010
+#define NPIC_IR_PRT_CMD                 0b100
 
 #endif//__INSTR_H__

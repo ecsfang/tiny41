@@ -105,6 +105,7 @@ their page number hardcoded.
 #include <stdlib.h>
 #include <string.h>
 #include <memory.h>
+#include "tiny41.h"
 #include "core_bus.h"
 #include "modfile.h"
 

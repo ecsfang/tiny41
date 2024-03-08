@@ -11,9 +11,7 @@
 #include "disasm.h"
 #include "serial.h"
 #include <malloc.h>
-#ifdef USE_FLASH
 #include "hardware/flash.h"
-#endif
 #ifdef USE_PIO
 #include "ir_led.h"
 #endif
@@ -28,9 +26,10 @@
 
 extern CDisplay    disp41;
 
+#ifdef USE_XF_MODULE
 CXFM xmem;
-
 static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+#endif
 
 
 uint32_t getTotalHeap(void)
@@ -167,7 +166,6 @@ extern const char *inst70disp[16];
 #define PAGE1(n) PAGEn(n,0)
 #define PAGE2(n) PAGEn(n,1)
 
-#ifdef USE_FLASH
 // Writing to flash can only be done page wise!
 int pageAdjust(int addr)
 {
@@ -257,11 +255,9 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
   // Point at the wanted flash image ...
   const uint8_t *fp = flashPointer(offs);
   memcpy(data, fp, size);
-  cdc_printf_(ITF_TRACE, " <-- Read flash @ %08X %d bytes\n", offs, size);
+  cdc_printf_(ITF_TRACE, " <-- Read flash @ %08X %d bytes\n\r", offs, size);
 }
-#endif
 
-#ifdef USE_FLASH
 // Save a ram image to flash (emulate Q-RAM)
 void saveRam(int port, int ovr = 0)
 {
@@ -270,13 +266,14 @@ void saveRam(int port, int ovr = 0)
       modules.clear(port);
       erasePort(port, false);
       writePort(port, modules.image(port,0));
-      printf("Wrote RAM[%X] to flash\n", port);
+      cdc_printf_(ITF_TRACE, "Wrote RAM[%X] to flash\n\r", port);
     }
   } else {
-      printf("Invalid page! [%X]\n", port);
+      cdc_printf_(ITF_TRACE, "Invalid page! [%X]\n\r", port);
   }
 }
 
+#ifdef USE_XFUNC
 void saveXMem(int xpg)
 {
   xpg += XF_PAGE;
@@ -311,8 +308,7 @@ void initXMem(int xpg)
     xmem.saveMem();
   }
 }
-
-#endif
+#endif//USE_XFUNC
 
 // Swap 16-bit word (n - number of 16-bit words)
 void swapRam(uint16_t *dta, int n)
@@ -352,23 +348,25 @@ void loadPage(int page, int bank = 0)
 #if 1
   // Verify loaded code
   if( nClr == PAGE_SIZE ) {
-    printf("%04X -> Image is cleared!", page*PAGE_SIZE);
+    cdc_printf_(ITF_TRACE, "%04X -> Image is cleared!", page*PAGE_SIZE);
   } else {
-    if( nErr ) printf("%d errors in image 0x%X!\n", nErr, page);
-    printf("%04X ->", page*PAGE_SIZE);
+    if( nErr ) cdc_printf_(ITF_TRACE, "%d errors in image 0x%X!\n\r", nErr, page);
+    cdc_printf_(ITF_TRACE, "%04X ->", page*PAGE_SIZE);
     for(int i=0; i<8; i++)
-      printf(" %03X", img[0x000+i]);
-    printf(" ...", page*PAGE_SIZE+0xFF0);
+      cdc_printf_(ITF_TRACE, " %03X", img[0x000+i]);
+    cdc_printf_(ITF_TRACE, " ...", page*PAGE_SIZE+0xFF0);
     for(int i=0; i<8; i++)
-      printf(" %03X", img[0xff8+i]);
+      cdc_printf_(ITF_TRACE, " %03X", img[0xff8+i]);
   }
-  printf("\n");
+  cdc_printf_(ITF_TRACE, "\n\r");
 #endif
   if( !nErr ) {
     modules.add(page, img, bank);
-     cdc_printf_(ITF_TRACE, "HaveBank: %d\n", modules[page]->haveBank());
+    if( modules[page]->haveBank() )
+      cdc_printf_(ITF_TRACE, "HaveBank: %d\n\r", modules[page]->haveBank());
   } else
     delete[] img;
+  cdc_flush(ITF_TRACE);
 }
 
 void initRoms()
@@ -398,6 +396,9 @@ void initRoms()
 #endif
   // Load second bank of printer-ROM (if available)
   loadPage(6, 1);
+  // Unplug Service ROM if inserted (has to be done manually)
+  if( modules.isInserted(4) )
+    modules.unplug(4);
   // TBD - Now RAM-page is hardcoded to port C
   qRam(0xC);
 }
@@ -575,6 +576,13 @@ void core1_main_3(void)
 // Clk2  _______/\_______/\_______/\_______/\_______/\_______/\_______/\_______/\___
 // DATA  |  T51   |  T52   |  T53   |  T54   |  T55   |  T0    |  T1    |  T2    |
 
+    if( bit_no >= LAST_CYCLE ) {
+      // Clear for next cykle ...
+      isa = data56 = 0LL;
+      // Setup FI-signal for next round ...
+      dataFI = getFI();
+    }
+
     // Drive the FI carry flags for each nibble
     if( (bit_no & 0b11) == 0b11 ) {
       gpio_put(P_FI_OE, dataFI & 1);
@@ -602,7 +610,7 @@ void core1_main_3(void)
         // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_isa & 1);
         break;
-      case 54-1:
+      case LAST_CYCLE-2:
         // Don't drive data any more
         gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
         // ... so no more data after this ...
@@ -618,8 +626,7 @@ void core1_main_3(void)
       }
     }
 
-    // Wait for CLK1 to have a falling edge
-    //WAIT_FALLING(P_CLK1);
+    // Wait for CLK1 to have a rising edge
     WAIT_RISING(P_CLK1);
 
     // Another bit, check SYNC to find bit number
@@ -671,12 +678,15 @@ void core1_main_3(void)
       xmAddr = 0;
       blinkyAddr = 0;
       if( !perph ) {
-        xmAddr = getXmemAddr(ramad);  // Address = [1..XF_END+1]
+        // Check if printer is being accessed ...
         if( (ramad & 0x3F0) == BLINKY_ADDR ) {
           if( ramad == BLINKY_ADDR )
             blinkyAddr = BLINKY_ADDR + 1;
           else
             blinkyAddr = (ramad & 0x0F) + 1;
+        } else {
+          // ... else it might be XMemory ...
+          xmAddr = getXmemAddr(ramad);  // Address = [1..XF_END+1]
         }
       }
       break;
@@ -719,7 +729,7 @@ void core1_main_3(void)
       break;
 
     case LAST_CYCLE-1:
-#if 0 // Select FI or debug info in fi-field
+#ifdef LOG_FI // Select FI or debug info in fi-field
       // Report next FI signal to trace ...
       pBus->fi = getFI();
 #else
@@ -729,6 +739,22 @@ void core1_main_3(void)
       //pBus->fi |= blinky.cntTimer & 0xFF;
       //pBus->fi = blinky.flags;
 #endif
+      // Prepare command word ...
+      // Is instruction fetched from flash?
+      if( !pBus->cmd ) {
+        // If not, get instruction from the bus ...
+        pBus->cmd = (isa >> ISA_SHIFT) & INST_MASK;
+      }
+      // Local copy of the instruction ...
+      cmd = pBus->cmd;
+      // Extract the low 6 bit instruction class ...
+      cmd6 = cmd & 0x3F;
+      // Extract register/address information from the instruction ...
+      r = (pBus->cmd >> 6) & 0x0F;
+      // Save info about sync in logged data ..
+      if( bIsSync )
+        pBus->cmd |= CMD_SYNC;
+
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
       // Turn off MLDL-led ...
@@ -742,17 +768,8 @@ void core1_main_3(void)
 
       // Assume no data drive any more ...
       output_data = 0;
+      data56 &= MASK_56_BIT;
 
-      // Is instruction fetched from flash?
-      if( !pBus->cmd )
-        pBus->cmd = (isa >> ISA_SHIFT) & INST_MASK;
-      pBus->data = data56 & MASK_56_BIT;
-      r = (pBus->cmd >> 6) & 0x0F;
-      cmd = pBus->cmd;
-      cmd6 = cmd & 0x3F;
-#ifdef TRACE_ISA
-      pBus->isa = isa;
-#endif
 
       // Check for pending writes to Blinky
       if( blinky.bwr ) {
@@ -760,26 +777,22 @@ void core1_main_3(void)
         blinky.bwr--;
         if( blinky.bwr == BLINKY_ADDR ) {
           // This is a special DATA WRITE to reg 0x20
-          blinky.wrStatus((uint8_t)((pBus->data >> 48LL) & 0xFF));
+          blinky.wrStatus((uint8_t)((data56 >> 48LL) & 0xFF));
         } else {
-          blinky.write(blinky.bwr, pBus->data, true);
+          blinky.write(blinky.bwr, data56, true);
         }
         blinky.bwr = 0;
-      }
-
-      // Check for pending writes to XMemory
-      if( xmem.bwr ) {
-        __mem[xmem.bwr-1] = pBus->data;
+#ifdef USE_XF_MODULE
+      } else if( xmem.bwr ) { // Check for pending writes to XMemory
+        __mem[xmem.bwr-1] = data56;
         xmem.bwr = 0;
-      }
-
+#endif
 #ifdef USE_TIME_MODULE
-      // Check for pending writes to XMemory
-      if( mTime.bwr ) {
-        mTime.write(mTime.bwr-1, pBus->data);
+      } else if( mTime.bwr ) { // Check for pending writes to Time Module
+        mTime.write(mTime.bwr-1, data56);
         mTime.bwr = 0;
-      }
 #endif//USE_TIME_MODULE
+      }
 
       if( bIsSync ) {
         switch( cmd ) {
@@ -794,12 +807,15 @@ void core1_main_3(void)
           bSelPa = true;
           break;
         case INST_SEL_PRT:
+          // Blinky Printer is selected
+          // Handle NPIC commands in next cykle
           bPrinter = true;
           break;
         case INST_ENBANK1:
         case INST_ENBANK2:
         case INST_ENBANK3:
         case INST_ENBANK4:
+            // Switch bank (if any) ...
             mp->bank(cmd);
           break;
         default:
@@ -819,6 +835,7 @@ void core1_main_3(void)
                 if( blinky.flags & BLINKY_RAM_ENABLE)
                   blinky.bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
               }
+#ifdef USE_XF_MODULE
             } else if( xmAddr ) {
               // X-Function module
               if( cmd == INST_WDATA ) {
@@ -831,6 +848,7 @@ void core1_main_3(void)
                 xmAddr = getXmemAddr(ramad);
                 xmem.bwr = xmAddr;
               }
+#endif
             }
           } else {
             // A peripherial is selected ...
@@ -854,14 +872,14 @@ void core1_main_3(void)
             }
           }
         }
+        bIsSync = false;
       } else {
         // No real instruction .. (no sync)
         // Handle the printer if it is selected
         if( bPrinter ) {
-          int cmd2 = (cmd >> 1) & 0x3;
-          switch(cmd2) {
+          switch(cmd & 0b110) {
             case NPIC_IR_PRT_WRITE:  // Write ...
-              blinky.write(r, pBus->data);
+              blinky.write(r, data56);
               break;
             case NPIC_IR_PRT_READ:  // Read ...
               DATA_OUTPUT(blinky.read(r));
@@ -889,24 +907,21 @@ void core1_main_3(void)
       }
       bErr = false;
 #endif
+
+      // Prepare logging data ...
+      pBus->data = data56;
+      // Report selected peripheral to trace ...
+      pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
+#ifdef TRACE_ISA
+      pBus->isa = isa;
+#endif
 #ifdef MEASURE_COUNT
       // Report FI-status to trace ...
       pBus->cnt |= iCnt++;
 #endif
-      // Report selected peripheral to trace ...
-      pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
-
-      if( bIsSync )
-        pBus->cmd |= CMD_SYNC;
-      bIsSync = false;
-
-      // Setup FI-signal for next round ...
-      dataFI = getFI();
 
       // Cleanup, fix trace buffer pointer and
       // check for overflow ...
-      isa = data56 = 0LL;
-
       INC_BUS_PTR(data_wr);
       if (data_rd == data_wr) {
         // No space left in ring-buffer ...
@@ -1481,11 +1496,13 @@ void handle_bus(volatile Bus_t *pBus)
           printf("Updated QRAM in page #X\n\r", p);
         }
       }
+#ifdef USE_XF_MODULE
       if( xmem.dirty() ) {
         extern void dump_xmem(void);
         dump_xmem();
         saveXMem(0);
       }
+#endif
       break;
     }
   }

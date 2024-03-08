@@ -220,6 +220,7 @@ void dump_time(void)
 }
 #endif//USE_TIME_MODULE
 
+#ifdef USE_XF_MODULE
 extern CXFM xmem;
 
 void dump_xmem(void)
@@ -278,6 +279,7 @@ void clr_xmem(void)
   memset((void*)xmem.mem,0,xmem.size());
   xmem.saveMem();
 }
+#endif//USE_XF_MODULE
 
 void rp2040_bootsel()
 {
@@ -328,8 +330,10 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'b', listBreakpoints,   "List breakpoints"  },
   { 'B', set_brk,           "Set breakpoint"  },
   { 'E', end_brk,           "End breakpoint"  },
+#ifdef USE_XF_MODULE
   { 'f', dump_xmem,         "Dump XMemory"  },
   { 'X', clr_xmem,          "Clear XMemory"  },
+#endif//USE_XF_MODULE
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
