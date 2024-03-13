@@ -42,6 +42,13 @@ uint32_t getTotalHeap(void);
 uint32_t getFreeHeap(void);
 const uint8_t *flashPointer(int offs);
 
+typedef enum {
+  NO_MODE,
+  DEEP_SLEEP,
+  LIGHT_SLEEP,
+  RUNNING
+} Mode_e;
+
 enum {
     BIT_0   = 1 << 0,
     BIT_1   = 1 << 1,
@@ -98,7 +105,7 @@ typedef struct {
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T (0x1000)
+#define NUM_BUS_T (0x1000/2)
 #endif
 
 enum {

@@ -20,7 +20,7 @@
 #define USE_40190
 #define MEASURE_TIME
 #define MEASURE_COUNT
-//#define LOG_FI
+#define LOG_FI
 
 //#define USE_TIME_MODULE
 #define USE_XF_MODULE
@@ -158,6 +158,8 @@ enum {
 #define ANNUN_ROW   (ANNUN_START*8)  // Starting row for each displaysegment
 #define DISP_ROW    (DISP_START*8)   // Starting row for each displaysegment
 #define STATUS_ROW  (STATUS_START*8) // Starting row for each displaysegment
+#define STATUS1_ROW  ((STATUS_START+1)*8) // Starting row for each displaysegment
+#define STATUS2_ROW  ((STATUS_START+2)*8) // Starting row for each displaysegment
 
 class CRendArea {
     struct render_area m_area;

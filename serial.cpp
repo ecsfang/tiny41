@@ -138,6 +138,7 @@ static void sbrkpt(BrkMode_e b)
   case BRK_CLR:   cdc_send_console((char*)"\n\rClear"); break;
   }
   cdc_send_console((char*)" breakpoint: ----\b\b\b\b");
+  cdc_flush_console();
   sBrk = 0;
   nBrk = 1;
   state = ST_BRK; // Expect 4 nibble addres
@@ -158,12 +159,14 @@ void clr_brk(void)
 void sel_qram(void)
 {
   cdc_send_console((char*)"\n\rSelect QRAM page: -\b");
+  cdc_flush_console();
   state = ST_QRAM;  // Expect port address
 }
 
 void plug_unplug(void)
 {
   cdc_send_console((char*)"\n\rSelect page to plug or unplug: -\b");
+  cdc_flush_console();
   state = ST_PLUG;  // Expect port address
 }
 
@@ -376,14 +379,26 @@ int getHexKey(int ky)
   return x; // Value of hex or -1
 }
 
-
+extern bool bReady;
 void serial_loop(void)
 {
 //  int key = getchar_timeout_us(1000);
 //  if( key != PICO_ERROR_TIMEOUT ) {
 
   int key = cdc_read_byte(ITF_CONSOLE);
+
   if( key != -1 ) {
+    {
+      static unsigned long k=0;
+      char kk[16];
+      extern CDisplay    disp41;
+      k = (k<<8) | (key&0xFF);
+      sprintf(kk, "[%08lX] ", k);
+      WriteString(disp41.buf(), 0, STATUS1_ROW, kk);
+      disp41.rend(REND_STATUS);
+      if( !bReady )
+        return;
+    }
     if( state != ST_NONE ) {
       // Assume input of some kind.
       if( key == 0x1b ) { // ESC - abort any key sequence ...
@@ -462,7 +477,7 @@ void serial_loop(void)
     // otherwise I get lockups on the serial communications.
     // So, if we get a timeout we send a space and backspace it. And
     // flush the stdio, but that didn't fix the problem but seems like a good idea.
-    cdc_flush_console();
+    //cdc_flush_console();
     //stdio_flush();
 //    sprintf(cbuff," \b");
   }

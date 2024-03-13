@@ -24,13 +24,13 @@
 #define OVERCLOCK 270000        // 270 MHz
 // #define OVERCLOCK 360000
 
-// #define DEBUG_ANALYZER
+#define DEBUG_ANALYZER
 
 int bRend = REND_NONE;
 
 // Init trace - no trace/no disassembler
-volatile uint8_t bTrace = TRACE_NONE;
-
+//volatile uint8_t bTrace = TRACE_NONE;
+volatile uint8_t bTrace = TRACE_ON | TRACE_DISASM;
 extern CBreakpoint brk;
 
 void bus_init(void)
@@ -97,6 +97,21 @@ char cc[32];
 char ccb[128];
 int wn = 0;
 
+void log(const char *s)
+{
+    cdc_printf_(ITF_TRACE, s);
+    cdc_printf_(ITF_TRACE, "\n\r");
+    cdc_flush(ITF_TRACE);
+}
+void logC(const char *s)
+{
+    cdc_printf_(ITF_CONSOLE, s);
+    cdc_printf_(ITF_CONSOLE, "\n\r");
+    cdc_flush(ITF_CONSOLE);
+}
+
+bool bReady = false;
+
 int main()
 {
 #if OVERCLOCK > 270000
@@ -123,19 +138,19 @@ int main()
 
 
     // Must read flash before we goto highspeed ...
-//    cdc_send_console((char*)"Init ROMs ...\n\r");
+    log("Init ROMs ...");
     initRoms();
 
-//    cdc_send_console((char*)"Init XMemory ...\n\r");
+    log("Init XMemory ...");
 #ifdef USE_XFUNC
     initXMem(0);
 #endif
 
     /* Overclock */
-//    cdc_send_console((char*)"Overclock ...\n\r");
+    log("Overclock ...");
     set_sys_clock_khz(OVERCLOCK, 1);
 
-//    cdc_send_console((char*)"Init all pins ...\n\r");
+    log("Init all pins ...");
     bus_init();
 
 #ifdef USE_PIO
@@ -145,7 +160,7 @@ int main()
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
-//    cdc_send_console((char*)"Init I2C ...\n\r");
+    log("Init I2C ...");
     i2c_init(i2c_default, SSD1306_I2C_CLK * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
@@ -153,14 +168,15 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
     // run through the complete initialization process
-//    cdc_send_console((char*)" - init OLED display\n\r");
+    log(" - init OLED display");
     SSD1306_init();
 
-//    cdc_send_console((char*)"Launch CORE 1 ...\n\r");
+    logC("Launch CORE 1 ...");
     multicore_launch_core1(core1_main_3);
 
     // zero the entire display
-//    cdc_send_console((char*)"Clear and init display ...\n\r");
+    logC("Clear and init display ...");
+  
     memset(disp41.buf(), 0, SSD1306_BUF_LEN);
     disp41.rend(REND_ALL);
     disp41.render();
@@ -181,6 +197,7 @@ int main()
 
     disp41.rend(REND_ALL);
     disp41.render();
+
 
 #ifdef DEBUG_ANALYZER
     char sBuf[32];
@@ -215,6 +232,8 @@ int main()
     IGNORE_LOOP(0x00A0);
     // Ignore key at DISOFF
     IGNORE_LOOP(0x089D);
+    // Ignore key at DISOFF
+    IGNORE_LOOP(0x03E9);
     // Ignore key at ...
     IGNORE_LOOP_COND(0x0BB2, 0x0BA2);
     // Ignore key at ...
@@ -229,6 +248,8 @@ int main()
     IGNORE_LOOP(0x009A);
     // FOR DEBOUNCE (DRSY30)
     IGNORE_LOOP(0x0178);
+    // Tone
+    IGNORE_LOOP(0x170F);
     // Tone in wand
     IGNORE_LOOP(0xF3D4);
     // Tone in Wand
@@ -282,11 +303,11 @@ int main()
 
     int pwo = 0;
     int w;
+    bReady = true;
     while (1)
     {
         // Process the USB interfaces
         tud_task();
-
         process_bus();
         // Update the USB CLI
         serial_loop();
@@ -305,6 +326,7 @@ int main()
             }
         }
 
+// gpio_put(LED_PIN_B, LED_ON); do { } while (1);
         w = cdc_read_byte(ITF_WAND);
         if( w != -1 ) {
             switch( wState ) {
@@ -338,10 +360,22 @@ int main()
         }
 
 #ifdef DEBUG_ANALYZER
-        WriteString(buf, 5, STATUS_ROW, (char *)(CHK_GPIO(P_POW)?"    ":"IDLE"));
-//        sprintf(sBuf, "I:%d O:%d", data_in, data_out);
-//        WriteString(buf, 5, (STATUS_START+2)*8, sBuf);
-        bRend = REND_ALL;
+    {
+        extern volatile Mode_e cpuMode;
+        static Mode_e oldMode = NO_MODE;
+        
+        char mm[8];
+        if( oldMode != cpuMode ) {
+            switch( cpuMode ) {
+            case RUNNING:     strcpy(mm, "Running"); break;
+            case LIGHT_SLEEP: strcpy(mm, "Light  "); break;
+            case DEEP_SLEEP:  strcpy(mm, "Deep   "); break;
+            }
+            WriteString(disp41.buf(), 5, STATUS2_ROW, mm);
+            disp41.rend(REND_STATUS);
+            oldMode = cpuMode;
+        }
+    }   
 #endif // DEBUG_ANALYZER
         // Need to update the display ... ?
         disp41.render();

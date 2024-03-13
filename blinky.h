@@ -11,10 +11,19 @@
 #define BLINKY_CLK_ENABLE   BIT_6
 #define BLINKY_ENABLE       BIT_7
 
+extern bool bT0Carry;
+
 // Memory and registers for Blinky module
 class CBlinky {
+  uint16_t  fiFlags;
+  bool      bSelected;
 public:
   CBlinky() {
+    fiFlags = 0;
+    bSelected = true;
+  }
+  void select(bool bSel) {
+    bSelected = bSel;
   }
   volatile static uint64_t  reg[8];    // First 8 registers
   volatile static uint8_t   reg8[16];  // Last 8 registers (0-7 not used)
@@ -23,7 +32,7 @@ public:
   int       cntTimer;
   int       bwr;
   int       busyCnt;
-  uint8_t   timerCnt() { return reg[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1; }
+  uint16_t  timerCnt() { return reg8[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1; }
   int       tick() {
     // Timer is clocked by a 85Hz (or XXX Hz) or clock, which means that the
     // timer value should decrement every ~75th (or 825) bus cycle.
@@ -37,6 +46,7 @@ public:
           nAlm = timerCnt(); //reg8[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
         } else {
           // Set FI flag when counter reaches zero ...
+          fiSet(FI_PRT_TIMER);
           return 1;
         }
       }
@@ -65,8 +75,8 @@ public:
           if( flags & BLINKY_CLK_ENABLE )
             cntTimer--;
           // Writing results in clearing of FI[12]
-          clrFI(FI_PRT_BUSY);
-          clrFI(FI_PRT_TIMER);
+          fiClr(FI_PRT_BUSY);
+          fiClr(FI_PRT_TIMER);
           // Reset timer countdown
           // Flag 6 in reg 8 indicates slow clock
           nAlm = timerCnt();
@@ -77,7 +87,7 @@ public:
             // Maybe we should just keep 8 LSB
             prtBuf[wprt++] = reg8[11];
             if( busyCnt ) // Already busy ... ?
-              setFI(FI_PRT_BUSY);
+              fiSet(FI_PRT_BUSY);
             busyCnt = BUSY_CNT;
           }
           break;
@@ -115,15 +125,18 @@ public:
       break;
     case 5: // Disable RAM write
       clr(BLINKY_RAM_ENABLE);
+      fiClr(FI_PRT_BUSY);
+      fiClr(FI_PRT_TIMER);
+      bT0Carry = false;
       break;
     case 7: // Reset
       flags = 0;
-      clrFI(FI_PRT_BUSY);
+      fiClr(FI_PRT_BUSY);
       break;
     case 8: // Clear buffer
-      clrFI(FI_PRT_BUSY);
-      clrFI(FI_PRT_TIMER);
-      cntTimer = 0;
+      fiClr(FI_PRT_BUSY);
+      fiClr(FI_PRT_TIMER);
+      //cntTimer = 0;
       break;
     }
   }
@@ -131,14 +144,25 @@ public:
     if(busyCnt) {
       busyCnt--;
       if( !busyCnt )
-        clrFI(FI_PRT_BUSY);
+        fiClr(FI_PRT_BUSY);
     }
-  }  
+  }
+  inline void fi(volatile uint16_t *f) {
+    *f &= ~(FI_PRT_BUSY|FI_PRT_TIMER);
+    if( bSelected )
+      *f |= fiFlags;
+  }
   inline void set(uint8_t f) {
     flags |= f;
   }
   inline void clr(uint8_t f) {
     flags &= ~f;
+  }
+  inline void fiSet(uint16_t f) {
+    fiFlags |= f;
+  }
+  inline void fiClr(uint16_t f) {
+    fiFlags &= ~f;
   }
 };
 #endif//__BLINKY_H__

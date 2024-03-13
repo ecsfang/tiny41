@@ -26,6 +26,18 @@
 
 extern CDisplay    disp41;
 
+CBlinky blinky;
+volatile uint64_t  CBlinky::reg[8];    // First 8 registers
+volatile uint8_t   CBlinky::reg8[16];  // Last 8 registers (0-7 not used)
+
+#ifdef USE_TIME_MODULE
+CTime mTime;
+volatile CRegs_t   CTime::reg[2];    // 56 bits time regs
+volatile uint32_t  CTime::interval;  // 20 bits interval timer
+volatile uint16_t  CTime::accuracy;  // 13 bits
+volatile uint16_t  CTime::status;    // 20 bits
+#endif//USE_TIME_MODULE
+
 #ifdef USE_XF_MODULE
 CXFM xmem;
 static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
@@ -107,6 +119,7 @@ inline uint16_t getFI(void)
     bPBusy = false;
     bClrPBusy = false;
   }
+  blinky.fi(&carry_fi);
   return carry_fi & FI_MASK;
 }
 
@@ -513,17 +526,10 @@ int getXmemAddr(uint16_t addr)
   return 0;
 }
 
-CBlinky blinky;
-volatile uint64_t  CBlinky::reg[8];    // First 8 registers
-volatile uint8_t   CBlinky::reg8[16];  // Last 8 registers (0-7 not used)
+bool bT0Carry = false;
 
-#ifdef USE_TIME_MODULE
-CTime mTime;
-volatile CRegs_t   CTime::reg[2];    // 56 bits time regs
-volatile uint32_t  CTime::interval;  // 20 bits interval timer
-volatile uint16_t  CTime::accuracy;  // 13 bits
-volatile uint16_t  CTime::status;    // 20 bits
-#endif//USE_TIME_MODULE
+volatile Mode_e cpuMode;
+void logC(const char *s);
 
 void core1_main_3(void)
 {
@@ -552,6 +558,8 @@ void core1_main_3(void)
   static uint8_t r = 0;
   static uint16_t cmd = 0;
   static uint8_t cmd6 = 0;
+  static bool bPWO = false;
+  static bool bPullIsa = false;
 
   pBus = &bus[data_wr];
 
@@ -561,12 +569,46 @@ void core1_main_3(void)
 
 #ifdef MEASURE_TIME
   uint64_t tm = time_us_64();
+  uint64_t tick = time_us_64();
 #endif
+
 
   // This is the mail loop where everything happens regarding the BUS
   // All 56 cycles of the bus is taken care of, and data is pulled from
   // the bus or injected on the bus accordingly.
   while (1) {
+    gpio_put(LED_PIN_B, LED_OFF);
+    // Check if module is active ...
+    bPWO = GPIO_PIN_RD(P_PWO);
+    if( !bPWO ) {
+      if( GPIO_PIN(P_SYNC) )
+        cpuMode = LIGHT_SLEEP;
+      else
+        cpuMode = DEEP_SLEEP;
+      uint32_t dt = (uint32_t)(time_us_64() - tick);
+      if( dt >= 160 ) { // One bus-cycle is 160 ms
+        if( blinky.tick() ) {
+          // Set FI flag when counter reaches zero ...
+          //setFI(FI_PRT_TIMER);
+          bPullIsa = true;
+        }
+        tick = time_us_64();
+      }
+      if( bPullIsa && !bIsaEn ) {
+        gpio_put(P_ISA_DRV, 1);
+        gpio_put(P_ISA_OE, (bIsaEn = ENABLE_OE));
+        gpio_put(LED_PIN_B, LED_ON);
+      }
+      // PWO is low, so nothing to do, just ...
+      continue;
+    } else {
+      if( bPullIsa ) {
+        gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
+        bPullIsa = false;
+      }
+      cpuMode = RUNNING;
+    }
+
     // Wait for CLK2 to have a falling edge
     WAIT_FALLING(P_CLK2);
 
@@ -581,6 +623,10 @@ void core1_main_3(void)
       isa = data56 = 0LL;
       // Setup FI-signal for next round ...
       dataFI = getFI();
+      if( bT0Carry && !bIsaEn ) {
+        gpio_put(P_ISA_DRV, 1);
+        gpio_put(P_ISA_OE, (bIsaEn = ENABLE_OE));
+      }
     }
 
     // Drive the FI carry flags for each nibble
@@ -597,6 +643,10 @@ void core1_main_3(void)
       data56_out >>= 1;
     }
 #endif
+    if( bT0Carry && bIsaEn && bit_no > 2 && bPWO ) {
+      gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
+      bT0Carry = false;
+    }
 
     // Do we drive the ISA line (bit 43-53)?
     if (output_isa) {
@@ -605,7 +655,7 @@ void core1_main_3(void)
       case 43-1:
         // Blue led indicates external rom-reading ...
         if( !bErr ) {
-          gpio_put(LED_PIN_B, LED_ON);
+//          gpio_put(LED_PIN_B, LED_ON);
         }
         // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_isa & 1);
@@ -715,7 +765,9 @@ void core1_main_3(void)
       // Check blinky timer counter
       if( blinky.tick() ) {
         // Set FI flag when counter reaches zero ...
-        setFI(FI_PRT_TIMER);
+        //setFI(FI_PRT_TIMER);
+        gpio_put(LED_PIN_B, LED_ON);
+        bT0Carry = true;
       }
       break;
 
@@ -734,9 +786,10 @@ void core1_main_3(void)
       pBus->fi = getFI();
 #else
       //pBus->fi = xmAddr-1;
-      pBus->fi = ramad;
+      //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      //pBus->fi |= blinky.cntTimer & 0xFF;
+      pBus->fi = blinky.reg8[8] << 8;
+      pBus->fi |= blinky.cntTimer & 0xFF;
       //pBus->fi = blinky.flags;
 #endif
       // Prepare command word ...
@@ -758,7 +811,7 @@ void core1_main_3(void)
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
       // Turn off MLDL-led ...
-      gpio_put(LED_PIN_B, LED_OFF);
+//      gpio_put(LED_PIN_B, LED_OFF);
       break;
 
     case LAST_CYCLE:
@@ -805,10 +858,12 @@ void core1_main_3(void)
         case INST_PRPH_SLCT:
           // Fetch selected peripheral from DATA in the next run ...
           bSelPa = true;
+          blinky.select(false);
           break;
         case INST_SEL_PRT:
           // Blinky Printer is selected
           // Handle NPIC commands in next cykle
+          blinky.select(true);
           bPrinter = true;
           break;
         case INST_ENBANK1:
