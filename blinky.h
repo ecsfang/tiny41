@@ -72,7 +72,7 @@ public:
           break;
         case 10:
           cntTimer = reg8[10];
-          if( flags & BLINKY_CLK_ENABLE )
+          if( cntTimer && (flags & BLINKY_CLK_ENABLE) )
             cntTimer--;
           // Writing results in clearing of FI[12]
           fiClr(FI_PRT_BUSY);
