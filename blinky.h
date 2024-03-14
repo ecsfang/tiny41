@@ -3,12 +3,14 @@
 
 #include "core_bus.h"
 
-#define TIMER_CNT1  75
-#define TIMER_CNT2  825
+#define TIMER_FAST  75
+#define TIMER_SLOW  825
 #define BUSY_CNT    8
 
-#define BLINKY_RAM_ENABLE   BIT_4
-#define BLINKY_CLK_ENABLE   BIT_6
+// Trace of real HP82242 shows that FUNC(2) set bit 4
+// and FUNC(4) sets bit 6 
+#define BLINKY_CLK_ENABLE   BIT_4 // Handled by FUNC(2/3)
+#define BLINKY_RAM_ENABLE   BIT_6 // Handled by FUNC(4/5)
 #define BLINKY_ENABLE       BIT_7
 
 extern bool bT0Carry;
@@ -32,8 +34,9 @@ public:
   int       cntTimer;
   int       bwr;
   int       busyCnt;
-  uint16_t  timerCnt() { return reg8[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1; }
-  int       tick() {
+  // Flag 6 in reg 8 indicates slow or fast clock
+  uint16_t  timerCnt() { return reg8[8] & BIT_6 ? TIMER_SLOW : TIMER_FAST; }
+  bool      tick() {
     // Timer is clocked by a 85Hz (or XXX Hz) or clock, which means that the
     // timer value should decrement every ~75th (or 825) bus cycle.
     // nAlm keeps track of the bus cycle counting, and when 0
@@ -43,26 +46,26 @@ public:
         if( cntTimer ) {
           // Decrement and continue counting ...
           cntTimer--;
-          nAlm = timerCnt(); //reg8[8] & 0x40 ? TIMER_CNT2 : TIMER_CNT1;
+          nAlm = timerCnt();
         } else {
           // Set FI flag when counter reaches zero ...
           fiSet(FI_PRT_TIMER);
-          return 1;
+          return true;
         }
       }
     }
     // Timer idle or still running ...
-    return 0;
+    return false;
   }
   void wrStatus(uint8_t st) {
     flags = reg8[14] = st;
   }
   inline void write(int r, uint64_t data, bool bRam = false) {
     if( r < 8 ) {
-      // 56 bit register
+      // Lower 56 bit register 0-7
       reg[r] = data;
-    } else {
-      // 8 bit register
+    } else if( r < 14 ) {
+      // Upper 8 bit register 8-13
       reg8[r] = (uint8_t)(data & 0xFF);
       if( !bRam ) {
         switch(r) {
@@ -78,7 +81,6 @@ public:
           fiClr(FI_PRT_BUSY);
           fiClr(FI_PRT_TIMER);
           // Reset timer countdown
-          // Flag 6 in reg 8 indicates slow clock
           nAlm = timerCnt();
           break;
         case 11:
@@ -115,13 +117,13 @@ public:
   void func(int c) {
     switch( c ) {
     case 2: // Enable timer clock
-      set(BLINKY_CLK_ENABLE);
+      set(BLINKY_ENABLE|BLINKY_CLK_ENABLE);
       break;
     case 3: // Disable timer clock
       clr(BLINKY_CLK_ENABLE);
       break;
     case 4: // Enable RAM write
-      set(BLINKY_RAM_ENABLE);
+      set(BLINKY_ENABLE|BLINKY_RAM_ENABLE);
       break;
     case 5: // Disable RAM write
       clr(BLINKY_RAM_ENABLE);

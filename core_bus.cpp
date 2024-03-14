@@ -20,9 +20,6 @@
 
 //#define RESET_FLASH
 //#define RESET_RAM
-#define DRIVE_CARRY
-#define DRIVE_DATA
-#define WAND_EMU
 
 extern CDisplay    disp41;
 
@@ -404,9 +401,6 @@ void initRoms()
     int pIdx = port - FIRST_PAGE;
     loadPage(port);
   }
-#ifdef WAND_EMU
-//    readFlash(PAGE1(NR_PAGES), wand_page, FLASH_SECTOR_SIZE);
-#endif
   // Load second bank of printer-ROM (if available)
   loadPage(6, 1);
   // Unplug Service ROM if inserted (has to be done manually)
@@ -573,40 +567,37 @@ void core1_main_3(void)
 #endif
 
 
-  // This is the mail loop where everything happens regarding the BUS
+  // This is the main loop where everything happens regarding the BUS
   // All 56 cycles of the bus is taken care of, and data is pulled from
   // the bus or injected on the bus accordingly.
   while (1) {
-    gpio_put(LED_PIN_B, LED_OFF);
     // Check if module is active ...
     bPWO = GPIO_PIN_RD(P_PWO);
     if( !bPWO ) {
-      if( GPIO_PIN(P_SYNC) )
-        cpuMode = LIGHT_SLEEP;
-      else
-        cpuMode = DEEP_SLEEP;
-      uint32_t dt = (uint32_t)(time_us_64() - tick);
-      if( dt >= 160 ) { // One bus-cycle is 160 ms
-        if( blinky.tick() ) {
-          // Set FI flag when counter reaches zero ...
-          //setFI(FI_PRT_TIMER);
-          bPullIsa = true;
-        }
+      // No, we are sleeping ...
+      gpio_put(LED_PIN_B, LED_OFF);
+      cpuMode = GPIO_PIN(P_SYNC) ? LIGHT_SLEEP : DEEP_SLEEP;
+      // Update Blinky after each bus-cycle (160 ms)
+      if( (uint32_t)(time_us_64() - tick) >= 160 ) {
+        bPullIsa = blinky.tick();
         tick = time_us_64();
       }
-      if( bPullIsa && !bIsaEn ) {
+      // But don't wake the CPU if we are in deep sleep ...
+      if( cpuMode == LIGHT_SLEEP && bPullIsa && !bIsaEn ) {
+        // Pull ISA high to wake the calculator ...
         gpio_put(P_ISA_DRV, 1);
         gpio_put(P_ISA_OE, (bIsaEn = ENABLE_OE));
-        gpio_put(LED_PIN_B, LED_ON);
       }
       // PWO is low, so nothing to do, just ...
       continue;
     } else {
-      if( bPullIsa ) {
+      // If ISA is active, then turn it off since PWO is active ...
+      if( bPullIsa && bIsaEn ) {
         gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
         bPullIsa = false;
       }
       cpuMode = RUNNING;
+      gpio_put(LED_PIN_B, LED_ON);
     }
 
     // Wait for CLK2 to have a falling edge
@@ -623,6 +614,7 @@ void core1_main_3(void)
       isa = data56 = 0LL;
       // Setup FI-signal for next round ...
       dataFI = getFI();
+      // Check if ISA should be active during T0 (peripherial carry)
       if( bT0Carry && !bIsaEn ) {
         gpio_put(P_ISA_DRV, 1);
         gpio_put(P_ISA_OE, (bIsaEn = ENABLE_OE));
@@ -635,14 +627,12 @@ void core1_main_3(void)
       dataFI >>= 1;
     }
 
-#ifdef DRIVE_DATA
     // Do we drive the DATA line (bit 0-55)?
     if (output_data) {
       // Expose the next bit on the data line ...
       gpio_put(P_DATA_DRV, data56_out & 1);
       data56_out >>= 1;
     }
-#endif
     if( bT0Carry && bIsaEn && bit_no > 2 && bPWO ) {
       gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
       bT0Carry = false;
@@ -653,10 +643,6 @@ void core1_main_3(void)
       // Drive the ISA line for theses data bit
       switch (bit_no) {
       case 43-1:
-        // Blue led indicates external rom-reading ...
-        if( !bErr ) {
-//          gpio_put(LED_PIN_B, LED_ON);
-        }
         // Prepare data for next round ...
         gpio_put(P_ISA_DRV, drive_isa & 1);
         break;
@@ -763,12 +749,7 @@ void core1_main_3(void)
 
     case LAST_CYCLE-3:
       // Check blinky timer counter
-      if( blinky.tick() ) {
-        // Set FI flag when counter reaches zero ...
-        //setFI(FI_PRT_TIMER);
-        gpio_put(LED_PIN_B, LED_ON);
-        bT0Carry = true;
-      }
+      blinky.tick();
       break;
 
     case LAST_CYCLE-2:
@@ -810,8 +791,6 @@ void core1_main_3(void)
 
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
-      // Turn off MLDL-led ...
-//      gpio_put(LED_PIN_B, LED_OFF);
       break;
 
     case LAST_CYCLE:
@@ -954,7 +933,7 @@ void core1_main_3(void)
         // Floating input-pin ... ?
         // A normal cycle (56 clock cycles @ 366kHz) should take ~158us (0x9E).
         // So, if outside that range, we have an invalid cycle ...
-        if( dt < 0x40 || dt > 0x100 ) {
+        if( dt < 64 || dt > 256 ) {
           bErr = true;
           break;
         }

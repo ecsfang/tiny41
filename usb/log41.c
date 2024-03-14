@@ -125,12 +125,12 @@ int main(int argc, char *argv[])
   // Signals
   signal(SIGTERM, signal_handler);
   signal(SIGKILL, signal_handler);
-  signal(SIGINT, signal_handler);
-  signal(SIGHUP, signal_handler);
+  signal(SIGINT,  signal_handler);
+  signal(SIGHUP,  signal_handler);
   signal(SIGABRT, signal_handler);
   signal(SIGTRAP, signal_handler);
   signal(SIGPIPE, signal_handler);
-  signal(SIGSYS, signal_handler);
+  signal(SIGSYS,  signal_handler);
 
     /* simple noncanonical input */
     int done = 0;
