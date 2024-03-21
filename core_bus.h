@@ -34,6 +34,9 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
+// One bus cycle is about 1/6300 = 160us
+#define ONE_BUS_CYCLE 160 //us
+
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
 #define FLASH_TARGET_OFFSET (512 * 1024)
@@ -90,15 +93,19 @@ enum {
 
 #define CMD_SYNC    0x8000
 
+#define ARITHM_UKN  0x0000
+#define ARITHM_DEC  0x4000
+#define ARITHM_HEX  0x8000
+
 typedef struct {
-  uint64_t  data;
+  uint64_t  data; // 56 bit data bus - MSB used to indicate selecte peripherial
 #ifdef TRACE_ISA
   uint64_t  isa;
 #endif
-  uint16_t  addr;
-  uint16_t  cmd;
-  uint16_t  fi;
-  uint16_t  cnt;
+  uint16_t  addr; // Address from ISA
+  uint16_t  cmd;  // Command from ISA - 2 MSB bits indicates arithmetic mode (DEC/HEX)
+  uint16_t  fi;   // FI flags
+  uint16_t  cnt;  // Trace counter
 } __attribute__((packed)) Bus_t;
 
 // Size of trace buffer should be a power of 2 (for the mask)

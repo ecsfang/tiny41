@@ -554,6 +554,7 @@ void core1_main_3(void)
   static uint8_t cmd6 = 0;
   static bool bPWO = false;
   static bool bPullIsa = false;
+  static int isBase = ARITHM_UKN;
 
   pBus = &bus[data_wr];
 
@@ -562,7 +563,6 @@ void core1_main_3(void)
   last_sync = GPIO_PIN(P_SYNC);
 
 #ifdef MEASURE_TIME
-  uint64_t tm = time_us_64();
   uint64_t tick = time_us_64();
 #endif
 
@@ -577,10 +577,15 @@ void core1_main_3(void)
       // No, we are sleeping ...
       gpio_put(LED_PIN_B, LED_OFF);
       cpuMode = GPIO_PIN(P_SYNC) ? LIGHT_SLEEP : DEEP_SLEEP;
-      // Update Blinky after each bus-cycle (160 ms)
-      if( (uint32_t)(time_us_64() - tick) >= 160 ) {
-        bPullIsa = blinky.tick();
-        tick = time_us_64();
+      // Update Blinky after each bus-cycle (160 us)
+      uint64_t now = time_us_64();
+      if( (uint32_t)(now - tick) >= ONE_BUS_CYCLE ) {
+        if( blinky.tick() ) {
+          // Time to wake the CPU, pull ISA high until PWO ...
+          bPullIsa = true;
+        }
+        // Reset bus-cycle counter
+        tick = now;
       }
       // But don't wake the CPU if we are in deep sleep ...
       if( cpuMode == LIGHT_SLEEP && bPullIsa && !bIsaEn ) {
@@ -688,7 +693,7 @@ void core1_main_3(void)
     switch (bit_no) {
     case 0:
 #ifdef MEASURE_TIME
-      tm = time_us_64();
+      tick = time_us_64();
 #endif
       pBus = &bus[data_wr];
       memset((void*)pBus, 0, sizeof(Bus_t));
@@ -714,7 +719,7 @@ void core1_main_3(void)
       xmAddr = 0;
       blinkyAddr = 0;
       if( !perph ) {
-        // Check if printer is being accessed ...
+        // Check if Blinky RAM is being accessed ...
         if( (ramad & 0x3F0) == BLINKY_ADDR ) {
           if( ramad == BLINKY_ADDR )
             blinkyAddr = BLINKY_ADDR + 1;
@@ -749,7 +754,8 @@ void core1_main_3(void)
 
     case LAST_CYCLE-3:
       // Check blinky timer counter
-      blinky.tick();
+      if( blinky.tick() )
+        bT0Carry = true;
       break;
 
     case LAST_CYCLE-2:
@@ -828,6 +834,12 @@ void core1_main_3(void)
 
       if( bIsSync ) {
         switch( cmd ) {
+        case INST_SETHEX:
+          isBase = ARITHM_HEX;
+          break;
+        case INST_SETDEC:
+          isBase = ARITHM_DEC;
+          break;
         case INST_RAM_SLCT:
           // Fetch selected RAM in the next run ...
           bSelRam = true;
@@ -929,15 +941,15 @@ void core1_main_3(void)
       }
 #ifdef MEASURE_TIME
       {
-        uint16_t dt = (uint16_t)(time_us_64() - tm);
+        uint16_t tCycle = (uint16_t)(time_us_64() - tick);
         // Floating input-pin ... ?
-        // A normal cycle (56 clock cycles @ 366kHz) should take ~158us (0x9E).
+        // A normal cycle (56 clock cycles @ 366kHz) should take ~158us.
         // So, if outside that range, we have an invalid cycle ...
-        if( dt < 64 || dt > 256 ) {
+        if( tCycle < 100 || tCycle > 220 ) {
           bErr = true;
           break;
         }
-        //pBus->fi = dt;
+        //pBus->fi = tCycle;
       }
       bErr = false;
 #endif
@@ -946,14 +958,13 @@ void core1_main_3(void)
       pBus->data = data56;
       // Report selected peripheral to trace ...
       pBus->data |= ((uint64_t)perph)<<PA_SHIFT;
+      // Report selected arithmetic mode ...
+      pBus->cmd |= isBase;
 #ifdef TRACE_ISA
       pBus->isa = isa;
 #endif
-#ifdef MEASURE_COUNT
-      // Report FI-status to trace ...
-      pBus->cnt |= iCnt++;
-#endif
-
+      // Add bus-counter to log ...
+      pBus->cnt = iCnt++;
       // Cleanup, fix trace buffer pointer and
       // check for overflow ...
       INC_BUS_PTR(data_wr);
@@ -1141,7 +1152,6 @@ void process_bus(void)
 
 uint64_t dreg_a = 0, dreg_b = 0, dreg_c = 0;
 bool display_on = false;
-int base = 0;
 
 void dump_dregs(void)
 {
@@ -1299,11 +1309,9 @@ void handle_bus(volatile Bus_t *pBus)
   static int pending_data_inst = 0;
   static int oAddr = ADDR_MASK;
 
-//  static uint64_t rr[16];
-//  static uint64_t bStat = 0;
-
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
+  int base = pBus->cmd & 0xC000;
   int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
   int fi   = pBus->fi;
   int cnt  = pBus->cnt;
@@ -1316,30 +1324,18 @@ void handle_bus(volatile Bus_t *pBus)
 
   setPeripheral((pBus->data & PA_MASK) >> PA_SHIFT);
 
-#ifdef MEASURE_COUNT
   if( IS_TRACE() ) {
     if( oCnt == -1)
       oCnt = cnt-1;
     oCnt = ++oCnt & 0xFFFF;
+    // Check if we missed/skipped any trace logs
     if( oCnt != cnt ) {
       nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r\n\r###### SKIPPED %d TRACE CYCLES #########################\n\r", skipClk);
       pending_data_inst = 0;
       oCnt = cnt;
     }
   }
-#endif
-#if 0
-  for( int i=0; i<16; i++ ) {
-    if( rr[i] != blinkyRAM[i] ) {
-      printf("\n\rBLKR%d: %014llX\n\r", i, blinkyRAM[i]);
-      rr[i] = blinkyRAM[i];
-    }
-  }
-  if( bStat != blinky[0] ) {
-    printf("\n\rBLINKY Stat: %014llX\n\r", blinky[0]);
-    bStat = blinky[0];
-  }
-#endif
+
 #define CPUX_PRT
 #ifdef CPUX_PRT
   // Any printouts from the other CPU ... ?
@@ -1384,9 +1380,10 @@ void handle_bus(volatile Bus_t *pBus)
   }
 #else
 #if 1
+  // Show current artihmetic mode
   char mode = '?';
-  if( base == 10 )  mode = 'd';
-  if( base == 16 )  mode = 'x';
+  if( base == ARITHM_DEC )  mode = 'd';
+  if( base == ARITHM_HEX )  mode = 'x';
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c%c %04X (Q%2d:%03X) %03X",
@@ -1494,12 +1491,6 @@ void handle_bus(volatile Bus_t *pBus)
   // Check for instructions
   if (sync) {
     switch (inst) {
-    case INST_SETHEX:
-      base = 16;
-      break;
-    case INST_SETDEC:
-      base = 10;
-      break;
     case INST_DISPLAY_OFF:
       display_on = !false; // Toggles to false below ...:P
     case INST_DISPLAY_TOGGLE:

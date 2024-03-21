@@ -1,11 +1,3 @@
-//#undef PICO_DEFAULT_I2C_SDA_PIN
-//#undef PICO_DEFAULT_I2C_SCL_PIN
-//#undef PICO_DEFAULT_I2C
-
-//#define PICO_DEFAULT_I2C_SDA_PIN 26
-//#define PICO_DEFAULT_I2C_SCL_PIN 27
-//#define PICO_DEFAULT_I2C 1
-
 #define CF_DUMP_DBG_DREGS 0
 #define CF_DISPLAY_LCD 1
 #define CF_DISPLAY_OLED 0
@@ -19,7 +11,6 @@
 
 #define USE_40190
 #define MEASURE_TIME
-#define MEASURE_COUNT
 #define LOG_FI
 
 //#define USE_TIME_MODULE
@@ -70,7 +61,18 @@
 #define P_CLK2      5
 #define P_CLK1      6
 #endif
+
+// On Pico Tiny, the RGB LED is tied to 3V3
+#define LED_ON    0
+#define LED_OFF   1
+
+#define LED_PIN_R TINY2040_LED_R_PIN
+#define LED_PIN_G TINY2040_LED_G_PIN
+#define LED_PIN_B TINY2040_LED_B_PIN
+// User switch is tied to GND (active low)
+#define USER_SW     23
 #endif
+
 #ifdef PIMORONI_PICOLIPO_16MB
 #define P_DATA      16
 #define P_DATA_DRV  20
@@ -88,27 +90,12 @@
 #define P_CLK1      12
 
 #define P_IR_LED    26
-#endif
 
-
-#ifdef PIMORONI_PICOLIPO_16MB
 // On Pico Lipo, the LED is tied to GND
 #define LED_ON      1
 #define LED_OFF     0
 
 #define LED_PIN_B PICO_DEFAULT_LED_PIN
-// User switch is tied to GND (active low)
-#define USER_SW     23
-#endif
-
-#ifdef PIMORONI_TINY2040_8MB
-// On Pico Tiny, the RGB LED is tied to 3V3
-#define LED_ON    0
-#define LED_OFF   1
-
-#define LED_PIN_R TINY2040_LED_R_PIN
-#define LED_PIN_G TINY2040_LED_G_PIN
-#define LED_PIN_B TINY2040_LED_B_PIN
 // User switch is tied to GND (active low)
 #define USER_SW     23
 #endif
@@ -189,8 +176,8 @@ public:
     static uint8_t m_dispBuf[SSD1306_BUF_LEN+1];
     static uint8_t *m_buf;
     CDisplay() :
-        // Initialize render area for parts of frame (SSD1306_WIDTH pixels by SSD1306_NUM_PAGES pages)
-        //m_buf = &CDisplay::m_dispBuf[1];
+        // Initialize render area for parts of frame
+        // (SSD1306_WIDTH pixels by SSD1306_NUM_PAGES pages)
         disLcd(m_buf, LCD_START, LCD_START+1),
         disAnnun(m_buf, ANNUN_START, ANNUN_START+1),
         disDisp(m_buf, DISP_START, ANNUN_START+1),
@@ -217,4 +204,3 @@ public:
     }
     uint8_t *buf() { return m_buf; }
 };
-

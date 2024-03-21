@@ -12,6 +12,7 @@
 #define BLINKY_CLK_ENABLE   BIT_4 // Handled by FUNC(2/3)
 #define BLINKY_RAM_ENABLE   BIT_6 // Handled by FUNC(4/5)
 #define BLINKY_ENABLE       BIT_7
+#define BLINKY_SLOW_CLK     BIT_6
 
 extern bool bT0Carry;
 
@@ -35,12 +36,13 @@ public:
   int       bwr;
   int       busyCnt;
   // Flag 6 in reg 8 indicates slow or fast clock
-  uint16_t  timerCnt() { return reg8[8] & BIT_6 ? TIMER_SLOW : TIMER_FAST; }
+  uint16_t  timerCnt() { return reg8[8] & BLINKY_SLOW_CLK ? TIMER_SLOW : TIMER_FAST; }
   bool      tick() {
-    // Timer is clocked by a 85Hz (or XXX Hz) or clock, which means that the
-    // timer value should decrement every ~75th (or 825) bus cycle.
+    // Timer is clocked by a 85Hz (or 7.6Hz) clock, which means that the
+    // timer value should decrement every ~75th (or ~825) bus cycle.
     // nAlm keeps track of the bus cycle counting, and when 0
     // timer value is decremented and nAlm restored.
+    // Note - this only works when bus is running (i.e not in sleep)
     if( nAlm && (flags & BLINKY_CLK_ENABLE) ) {
       if( --nAlm == 0 ) {
         if( cntTimer ) {
@@ -138,7 +140,6 @@ public:
     case 8: // Clear buffer
       fiClr(FI_PRT_BUSY);
       fiClr(FI_PRT_TIMER);
-      //cntTimer = 0;
       break;
     }
   }
