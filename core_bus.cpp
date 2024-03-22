@@ -554,7 +554,7 @@ void core1_main_3(void)
   static uint8_t cmd6 = 0;
   static bool bPWO = false;
   static bool bPullIsa = false;
-  static int isBase = ARITHM_UKN;
+  static uint16_t isBase = ARITHM_UKN;
 
   pBus = &bus[data_wr];
 
@@ -604,6 +604,8 @@ void core1_main_3(void)
       cpuMode = RUNNING;
       gpio_put(LED_PIN_B, LED_ON);
     }
+    if( bErr )
+      cpuMode = NO_MODE;
 
     // Wait for CLK2 to have a falling edge
     WAIT_FALLING(P_CLK2);
@@ -790,7 +792,7 @@ void core1_main_3(void)
       // Extract the low 6 bit instruction class ...
       cmd6 = cmd & 0x3F;
       // Extract register/address information from the instruction ...
-      r = (pBus->cmd >> 6) & 0x0F;
+      r = (cmd >> 6) & 0x0F;
       // Save info about sync in logged data ..
       if( bIsSync )
         pBus->cmd |= CMD_SYNC;
@@ -945,12 +947,14 @@ void core1_main_3(void)
         // Floating input-pin ... ?
         // A normal cycle (56 clock cycles @ 366kHz) should take ~158us.
         // So, if outside that range, we have an invalid cycle ...
-        if( tCycle < 100 || tCycle > 220 ) {
+        if( tCycle < 150 || tCycle > 170 ) {
           bErr = true;
-          break;
+          continue;
         }
-        //pBus->fi = tCycle;
+        pBus->fi = tCycle;
       }
+      if( !(pBus->cmd|pBus->addr) )
+        continue;
       bErr = false;
 #endif
 
@@ -1311,7 +1315,7 @@ void handle_bus(volatile Bus_t *pBus)
 
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
-  int base = pBus->cmd & 0xC000;
+  int base = pBus->cmd & ARITHM_MSK;
   int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
   int fi   = pBus->fi;
   int cnt  = pBus->cnt;

@@ -25,7 +25,7 @@
 #define PAGE_SIZE   0x1000
 #define PAGE_MASK   0x0FFF
 #define ADDR_MASK   0xFFFF
-#define INST_MASK   0x3FF
+#define INST_MASK   (BIT_10-1)
 #define FIRST_PAGE  0x04
 #define NR_PAGES    0x10
 #define LAST_PAGE   (NR_PAGES - 1)
@@ -66,7 +66,9 @@ enum {
     BIT_10  = 1 << 10,
     BIT_11  = 1 << 11,
     BIT_12  = 1 << 12,
-    BIT_13  = 1 << 13
+    BIT_13  = 1 << 13,
+    BIT_14  = 1 << 14,
+    BIT_15  = 1 << 15
 };
 
 enum {
@@ -91,19 +93,23 @@ enum {
 #define FI_PRT_TIMER  FI_ALM
 #define FI_PRT_BUSY   FI_TFAIL
 
-#define CMD_SYNC    0x8000
+#define CMD_SYNC    BIT_15
 
 #define ARITHM_UKN  0x0000
-#define ARITHM_DEC  0x4000
-#define ARITHM_HEX  0x8000
+#define ARITHM_DEC  BIT_13
+#define ARITHM_HEX  BIT_14
+#define ARITHM_MSK  (BIT_14|BIT_13)
 
 typedef struct {
-  uint64_t  data; // 56 bit data bus - MSB used to indicate selecte peripherial
+  uint64_t  data; // 56 bit data bus
+                  // 8 MSB used to indicate selected peripherial
 #ifdef TRACE_ISA
   uint64_t  isa;
 #endif
   uint16_t  addr; // Address from ISA
-  uint16_t  cmd;  // Command from ISA - 2 MSB bits indicates arithmetic mode (DEC/HEX)
+  uint16_t  cmd;  // Command from ISA (bit 0-8)
+                  // bit 13+14 indicates arithmetic mode (DEC/HEX)
+                  // bit 15 indicates SYNC
   uint16_t  fi;   // FI flags
   uint16_t  cnt;  // Trace counter
 } __attribute__((packed)) Bus_t;

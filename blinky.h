@@ -8,7 +8,7 @@
 #define BUSY_CNT    8
 
 // Trace of real HP82242 shows that FUNC(2) set bit 4
-// and FUNC(4) sets bit 6 
+// and FUNC(4) sets bit 6
 #define BLINKY_CLK_ENABLE   BIT_4 // Handled by FUNC(2/3)
 #define BLINKY_RAM_ENABLE   BIT_6 // Handled by FUNC(4/5)
 #define BLINKY_ENABLE       BIT_7
@@ -151,7 +151,9 @@ public:
     }
   }
   inline void fi(volatile uint16_t *f) {
+    // Clear FI-flags
     *f &= ~(FI_PRT_BUSY|FI_PRT_TIMER);
+    // Set flags if printer is selected
     if( bSelected )
       *f |= fiFlags;
   }

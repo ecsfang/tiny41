@@ -54,6 +54,8 @@ void bus_init(void)
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
     INIT_PIN(P_IR_LED, GPIO_OUT, LED_OFF);
     INIT_PIN(P_PWO, GPIO_IN, 0);
+//    gpio_pull_down(P_PWO);
+//    gpio_pull_down(P_SYNC);
 #endif
 #ifdef PIMORONI_TINY2040_8MB
     // Init leds ...
@@ -367,6 +369,7 @@ int main()
         char mm[8];
         if( oldMode != cpuMode ) {
             switch( cpuMode ) {
+            case NO_MODE:     strcpy(mm, "---    "); break;
             case RUNNING:     strcpy(mm, "Running"); break;
             case LIGHT_SLEEP: strcpy(mm, "Light  "); break;
             case DEEP_SLEEP:  strcpy(mm, "Deep   "); break;
