@@ -16,6 +16,7 @@
 #include "ir_led.h"
 #endif
 #include "usb/cdc_helper.h"
+#include "module.h"
 #include "modfile.h"
 
 //#define RESET_FLASH

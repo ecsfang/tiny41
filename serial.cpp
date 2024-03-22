@@ -15,6 +15,7 @@
 #include "core_bus.h"
 #include "usb/cdc_helper.h"
 #include "hardware/flash.h"
+#include "module.h"
 
 #define CON_PRINTF cdc_printf_console
 //#define CON_PRINTF printf
