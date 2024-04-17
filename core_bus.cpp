@@ -463,6 +463,12 @@ volatile uint8_t prtBuf[PRT_BUF_LEN];
 volatile uint8_t wprt = 0;
 volatile uint8_t rprt = 0;
 
+volatile uint8_t sendBuf[PRT_BUF_LEN];
+volatile uint8_t wSend = 0;
+volatile uint8_t rSend = 0;
+volatile uint16_t sendSize = 0;
+volatile uint16_t rxSize = 0;
+
 int last_sync = 0;
 int gpio_states = 0;
 
@@ -544,6 +550,7 @@ void core1_main_3(void)
   static uint32_t ramad = 0;    // Current RAM pointer
   static bool bErr = false;     // True if corrupt cycle is detected
   static bool bPrinter = false; // True if printer is selected
+  static bool bTiny = false;    // True if Tiny41 is selected
   static CModule *mp = NULL;    // Pointer to current module (if selected)
   volatile Bus_t *pBus;         // Pointer into trace buffer
   static int last_data_wr;      // Keep track of trace overflow
@@ -860,6 +867,11 @@ void core1_main_3(void)
           blinky.select(true);
           bPrinter = true;
           break;
+        case INST_SEL_TINY:
+          // Tiny41 special instructions
+          // Handle NPIC commands in next cykle
+          bTiny = true;
+          break;
         case INST_ENBANK1:
         case INST_ENBANK2:
         case INST_ENBANK3:
@@ -940,6 +952,27 @@ void core1_main_3(void)
           // Check if return-bit is set
           if( cmd & 1)
             bPrinter = false;
+        }
+        if( bTiny ) {
+          // Handle any specific Tiny41 instructions
+          switch(cmd & 0b1110) {
+            case NPIC_TINY_RAW_INIT:
+              // Init raw file transfer...
+              sendSize = data56 & 0xFFFF;
+              rxSize = 0;
+              wSend = rSend = 0;
+              break;
+            case NPIC_TINY_RAW_BYTE:
+              // Send program byte ...
+              sendBuf[wSend++] = data56 & 0xFF;
+              break;
+            case NPIC_TINY_RAW_DONE:
+              // Done with raw file transfer!
+              break;
+          }
+          // Check if return-bit is set
+          if( cmd & 1)
+            bTiny = false;
         }
       }
 #ifdef MEASURE_TIME
@@ -1064,6 +1097,30 @@ void post_handling(uint16_t addr)
     send_to_printer(c);
 #endif
   }
+  if (wSend != rSend) {
+    uint8_t c = sendBuf[rSend++];
+    if( rxSize == 0 && c == 0x00 ) {
+      // Skip leading NULL bytes
+      sendSize--;
+    } else {
+      char bb[8];
+      sprintf(bb,"%02X", c);
+      if( rxSize == 0 ) {
+        // Send 'S' to start the transfer
+        cdc_send_printport('S');
+      }
+      // Send each byte as ascii
+      cdc_send_printport(bb[0]);
+      cdc_send_printport(bb[1]);
+      if( rxSize == sendSize ) {
+        // When done - end transfer with a 'q'
+        cdc_send_printport('q');
+      }
+      cdc_send_printport('\n');
+      cdc_send_printport('\r');
+      rxSize++;
+    }
+  }
 #ifdef USE_TIME_MODULE
   // Update time in Time module
   mTime.tick();
@@ -1148,12 +1205,6 @@ void process_bus(void)
     tud_task();
   }
 }
-
-////////////////////////////////////////////////////////////////////////////////
-//
-// This function is passed all of the traffic on the bus. It can do
-// various things with that.
-//
 
 uint64_t dreg_a = 0, dreg_b = 0, dreg_c = 0;
 bool display_on = false;
@@ -1274,7 +1325,9 @@ void rotateDispReg(uint8_t r)
   dump_dregs();
 }
 
-// Keep track of selected peripheral ...
+CPeripherial peripheral;
+
+/*
 int peripheral_ce = 0;
 void setPeripheral(int pa)
 {
@@ -1306,6 +1359,13 @@ void printPeripheral(void)
     nCpu2 += sprintf(cpu2buf + nCpu2, "  ");
   }
 }
+*/
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// This function is passed all of the traffic on the bus. It can do
+// various things with that.
+//
 
 // Handle bus-trace ...
 void handle_bus(volatile Bus_t *pBus)
@@ -1327,7 +1387,7 @@ void handle_bus(volatile Bus_t *pBus)
 
   nCpu2 = 0;
 
-  setPeripheral((pBus->data & PA_MASK) >> PA_SHIFT);
+  peripheral.set((pBus->data & PA_MASK) >> PA_SHIFT);
 
   if( IS_TRACE() ) {
     if( oCnt == -1)
@@ -1370,7 +1430,7 @@ void handle_bus(volatile Bus_t *pBus)
 #endif
 #endif
 
-  printPeripheral();
+  nCpu2 += peripheral.print(cpu2buf+nCpu2);
 
   uint8_t q = (addr >> 10) & 0b1111;
 #ifdef TRACE_ISA
@@ -1486,7 +1546,7 @@ void handle_bus(volatile Bus_t *pBus)
     updateDispReg(data56, pending_data_inst >> 6);
     break;
   case INST_WANDRD:
-    if( IS_TRACE() && selectedPeripheral() == WAND_ADDR )
+    if( IS_TRACE() && peripheral.get() == WAND_ADDR )
       printf(" WB -> %03X", (int)(data56 & 0xFFF));
     break;
   }
@@ -1537,8 +1597,8 @@ void handle_bus(volatile Bus_t *pBus)
     }
   }
 
-  if( selectedPeripheral() && sync) {
-    switch(selectedPeripheral()) {
+  if( peripheral.get() && sync) {
+    switch(peripheral.get()) {
     case WAND_ADDR:
       // Check for Wand transactions
       if (inst == INST_WANDRD)

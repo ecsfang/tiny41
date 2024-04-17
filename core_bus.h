@@ -210,6 +210,44 @@ public:
   }
 };
 
+// Keep track of selected peripheral ...
+class CPeripherial {
+  int m_pa;
+public:
+  CPeripherial() {
+    m_pa = 0;
+  }
+  void set(int pa) {
+    switch (pa) {
+    case DISP_ADDR:
+    case WAND_ADDR:
+    case TIMR_ADDR:
+    case CRDR_ADDR:
+      m_pa = pa;
+      break;
+    default:
+      m_pa = NONE_ADDR;
+    }
+  }
+  int get(void) {
+    return m_pa;
+  }
+  int print(char *pb) {
+    int n;
+    switch (get()) {
+    case DISP_ADDR:
+    case WAND_ADDR:
+    case TIMR_ADDR:
+    case CRDR_ADDR:
+      n = sprintf(pb, "%c ", "TCDW"[get() - TIMR_ADDR]);
+      break;
+    default:
+      n = sprintf(pb, "  ");
+    }
+    return n;
+  }
+};
+
 extern volatile uint16_t carry_fi;
 
 inline void setFI(int flag) {

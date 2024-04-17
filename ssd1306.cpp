@@ -302,15 +302,17 @@ void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp) {
     y >>= 3;
 
     if( str ) {
+        // Write string to LCD ...
         while (*str) {
             x += Write41Char(buf, x, y, *str++, *pbp++);
         }
     } else {
-        for(int c=0; c<12; c++) {
+        // Clear the whole line ...
+        for(int c=0; x <= (SSD1306_WIDTH - CHAR41_WIDTH) && c<12; c++) {
             x += Write41Char(buf, x, y, ' ', false);
         }
     }
-    Render(0b001);
+    Render(0b001); // Mark LCD row as dirty
 }
 
 

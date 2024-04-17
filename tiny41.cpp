@@ -391,8 +391,9 @@ static int cAnn = 0;
 
 void UpdateLCD(char *txt, bool *bp, bool on)
 {
-    if( IS_TRACE() )
-        printf("\n\n[%s] (%s)", txt, on ? "ON" : "OFF");
+    if( IS_TRACE() ) {
+        cdc_printf_(ITF_TRACE, "\n\r\n\r[%s] (%s)\n\r", txt, on ? "ON" : "OFF");
+    }
     if (on) {
         Write41String(disp41.buf(), 3, LCD_ROW, txt, bp);
         UpdateAnnun(cAnn, false);

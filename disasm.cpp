@@ -17,12 +17,14 @@
 
 #include "pico/stdlib.h"
 #include "tiny41.h"
+#include "core_bus.h"
 #include "disasm.h"
 #include "disstr.h"
 
 #include "instr.h" // Instruction codes ...
 
-extern int selectedPeripheral(void);
+//extern int selectedPeripheral(void);
+extern CPeripherial peripheral;
 
 // Buffer for the disassembled string
 static char disBuf[256];
@@ -148,7 +150,7 @@ void prtCl0Cmd(int inst, int data, int con)
 				// printf(" (PA=%02X)", con&0xFF);
 				break;
 			case 0xB:	// 001360
-				switch( selectedPeripheral() ) {
+				switch( peripheral.get() ) {
 				case DISP_ADDR:
 					addDis(" (WRTEN - writes annunciators)");
 					break;
@@ -166,7 +168,7 @@ void prtCl0Cmd(int inst, int data, int con)
 			if( mod == 0x0 )
 				addDis("READ DATA");	// copy active user memory register to C
 			else {
-				if ( mod == 5 && selectedPeripheral() == DISP_ADDR)
+				if ( mod == 5 && peripheral.get() == DISP_ADDR)
 					addDis("READEN");
 				else {
 					addDis("C=REG ");
@@ -190,7 +192,7 @@ bool disAsmPeripheral(int inst)
 	const char *dBuf = NULL;
   int cmd = inst & 0077;
   int mod = inst >> 6;
-	switch (selectedPeripheral()) {
+	switch (peripheral.get()) {
 	case DISP_ADDR:
 		if( inst == INST_WRITE_ANNUNCIATORS )
 			dBuf = "WRTEN";

@@ -41,6 +41,7 @@
 
 #define INST_SELP                      00044 // Select peripherial
 #define INST_SEL_PRT                   ((9<<6) | INST_SELP) // Select printer
+#define INST_SEL_TINY                  ((8<<6) | INST_SELP) // Select Tiny41
 
 // Display
 #define INST_SRLDA                     (00000 | INST_WRITE_DATA)
@@ -134,4 +135,7 @@
 #define NPIC_IR_PRT_READ                0b010
 #define NPIC_IR_PRT_CMD                 0b100
 
+#define NPIC_TINY_RAW_INIT              0b0000
+#define NPIC_TINY_RAW_BYTE              0b0010
+#define NPIC_TINY_RAW_DONE              0b1110
 #endif//__INSTR_H__
