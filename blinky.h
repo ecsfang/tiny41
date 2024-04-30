@@ -137,9 +137,8 @@ public:
       flags = 0;
       fiClr(FI_PRT_BUSY);
       break;
-    case 8: // Clear buffer
+    case 8: // Clear busy state
       fiClr(FI_PRT_BUSY);
-      fiClr(FI_PRT_TIMER);
       break;
     }
   }
