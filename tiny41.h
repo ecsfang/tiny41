@@ -11,7 +11,7 @@
 
 #define USE_40190
 #define MEASURE_TIME
-#define LOG_FI
+#define LOG_FI // If true - add FI flags to output log
 
 //#define USE_TIME_MODULE
 #define USE_XF_MODULE

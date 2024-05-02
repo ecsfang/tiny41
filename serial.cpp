@@ -323,6 +323,11 @@ void info(void)
   cdc_send_console(cbuff);
 }
 
+void tag(void) {
+  cdc_printf_(ITF_TRACE, "\n\r###  TAG ###\n\r\n\r");
+  cdc_flush(ITF_TRACE);
+}
+
 extern void reset_bus_buffer(void);
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -349,6 +354,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'Q', quit_log,          "Stop logging"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
+  { 'g', tag,               "Enter trace tag"  },
 #ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
 #endif//USE_TIME_MODULE

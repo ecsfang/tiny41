@@ -14,7 +14,7 @@
 #define BLINKY_ENABLE       BIT_7
 #define BLINKY_SLOW_CLK     BIT_6
 
-extern bool bT0Carry;
+//extern bool bT0Carry;
 
 // Memory and registers for Blinky module
 class CBlinky {
@@ -130,8 +130,8 @@ public:
     case 5: // Disable RAM write
       clr(BLINKY_RAM_ENABLE);
       fiClr(FI_PRT_BUSY);
-      fiClr(FI_PRT_TIMER);
-      bT0Carry = false;
+      //fiClr(FI_PRT_TIMER); - removed - CAT 2 with R/S failed !
+      //bT0Carry = false;
       break;
     case 7: // Reset
       flags = 0;
@@ -139,6 +139,7 @@ public:
       break;
     case 8: // Clear busy state
       fiClr(FI_PRT_BUSY);
+      fiClr(FI_PRT_TIMER);
       break;
     }
   }

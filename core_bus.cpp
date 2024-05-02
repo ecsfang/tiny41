@@ -985,7 +985,7 @@ void core1_main_3(void)
           bErr = true;
           continue;
         }
-        pBus->fi = tCycle;
+        //pBus->fi = tCycle;
       }
       if( !(pBus->cmd|pBus->addr) )
         continue;
