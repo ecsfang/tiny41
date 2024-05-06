@@ -785,9 +785,9 @@ void core1_main_3(void)
       //pBus->fi = xmAddr-1;
       //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      pBus->fi = blinky.reg8[8] << 8;
+      //pBus->fi = blinky.reg8[8] << 8;
+      pBus->fi = blinky.flags << 8;
       pBus->fi |= blinky.cntTimer & 0xFF;
-      //pBus->fi = blinky.flags;
 #endif
       // Prepare command word ...
       // Is instruction fetched from flash?

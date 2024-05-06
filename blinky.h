@@ -5,7 +5,7 @@
 
 #define TIMER_FAST  75
 #define TIMER_SLOW  825
-#define BUSY_CNT    8
+#define BUSY_CNT    78    // Delay of about 12.4 ms
 
 // Trace of real HP82242 shows that FUNC(2) set bit 4
 // and FUNC(4) sets bit 6
@@ -80,7 +80,6 @@ public:
           if( cntTimer && (flags & BLINKY_CLK_ENABLE) )
             cntTimer--;
           // Writing results in clearing of FI[12]
-          fiClr(FI_PRT_BUSY);
           fiClr(FI_PRT_TIMER);
           // Reset timer countdown
           nAlm = timerCnt();
@@ -127,19 +126,16 @@ public:
     case 4: // Enable RAM write
       set(BLINKY_ENABLE|BLINKY_RAM_ENABLE);
       break;
-    case 5: // Disable RAM write
+    case 5: // Disable RAM write and de-select the printer
       clr(BLINKY_RAM_ENABLE);
-      fiClr(FI_PRT_BUSY);
-      //fiClr(FI_PRT_TIMER); - removed - CAT 2 with R/S failed !
-      //bT0Carry = false;
+      select(false);
       break;
     case 7: // Reset
       flags = 0;
       fiClr(FI_PRT_BUSY);
       break;
-    case 8: // Clear busy state
-      fiClr(FI_PRT_BUSY);
-      fiClr(FI_PRT_TIMER);
+    case 8: // De-select the printer
+      select(false);
       break;
     }
   }
