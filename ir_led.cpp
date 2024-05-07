@@ -5,7 +5,10 @@
 #include "pico/multicore.h"
 #include "tiny41.h"
 #include "ir_led.h"
+#include "usb/cdc_helper.h"
 
+char irBuf[32];
+int nIr;
 // code for the main loop in core0
 // gets PrintChar from a queue in core1
 void send_to_printer(char *pByte)
@@ -18,9 +21,11 @@ void send_to_printer(char *pByte)
 
 void dump_frame(uint32_t frame)
 {
+  nIr = 0;
   for(int i=31; i>4; i--) {
-    printf("%c", frame & (1<<i) ? '#':'_');
+    nIr += sprintf(irBuf+nIr, "%c", frame & (1<<i) ? '#':'_');
   }
+  cdc_send_console(irBuf);
 }
 void send_to_printer(uint8_t pByte)
 {
@@ -29,9 +34,13 @@ void send_to_printer(uint8_t pByte)
   uint32_t ir_frame = construct_frame(ir_code);
   send_ir_frame(ir_frame);
   // line below for debugging the construction of the IR frame
-//  printf("IR char = %02X, code = %04X, frame = ", pByte, ir_code);
-//  dump_frame(ir_frame);
-//  printf("\n");
+#if 0
+  sprintf(irBuf, "IR char = %02X, code = %04X, frame = ", pByte, ir_code);
+  cdc_send_console(irBuf);
+  dump_frame(ir_frame);
+  cdc_send_console((char*)"\n\r");
+  cdc_flush_console();
+#endif
 }
 
 PIO pio;
