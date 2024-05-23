@@ -5,7 +5,7 @@
 
 #define TIMER_FAST  75
 #define TIMER_SLOW  825
-#define BUSY_CNT    78    // Delay of about 12.4 ms
+#define BUSY_CNT    80    // Delay of about 12.4 ms
 
 // Trace of real HP82242 shows that FUNC(2) set bit 4
 // and FUNC(4) sets bit 6
@@ -18,12 +18,14 @@
 
 // Memory and registers for Blinky module
 class CBlinky {
-  uint16_t  fiFlags;
-  bool      bSelected;
+  uint16_t  fiFlags;    // Current FI flags
+  bool      bSelected;  // True when selected (FI visible)
+  bool      bOutBuf;    // True when character is in output buffer
 public:
   CBlinky() {
     fiFlags = 0;
     bSelected = true;
+    bOutBuf = false;
   }
   void select(bool bSel) {
     bSelected = bSel;
@@ -89,31 +91,33 @@ public:
             // Write to out buffer - set buffer flag
             // Maybe we should just keep 8 LSB
             prtBuf[wprt++] = reg8[11];
-            if( busyCnt ) // Already busy ... ?
-              fiSet(FI_PRT_BUSY);
-            busyCnt = BUSY_CNT;
+            fiSet(FI_PRT_BUSY);
+            bOutBuf = true; // Character in buffer to be sent
           }
           break;
         }
       }
     }
   }
+  inline void updateHwRegs(void) {
+    // Update hardware registers
+    // Timer register
+    reg8[10] = cntTimer;
+    // HW flag register
+    reg8[14] = flags;
+  }
   inline uint64_t read(int r) {
-    // Enable data driver ...
+    // 8 or 64 bit register ... ?
     if( r < 8 ) {
-      return reg[r];
+      return reg[r];  // 64-bit
     } else {
       // Update hardware registers
-      switch(r) {
-      case 10:  // Timer register
-        reg8[10] = cntTimer;
-        break;
-      case 14:  // HW flag register
-        reg8[14] = flags;
-        break;
-      }
-      return reg8[r];
+      updateHwRegs();
+      return reg8[r]; // 8-bit
     }
+  }
+  inline uint64_t operator[](int index) {
+    return read(index);
   }
   void func(int c) {
     switch( c ) {
@@ -140,18 +144,33 @@ public:
     }
   }
   void inline busy(void) {
-    if(busyCnt) {
+    if( bOutBuf ) { // Character in buffer
+      if( busyCnt ) {
+        // HW is still busy sending character
+        fiSet(FI_PRT_BUSY);
+      } else {
+        // HW is free - start next transmission
+        busyCnt = BUSY_CNT;
+        // Empty buffer and clear FI-flag
+        bOutBuf = false;
+        fiClr(FI_PRT_BUSY);
+      }
+    }
+    if( busyCnt ) {
       busyCnt--;
-      if( !busyCnt )
+      // When done and no character waiting - clear busy flag
+      if( !busyCnt && !bOutBuf)
         fiClr(FI_PRT_BUSY);
     }
   }
   inline void fi(volatile uint16_t *f) {
-    // Clear FI-flags
-    *f &= ~(FI_PRT_BUSY|FI_PRT_TIMER);
-    // Set flags if printer is selected
-    if( bSelected )
+    // Only update flags if we are selected
+    if( bSelected ) {
+      // Clear FI-flags
+      *f &= ~(FI_PRT_BUSY|FI_PRT_TIMER);
+      // Set flags if printer is selected
       *f |= fiFlags;
+    }
   }
   inline void set(uint8_t f) {
     flags |= f;

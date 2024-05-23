@@ -555,8 +555,8 @@ void core1_main_3(void)
   volatile Bus_t *pBus;         // Pointer into trace buffer
   static int last_data_wr;      // Keep track of trace overflow
   static uint16_t iCnt = 0;     // Cycle counter for trace
-  static uint32_t xmAddr = 0;
-  static uint32_t blinkyAddr = 0;
+  static RamDevice_e ramDev = RAM_DEV;
+  static uint32_t ramAddr = 0;
   static uint8_t r = 0;
   static uint16_t cmd = 0;
   static uint8_t cmd6 = 0;
@@ -629,6 +629,7 @@ void core1_main_3(void)
       isa = data56 = 0LL;
       // Setup FI-signal for next round ...
       dataFI = getFI();
+      carry_fi = 0;
       // Check if ISA should be active during T0 (peripherial carry)
       if( bT0Carry && !bIsaEn ) {
         gpio_put(P_ISA_DRV, 1);
@@ -726,18 +727,16 @@ void core1_main_3(void)
         ramad = data56 & 0x3FF;
         bSelRam = false;
       }
-      xmAddr = 0;
-      blinkyAddr = 0;
+      ramDev = RAM_DEV;
       if( !perph ) {
         // Check if Blinky RAM is being accessed ...
         if( (ramad & 0x3F0) == BLINKY_ADDR ) {
-          if( ramad == BLINKY_ADDR )
-            blinkyAddr = BLINKY_ADDR + 1;
-          else
-            blinkyAddr = (ramad & 0x0F) + 1;
+          ramAddr = (ramad == BLINKY_ADDR) ? BLINKY_ADDR+1 : (ramad&0x0F)+1;
+          ramDev = BLINKY_DEV;
         } else {
           // ... else it might be XMemory ...
-          xmAddr = getXmemAddr(ramad);  // Address = [1..XF_END+1]
+          if( (ramAddr = getXmemAddr(ramad)) )  // Address = [1..XF_END+1]
+            ramDev = XMEM_DEV;
         }
       }
       break;
@@ -782,10 +781,10 @@ void core1_main_3(void)
       // Report next FI signal to trace ...
       pBus->fi = getFI();
 #else
-      //pBus->fi = xmAddr-1;
+      //pBus->fi = ramAddr-1;
       //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      //pBus->fi = blinky.reg8[8] << 8;
+      //pBus->fi = blinky[8] << 8;
       pBus->fi = blinky.flags << 8;
       pBus->fi |= blinky.cntTimer & 0xFF;
 #endif
@@ -881,36 +880,60 @@ void core1_main_3(void)
           break;
         default:
           // If perph == 0 then RAM is accessible
+          // Handle any device in the normal RAM address space
+          // - Memory module (not done yet)
+          // - XMemory
+          // - Blinky RAM
           if( !perph ) {
             // Look for read/write towards the Blinky RAM
-            if( blinkyAddr ) {
+            if( ramDev == BLINKY_DEV ) {
               // Accessing RAM 0x20-0x2F
               if( cmd == INST_WDATA ) {
                 // Note! A write to BLINKY_ADDR (0x20) should be treated special
                 // Should be interpreted as a Write Status instruction
-                blinky.bwr = blinkyAddr; // (0x20 or 0x01-0x0F) + 1
+                blinky.bwr = ramAddr; // (0x20 or 0x01-0x0F) + 1
               } else if( cmd6 == INST_READ_DATA ) {
-                DATA_OUTPUT(r < 8 ? blinky.reg[r] : blinky.reg8[r]);
+                //DATA_OUTPUT(r < 8 ? blinky.reg[r] : blinky.reg8[r]);
+                DATA_OUTPUT( blinky[r] );
               } else if( cmd6 == INST_WRITE_DATA ) {
-                ramad = BLINKY_ADDR | r;  // Update ram select pointer
+                // Update ram select pointer
+                ramad = BLINKY_ADDR | r;
                 if( blinky.flags & BLINKY_RAM_ENABLE)
                   blinky.bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
               }
+            }
 #ifdef USE_XF_MODULE
-            } else if( xmAddr ) {
+            // Handle emulated XMemory
+            else if( ramDev == XMEM_DEV ) {
               // X-Function module
               if( cmd == INST_WDATA ) {
-                xmem.bwr = xmAddr;
+                xmem.bwr = ramAddr;
               } else if( cmd6 == INST_READ_DATA ) {
-                DATA_OUTPUT(__mem[xmAddr-1]);
+                DATA_OUTPUT(__mem[ramAddr-1]);
               } else if( cmd6 == INST_WRITE_DATA ) {
                 // Update ram select pointer
                 ramad = (ramad & 0x3F0) | r;
-                xmAddr = getXmemAddr(ramad);
-                xmem.bwr = xmAddr;
+                xmem.bwr = getXmemAddr(ramad);
               }
-#endif
             }
+#endif
+#ifdef USE_QUAD_MODULE
+            // Handle emulated QUAD memory module (for HP41C)
+            // TBD - Is there a way to detect RAM?
+            else if( ramAddr ) {
+              // QUAD RAM module
+              if( cmd == INST_WDATA ) {
+                ram.bwr = ramAddr;
+              } else if( cmd6 == INST_READ_DATA ) {
+                DATA_OUTPUT(__ram[ramAddr-1]);
+              } else if( cmd6 == INST_WRITE_DATA ) {
+                // Update ram select pointer
+                ramad = (ramad & 0x3F0) | r;
+                ramAddr = getRamAddr(ramad);
+                ram.bwr = ramAddr;
+              }
+            }
+#endif
           } else {
             // A peripherial is selected ...
             switch( perph ) {
@@ -943,7 +966,7 @@ void core1_main_3(void)
               blinky.write(r, data56);
               break;
             case NPIC_IR_PRT_READ:  // Read ...
-              DATA_OUTPUT(blinky.read(r));
+              DATA_OUTPUT(blinky[r]);
               break;
             case NPIC_IR_PRT_CMD:  // Func ...
               blinky.func(r);

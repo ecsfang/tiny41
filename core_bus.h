@@ -121,6 +121,12 @@ typedef struct {
 #define NUM_BUS_T (0x1000/2)
 #endif
 
+typedef enum {
+  RAM_DEV,
+  XMEM_DEV,
+  QUAD_DEV,
+  BLINKY_DEV
+} RamDevice_e;
 
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
 
