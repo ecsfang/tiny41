@@ -541,6 +541,7 @@ void core1_main_3(void)
   static uint64_t isa = 0LL;    // Current bit-pattern on the ISA bus
   static uint64_t bit = 0LL;    // Bit mask for current bit in cycle
   static uint64_t data56 = 0LL; // Current bit-pattern on DATA bus
+  static uint8_t fiShift = 0;   // Current shift of FI
   static uint16_t dataFI = 0;   // State of FI to be sent
   static int sync = 0;          // True if sync detected
   static bool bIsSync = false;  // True if current cycle have sync
@@ -629,6 +630,7 @@ void core1_main_3(void)
       isa = data56 = 0LL;
       // Setup FI-signal for next round ...
       dataFI = getFI();
+      fiShift = 0;
       carry_fi = 0;
       // Check if ISA should be active during T0 (peripherial carry)
       if( bT0Carry && !bIsaEn ) {
@@ -639,8 +641,9 @@ void core1_main_3(void)
 
     // Drive the FI carry flags for each nibble
     if( (bit_no & 0b11) == 0b11 ) {
-      gpio_put(P_FI_OE, dataFI & 1);
-      dataFI >>= 1;
+      gpio_put(P_FI_OE, (dataFI>>fiShift) & 1);
+      //dataFI >>= 1;
+      fiShift++;
     }
 
     // Do we drive the DATA line (bit 0-55)?
@@ -708,7 +711,8 @@ void core1_main_3(void)
 #endif
       pBus = &bus[data_wr];
       memset((void*)pBus, 0, sizeof(Bus_t));
-
+      // Report next FI signal to trace ...
+      pBus->fi = dataFI;
       // Check if still busy ...
       blinky.busy();
       break;
@@ -777,16 +781,13 @@ void core1_main_3(void)
       break;
 
     case LAST_CYCLE-1:
-#ifdef LOG_FI // Select FI or debug info in fi-field
-      // Report next FI signal to trace ...
-      pBus->fi = getFI();
-#else
+#ifndef LOG_FI // Log something else ...
       //pBus->fi = ramAddr-1;
       //pBus->fi = ramad;
       //pBus->fi = (blinky.nAlm & 0xFF) << 8;
-      //pBus->fi = blinky[8] << 8;
-      pBus->fi = blinky.flags << 8;
-      pBus->fi |= blinky.cntTimer & 0xFF;
+      //pBus->fi = blinky.timer() << 8;
+      pBus->fi = blinky.fiFlags();
+      //pBus->fi |= blinky.cntTimer & 0xFF;
 #endif
       // Prepare command word ...
       // Is instruction fetched from flash?
@@ -898,7 +899,7 @@ void core1_main_3(void)
               } else if( cmd6 == INST_WRITE_DATA ) {
                 // Update ram select pointer
                 ramad = BLINKY_ADDR | r;
-                if( blinky.flags & BLINKY_RAM_ENABLE)
+                if( blinky.flags() & BLINKY_RAM_ENABLE)
                   blinky.bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
               }
             }

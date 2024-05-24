@@ -14,16 +14,19 @@
 #define BLINKY_ENABLE       BIT_7
 #define BLINKY_SLOW_CLK     BIT_6
 
-//extern bool bT0Carry;
+#define STATUS_REG          8
+#define TIMER_REG           10
+#define TX_REG              11
+#define FLAGS_REG           14
 
 // Memory and registers for Blinky module
 class CBlinky {
-  uint16_t  fiFlags;    // Current FI flags
+  uint16_t  m_fiFlags;  // Current FI flags
   bool      bSelected;  // True when selected (FI visible)
   bool      bOutBuf;    // True when character is in output buffer
 public:
   CBlinky() {
-    fiFlags = 0;
+    m_fiFlags = 0;
     bSelected = true;
     bOutBuf = false;
   }
@@ -32,24 +35,23 @@ public:
   }
   volatile static uint64_t  reg[8];    // First 8 registers
   volatile static uint8_t   reg8[16];  // Last 8 registers (0-7 not used)
-  uint8_t   flags;
   int       nAlm;
-  int       cntTimer;
   int       bwr;
   int       busyCnt;
   // Flag 6 in reg 8 indicates slow or fast clock
-  uint16_t  timerCnt() { return reg8[8] & BLINKY_SLOW_CLK ? TIMER_SLOW : TIMER_FAST; }
+  uint16_t  timerCnt() { return reg8[STATUS_REG] & BLINKY_SLOW_CLK ? TIMER_SLOW : TIMER_FAST; }
   bool      tick() {
     // Timer is clocked by a 85Hz (or 7.6Hz) clock, which means that the
     // timer value should decrement every ~75th (or ~825) bus cycle.
     // nAlm keeps track of the bus cycle counting, and when 0
     // timer value is decremented and nAlm restored.
     // Note - this only works when bus is running (i.e not in sleep)
-    if( nAlm && (flags & BLINKY_CLK_ENABLE) ) {
+    if( nAlm && (reg8[FLAGS_REG] & BLINKY_CLK_ENABLE) ) {
       if( --nAlm == 0 ) {
-        if( cntTimer ) {
+        // Check timer register
+        if( reg8[TIMER_REG] ) {
           // Decrement and continue counting ...
-          cntTimer--;
+          reg8[TIMER_REG]--;
           nAlm = timerCnt();
         } else {
           // Set FI flag when counter reaches zero ...
@@ -62,7 +64,7 @@ public:
     return false;
   }
   void wrStatus(uint8_t st) {
-    flags = reg8[14] = st;
+    reg8[FLAGS_REG] = st;
   }
   inline void write(int r, uint64_t data, bool bRam = false) {
     if( r < 8 ) {
@@ -73,24 +75,23 @@ public:
       reg8[r] = (uint8_t)(data & 0xFF);
       if( !bRam ) {
         switch(r) {
-        case  8:
-          if( reg8[8] & BLINKY_ENABLE )
+        case STATUS_REG:
+          if( reg8[STATUS_REG] & BLINKY_ENABLE )
             set(BLINKY_ENABLE);
           break;
-        case 10:
-          cntTimer = reg8[10];
-          if( cntTimer && (flags & BLINKY_CLK_ENABLE) )
-            cntTimer--;
+        case TIMER_REG:
+          if( reg8[TIMER_REG] && (reg8[FLAGS_REG] & BLINKY_CLK_ENABLE) )
+            reg8[TIMER_REG]--;
           // Writing results in clearing of FI[12]
           fiClr(FI_PRT_TIMER);
           // Reset timer countdown
           nAlm = timerCnt();
           break;
-        case 11:
-          if( flags & BLINKY_CLK_ENABLE ) {
+        case TX_REG:
+          if( reg8[FLAGS_REG] & BLINKY_CLK_ENABLE ) {
             // Write to out buffer - set buffer flag
             // Maybe we should just keep 8 LSB
-            prtBuf[wprt++] = reg8[11];
+            prtBuf[wprt++] = reg8[TX_REG];
             fiSet(FI_PRT_BUSY);
             bOutBuf = true; // Character in buffer to be sent
           }
@@ -99,20 +100,12 @@ public:
       }
     }
   }
-  inline void updateHwRegs(void) {
-    // Update hardware registers
-    // Timer register
-    reg8[10] = cntTimer;
-    // HW flag register
-    reg8[14] = flags;
-  }
   inline uint64_t read(int r) {
     // 8 or 64 bit register ... ?
     if( r < 8 ) {
       return reg[r];  // 64-bit
     } else {
       // Update hardware registers
-      updateHwRegs();
       return reg8[r]; // 8-bit
     }
   }
@@ -135,7 +128,7 @@ public:
       select(false);
       break;
     case 7: // Reset
-      flags = 0;
+      reg8[FLAGS_REG] = 0;
       fiClr(FI_PRT_BUSY);
       break;
     case 8: // De-select the printer
@@ -169,20 +162,29 @@ public:
       // Clear FI-flags
       *f &= ~(FI_PRT_BUSY|FI_PRT_TIMER);
       // Set flags if printer is selected
-      *f |= fiFlags;
+      *f |= m_fiFlags;
     }
   }
+  inline uint8_t flags(void) {
+    return reg8[FLAGS_REG];
+  }
+  inline uint8_t timer(void) {
+    return reg8[TIMER_REG];
+  }
+  inline uint16_t fiFlags(void) {
+    return m_fiFlags;
+  }
   inline void set(uint8_t f) {
-    flags |= f;
+    reg8[FLAGS_REG] |= f;
   }
   inline void clr(uint8_t f) {
-    flags &= ~f;
+    reg8[FLAGS_REG] &= ~f;
   }
   inline void fiSet(uint16_t f) {
-    fiFlags |= f;
+    m_fiFlags |= f;
   }
   inline void fiClr(uint16_t f) {
-    fiFlags &= ~f;
+    m_fiFlags &= ~f;
   }
 };
 #endif//__BLINKY_H__
