@@ -456,6 +456,7 @@ volatile int data_rd = 0;
 
 #define DATA_OUTPUT(x) do { output_data = 1; data56_out = x;} while(0)
 volatile uint64_t data56_out = 0;
+volatile uint64_t data2FI = 0;
 
 volatile Bus_t bus[NUM_BUS_T];
 
@@ -641,8 +642,11 @@ void core1_main_3(void)
 
     // Drive the FI carry flags for each nibble
     if( (bit_no & 0b11) == 0b11 ) {
+#ifdef ET_11967
+      gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
+#else
       gpio_put(P_FI_OE, (dataFI>>fiShift) & 1);
-      //dataFI >>= 1;
+#endif
       fiShift++;
     }
 
@@ -1014,6 +1018,11 @@ void core1_main_3(void)
       if( !(pBus->cmd|pBus->addr) )
         continue;
       bErr = false;
+#endif
+
+#ifdef ET_11967
+      // Copy C-register to the FI data line
+      data2FI = ~data56;
 #endif
 
       // Prepare logging data ...
