@@ -632,7 +632,15 @@ void core1_main_3(void)
       // Clear for next cykle ...
       isa = data56 = 0LL;
       // Setup FI-signal for next round ...
+#ifdef ET_11967
+      gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
+      dataFI = 0;
+      for(int f=0; f<14; f++) {
+
+      }
+#else
       dataFI = getFI();
+#endif
       fiShift = 0;
       carry_fi = 0;
       // Check if ISA should be active during T0 (peripherial carry)
