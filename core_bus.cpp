@@ -456,7 +456,9 @@ volatile int data_rd = 0;
 
 #define DATA_OUTPUT(x) do { output_data = 1; data56_out = x;} while(0)
 volatile uint64_t data56_out = 0;
+#ifdef ET_11967
 volatile uint64_t data2FI = 0;
+#endif
 
 volatile Bus_t bus[NUM_BUS_T];
 

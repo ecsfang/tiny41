@@ -116,6 +116,7 @@ public:
     switch( c ) {
     case 2: // Enable timer clock
       set(BLINKY_ENABLE|BLINKY_CLK_ENABLE);
+      reg8[9] = reg8[14];
       break;
     case 3: // Disable timer clock
       clr(BLINKY_CLK_ENABLE);

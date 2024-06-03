@@ -12,7 +12,7 @@
 #define USE_40190
 #define MEASURE_TIME
 #define LOG_FI          // If true - add FI flags to output log
-#define ET_11967        // Emulate FI-wired service module
+//#define ET_11967        // Emulate FI-wired service module
 
 //#define USE_TIME_MODULE
 #define USE_XF_MODULE
