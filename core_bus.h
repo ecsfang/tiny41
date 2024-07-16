@@ -8,6 +8,7 @@
 
 #include "instr.h"
 
+#include "usb/cdc_helper.h"
 
 #define MASK_64_BIT    (0xFFFFFFFFFFFFFFFFL)
 #define MASK_56_BIT    (0x00FFFFFFFFFFFFFFL)
@@ -44,6 +45,9 @@
 uint32_t getTotalHeap(void);
 uint32_t getFreeHeap(void);
 const uint8_t *flashPointer(int offs);
+
+extern char cbuff[CDC_PRINT_BUFFER_SIZE];
+extern int send2console(const char* dispBuf, bool bClear);
 
 typedef enum {
   NO_MODE,
@@ -99,6 +103,7 @@ enum {
 #define ARITHM_DEC  BIT_13
 #define ARITHM_HEX  BIT_14
 #define ARITHM_MSK  (BIT_14|BIT_13)
+#define ARITHM_SHFT 13
 
 typedef struct {
   uint64_t  data; // 56 bit data bus
@@ -153,10 +158,21 @@ extern void process_bus(void);
 extern volatile int data_wr;
 extern volatile int data_rd;
 
-#define BRK_SIZE ((ADDR_MASK+1)/(32/2)) // 2 bits per brkpt
-#define BRK_MASK(a,w) ((m_brkpt[a>>4]w >> ((a & 0xF)<<1)) & 0b11)
-#define BRK_SHFT(a) ((a & 0xF)<<1)
-#define BRK_WORD(a) (a >> 4)
+#define BRK_BANKS 0
+#if BRK_BANKS > 0
+#define BPBR 2 // Bits per breakpoint
+#define BPBK 2 // Bits per bank (4 banks)
+#define BRK_APW (32/(1<<(BPBR+BPBK))) // Addresses Per Word (8)
+#define BRK_SIZE ((ADDR_MASK+1)/BRK_APW) // Total size
+#define BRK_WORD(a) (a >> 2) // /8
+#define BRK_SHFT(a,b) ((a & 0x3)*8 + b*2)
+#else
+#define BPB 2 // Bits per breakpoint (2 type + 0 bank)
+#define BRK_APW (32/BPB) // Addresses Per Word
+#define BRK_SIZE ((ADDR_MASK+1)/BRK_APW) // 2 bits per brkpt
+#define BRK_WORD(a) (a >> 4) // /16
+#define BRK_SHFT(a,b) ((a & 0xF)<<1) // *2
+#endif
 
 #define START_TRACE() bTrace |= TRACE_BRK
 #define END_TRACE()   bTrace &= ~TRACE_BRK
@@ -165,54 +181,64 @@ typedef enum {
   BRK_NONE,
   BRK_START,
   BRK_END,
-  BRK_CLR
+  BRK_MASK
 } BrkMode_e;
 
 class CBreakpoint {
   uint32_t m_brkpt[BRK_SIZE];
 public:
   // Check if breakpoint is set for given address
-  inline BrkMode_e isBrk(uint16_t addr) {
+  inline BrkMode_e isBrk(uint16_t addr, int bank = 0) {
     uint32_t w = m_brkpt[BRK_WORD(addr)];
-    return w ? (BrkMode_e)((w >> BRK_SHFT(addr)) & 0b11) : BRK_NONE;
+    return w ? (BrkMode_e)((w >> BRK_SHFT(addr,bank)) & BRK_MASK) : BRK_NONE;
   }
   // Clear breakpoint on given address
-  void clrBrk(uint16_t addr) {
-    m_brkpt[BRK_WORD(addr)] &= ~(0b11 << BRK_SHFT(addr));
+  void clrBrk(uint16_t addr, int bank = 0) {
+    m_brkpt[BRK_WORD(addr)] &= ~(BRK_MASK << BRK_SHFT(addr,bank));
   }
   void clrAllBrk(void) {
-    printf("Clear all breakpoints\n");
+    cdc_printf_( ITF_CONSOLE, "Clear all breakpoints\r\n");
+    cdc_flush_console();
     memset(m_brkpt, 0, sizeof(uint32_t) * BRK_SIZE);
   }
   // Set breakpoint on given address
-  void setBrk(uint16_t addr) {
-    clrBrk(addr); // Remove previous settings
-    m_brkpt[BRK_WORD(addr)] |= BRK_START << BRK_SHFT(addr);
+  void setBrk(uint16_t addr, int bank = 0) {
+    clrBrk(addr, bank); // Remove previous settings
+    m_brkpt[BRK_WORD(addr)] |= BRK_START << BRK_SHFT(addr,bank);
   }
-  void stopBrk(uint16_t addr) {
-    clrBrk(addr); // Remove previous settings
-    m_brkpt[BRK_WORD(addr)] |= BRK_END << BRK_SHFT(addr);
+  void stopBrk(uint16_t addr, int bank = 0) {
+    clrBrk(addr, bank); // Remove previous settings
+    cdc_printf_( ITF_CONSOLE, "Clear breakpoint @ %04X\r\n", addr);
+    cdc_flush_console();
+    m_brkpt[BRK_WORD(addr)] |= BRK_END << BRK_SHFT(addr,bank);
   }
   void list_brks(void) {
     int n = 0;
+    int i=0;
     for(int w=0; w<BRK_SIZE; w++) {
       if( m_brkpt[w] ) {
-        for(int a=w*16; a<(w+1)*16; a++) {
+        for(int a=w*BRK_APW; a<(w+1)*BRK_APW; a++) {
           int br = isBrk(a);
           if( br ) {
-            printf("#%d: %04X -> ", ++n, a);
+#if BRK_BANKS > 0
+            i = sprintf(cbuff, "#%d bank%d: %04X -> ", ++n, br>>2, a);
+#else
+            i = sprintf(cbuff, "#%d: %04X -> ", ++n, a);
+#endif
             switch( br ) {
-              case 1: printf("start"); break;
-              case 2: printf("stop"); break;
-              default: printf("???"); break;
+              case 1: i += sprintf(cbuff+i, "start"); break;
+              case 2: i += sprintf(cbuff+i, "stop"); break;
+              default: i += sprintf(cbuff+i, "?%X", br); break;
             }
-            printf("\n");
+            i += sprintf(cbuff+i, "\n\r");
+            cdc_printf_( ITF_CONSOLE, "%s", cbuff);
           }
         }
       }
     }
     if( !n )
-      printf("No breakpoints\n");
+      cdc_printf_( ITF_CONSOLE, "No breakpoints\n\r");
+    cdc_flush_console();
   }
 };
 

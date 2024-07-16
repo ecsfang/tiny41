@@ -17,6 +17,7 @@
 //#define USE_TIME_MODULE
 #define USE_XF_MODULE
 //#define DISABLE_DISPRINT
+#define USE_QUAD_MODULE
 
 #ifdef USE_40190
 #define ENABLE_OE   1

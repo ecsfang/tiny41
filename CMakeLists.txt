@@ -16,6 +16,7 @@ add_executable(tiny41
   ssd1306.cpp
   core_bus.cpp
   disasm.cpp
+  disstr.cpp
   serial.cpp
   ir_led.cpp
   modfile.cpp

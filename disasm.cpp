@@ -19,7 +19,6 @@
 #include "tiny41.h"
 #include "core_bus.h"
 #include "disasm.h"
-#include "disstr.h"
 
 #include "instr.h" // Instruction codes ...
 
@@ -385,6 +384,7 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 	return disBuf;
 }
 
+#ifdef DUMP_ROM
 uint16_t fat[64];
 extern uint16_t readRom(int a);
 
@@ -450,3 +450,4 @@ void dumpRom(int p)
 		printf("\n===================\n");
 	}
 }
+#endif

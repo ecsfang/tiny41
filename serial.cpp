@@ -58,17 +58,18 @@ void toggle_trace(void)
 {
   bTrace ^= TRACE_ON;
   if( bTrace & TRACE_ON ) bTrace |= TRACE_BRK;
-  sprintf(cbuff,"Turn trace %s\n\r", bTrace & TRACE_ON ? "on":"off");
-  cdc_send_console(cbuff);
+  cdc_printf_( ITF_CONSOLE,"Turn trace %s\n\r", bTrace & TRACE_ON ? "on":"off");
+  cdc_flush_console();
 }
 // Toggle disassembler (on -> call disassembler if trace is on)
 void toggle_disasm(void)
 {
   bTrace ^= TRACE_DISASM;
-  sprintf(cbuff,"Turn disassemble %s\n\r", IS_DISASM() ? "on":"off");
-  cdc_send_console(cbuff);
+  cdc_printf_( ITF_CONSOLE,"Turn disassemble %s\n\r", IS_DISASM() ? "on":"off");
 }
-#define BAR()   cdc_send_console((char*)"+------+------+------+-----+-----+\n\r")
+#define BAR_T()   cdc_send_console((char*)"/------+------+------+-----+-----+\n\r")
+#define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+-----+\n\r")
+#define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+-----/\n\r")
 
 void list_modules(void)
 {
@@ -76,9 +77,9 @@ void list_modules(void)
   int n;
 
   cdc_send_console((char*)"\n\rLoaded modules\n\r");
-  BAR();
+  BAR_T();
   cdc_send_console((char*)"| Page | Port | XROM | RAM | Bank|\n\r");
-  BAR();
+  BAR_M();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
     n = sprintf(cbuff,"|  #%X  | ", i);
     if( i>=8)
@@ -95,7 +96,7 @@ void list_modules(void)
     n += sprintf(cbuff+n," %3.3s |\n\r", modules[i]->haveBank() ? "Yes" : "" );
     cdc_send_console(cbuff);
   }
-  BAR();
+  BAR_B();
 }
 
 extern void list_brks(void);
@@ -136,7 +137,7 @@ static void sbrkpt(BrkMode_e b)
   switch(b) {
   case BRK_START: cdc_send_console((char*)"\n\rStart"); break;
   case BRK_END:   cdc_send_console((char*)"\n\rEnd"); break;
-  case BRK_CLR:   cdc_send_console((char*)"\n\rClear"); break;
+  case BRK_NONE:   cdc_send_console((char*)"\n\rClear"); break;
   }
   cdc_send_console((char*)" breakpoint: ----\b\b\b\b");
   cdc_flush_console();
@@ -154,7 +155,7 @@ void end_brk(void)
 }
 void clr_brk(void)
 {
-  sbrkpt(BRK_CLR);
+  sbrkpt(BRK_NONE);
 }
 
 void sel_qram(void)
@@ -188,14 +189,13 @@ void dump_blinky(void)
   int i;
   cdc_send_console((char*)"Blinky registers and RAM\n\r=====================================\n\r");
   for(i=0; i<0x08; i++) {
-    sprintf(cbuff,"Reg%02d: %014llx (56)\n\r", i, blinky.reg[i]);
-    cdc_send_console(cbuff);
+    cdc_printf_( ITF_CONSOLE,"Reg%02d: %014llx (56)\n\r", i, blinky.reg[i]);
   }
   for(; i<0x10; i++) {
-    sprintf(cbuff,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
-    cdc_send_console(cbuff);
+    cdc_printf_( ITF_CONSOLE,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
   }
   cdc_send_console((char*)"\n\r\r");
+  cdc_flush_console();
 }
 
 #ifdef USE_TIME_MODULE
@@ -205,22 +205,16 @@ void dump_time(void)
   int i;
   cdc_send_console((char*)"Time Module registers\n\r=====================================\n\r");
   for(i=0; i<2; i++) {
-    sprintf(cbuff,"Reg %c:\n\r", i==0?'A':'B');
-    cdc_send_console(cbuff);
-    sprintf(cbuff,"  Clock:   %014llx (56)\n\r", mTime.reg[i].clock);
-    cdc_send_console(cbuff);
-    sprintf(cbuff,"  Alarm:   %014llx (56)\n\r", mTime.reg[i].alarm);
-    cdc_send_console(cbuff);
-    sprintf(cbuff,"  Scratch: %014llx (56)\n\r", mTime.reg[i].scratch);
-    cdc_send_console(cbuff);
+    cdc_printf_( ITF_CONSOLE,"Reg %c:\n\r", i==0?'A':'B');
+    cdc_printf_( ITF_CONSOLE,"  Clock:   %014llx (56)\n\r", mTime.reg[i].clock);
+    cdc_printf_( ITF_CONSOLE,"  Alarm:   %014llx (56)\n\r", mTime.reg[i].alarm);
+    cdc_printf_( ITF_CONSOLE,"  Scratch: %014llx (56)\n\r", mTime.reg[i].scratch);
   }
-  sprintf(cbuff,"\n\r  Interval: %05X  (20)\n\r", mTime.interval);
-  cdc_send_console(cbuff);
-  sprintf(cbuff,"  Accuracy: %05X  (13)\n\r", mTime.accuracy);
-  cdc_send_console(cbuff);
-  sprintf(cbuff,"  Status:   %05X  (20)\n\r", mTime.status);
-  cdc_send_console(cbuff);
+  cdc_printf_( ITF_CONSOLE,"\n\r  Interval: %05X  (20)\n\r", mTime.interval);
+  cdc_printf_( ITF_CONSOLE,"  Accuracy: %05X  (13)\n\r", mTime.accuracy);
+  cdc_printf_( ITF_CONSOLE,"  Status:   %05X  (20)\n\r", mTime.status);
   cdc_send_console((char*)"\n\r\r");
+  cdc_flush_console();
 }
 #endif//USE_TIME_MODULE
 
@@ -276,10 +270,12 @@ void dump_xmem(void)
   }
   cdc_send_console((char*)"\n\r");
 #endif
+  cdc_flush_console();
 }
 void clr_xmem(void)
 {
   cdc_send_console((char*)"Clear XMemory\n\r");
+  cdc_flush_console();
   memset((void*)xmem.mem,0,xmem.size());
   xmem.saveMem();
 }
@@ -290,7 +286,6 @@ void rp2040_bootsel()
   cdc_send_console((char*)"\n\r RESETTING THE RP2040-TUP to BOOTSEL mode!!\n\r");
   cdc_flush_console();
   sleep_ms(1000);
-
   // reboots the RP2040, uses the standard LED for activity monitoring
   reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
@@ -305,27 +300,37 @@ void quit_log()
 
 void info(void)
 {
-  sprintf(cbuff, "Flash offset: 0x%X\r\n", FLASH_TARGET_OFFSET);
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "XIP_BASE:     0x%X\r\n", XIP_BASE);
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "Sector size:  0x%X (%d)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "Page size:    0x%X (%d)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "%d bytes total heap\r\n", getTotalHeap());
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "%d bytes free heap\r\n", getFreeHeap());
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "Trace element: %d bytes\r\n", sizeof(Bus_t));
-  cdc_send_console(cbuff);
-  sprintf(cbuff, "Trace buffer: %d bytes\r\n", sizeof(Bus_t)*NUM_BUS_T);
-  cdc_send_console(cbuff);
+  cdc_printf_( ITF_CONSOLE, "\r\nSystem information\r\n=========================\r\n");
+  cdc_printf_( ITF_CONSOLE, "Flash offset:  0x%X\r\n", FLASH_TARGET_OFFSET);
+  cdc_printf_( ITF_CONSOLE, "XIP_BASE:      0x%X\r\n", XIP_BASE);
+  cdc_printf_( ITF_CONSOLE, "Sector size:   %6d (0x%X)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+  cdc_printf_( ITF_CONSOLE, "Page size:     %6d (0x%X)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
+  cdc_printf_( ITF_CONSOLE, "Total heap:    %6d bytes \r\n", getTotalHeap());
+  cdc_printf_( ITF_CONSOLE, "Free heap:     %6d bytes\r\n", getFreeHeap());
+  cdc_printf_( ITF_CONSOLE, "Trace element: %6d bytes\r\n", sizeof(Bus_t));
+  cdc_printf_( ITF_CONSOLE, "Trace buffer:  %6d bytes\r\n", sizeof(Bus_t)*NUM_BUS_T);
+  cdc_printf_( ITF_CONSOLE, "\r\nHP41 information\r\n-------------------------\r\n");
+#ifdef USE_XF_MODULE
+  cdc_printf_( ITF_CONSOLE, "XMemory:       %6d bytes (%d registers)\r\n",
+                  sizeof(uint64_t)*(XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE),
+                  XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE);
+#endif
+#ifdef USE_QUAD_MODULE
+  cdc_printf_( ITF_CONSOLE, "Quad Memory:   %6d bytes (%d registers)\r\n",
+                  sizeof(uint64_t)*(MEM_MOD_SIZE),
+                  MEM_MOD_SIZE);
+#endif
+
+  cdc_flush_console();
 }
 
 void tag(void) {
-  cdc_printf_(ITF_TRACE, "\n\r###  TAG ###\n\r\n\r");
+  static unsigned int nTag = 0;
+  nTag++;
+  cdc_printf_(ITF_TRACE, "\n\r###  TAG %d ###\n\r\n\r", nTag);
   cdc_flush(ITF_TRACE);
+  cdc_printf_(ITF_CONSOLE, "###  TAG %d ###\n\r", nTag);
+  cdc_flush(ITF_CONSOLE);
 }
 
 extern void reset_bus_buffer(void);
@@ -364,14 +369,12 @@ const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
 
 void serial_help(void)
 {
-  int n = sprintf(cbuff,"\n\rCmd | Description");
-  n += sprintf(cbuff+n,"\n\r----+-----------------");
-  cdc_send_console(cbuff);
+  cdc_printf_( ITF_CONSOLE,"\n\rCmd | Description\n\r----+------------------------");
   for (int i = 0; i < helpSize; i++) {
-    sprintf(cbuff,"\n\r  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
-    cdc_send_console(cbuff);
+    cdc_printf_( ITF_CONSOLE,"\n\r  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
   }
-  cdc_send_console((char*)"\n\r----+-----------------\n\r");
+  cdc_printf_( ITF_CONSOLE, (char*)"\n\r====+========================\n\r");
+  cdc_flush_console();
 }
 
 int getHexKey(int ky)
@@ -386,6 +389,14 @@ int getHexKey(int ky)
   return x; // Value of hex or -1
 }
 
+int send2console(const char* dispBuf, bool bClear = false)
+{
+  int n = cdc_send_console((char*)dispBuf);
+  if( bClear )
+    n += cdc_send_console((char*)"              \n\r");
+  return n;
+}
+
 extern bool bReady;
 void serial_loop(void)
 {
@@ -393,6 +404,7 @@ void serial_loop(void)
 //  if( key != PICO_ERROR_TIMEOUT ) {
 
   int key = cdc_read_byte(ITF_CONSOLE);
+  int conChars = 0;
 
   if( key != -1 ) {
     {
@@ -411,8 +423,8 @@ void serial_loop(void)
       if( key == 0x1b ) { // ESC - abort any key sequence ...
         state = ST_NONE;
         nBrk = sBrk = 0;
-        cdc_send_console((char*)"\n\rAbort!\n\r");
-      } else {
+        conChars += send2console("\n\rAbort!\n\r");
+     } else {
         // Input of hex-digit ... ?
         int x = getHexKey(key);
         if( x >= 0 ) {
@@ -425,8 +437,7 @@ void serial_loop(void)
             } else {
               sprintf(cbuff,"\rNo image at page #%X!!", x);
             }
-            cdc_send_console(cbuff);
-            cdc_send_console((char*)"              \n\r");  // Clean previous content on page ...
+            conChars += send2console(cbuff, true);  // Clean previous content on page ...
             state = ST_NONE;
             break;
           case ST_PLUG:
@@ -436,8 +447,7 @@ void serial_loop(void)
             } else {
               sprintf(cbuff,"\rNo image at page #%X!!", x);
             }
-            cdc_send_console(cbuff);
-            cdc_send_console((char*)"              \n\r");  // Clean previous content on page ...
+            conChars += send2console(cbuff, true);  // Clean previous content on page ...
             state = ST_NONE;
             break;
           case ST_BRK:
@@ -445,7 +455,7 @@ void serial_loop(void)
             sBrk |= x;
             nBrk++;
             sprintf(cbuff,"%X", x);
-            cdc_send_console(cbuff);
+            conChars += send2console(cbuff);
             if( nBrk > 4 ) {
               switch(brk_mode) {
               case BRK_START:
@@ -456,12 +466,12 @@ void serial_loop(void)
                 sprintf(cbuff,"\rEnd breakpoint @ %04X\n\r", sBrk);
                 brk.stopBrk(sBrk);
                 break;
-              case BRK_CLR:
+              case BRK_NONE:
                 sprintf(cbuff,"\rClear breakpoint @ %04X\n\r", sBrk);
                 brk.clrBrk(sBrk);
                 break;
               }
-              cdc_send_console(cbuff);
+              conChars += send2console(cbuff);
               brk_mode = BRK_NONE;
               sBrk = nBrk = 0;
               state = ST_NONE;
@@ -488,4 +498,7 @@ void serial_loop(void)
     //stdio_flush();
 //    sprintf(cbuff," \b");
   }
+  // Remember to update the console!
+  if( conChars )
+    cdc_flush_console();
 }

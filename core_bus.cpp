@@ -41,6 +41,10 @@ CXFM xmem;
 static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
 #endif
 
+#ifdef USE_QUAD_MODULE
+CMem ram;
+static volatile uint64_t __ram[MEM_MOD_SIZE];
+#endif
 
 uint32_t getTotalHeap(void)
 {
@@ -480,8 +484,6 @@ bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
-char cpuXbuf[256];
-int nCpuX = 0;
 
 extern void dispOverflow(bool bOvf);
 
@@ -752,8 +754,12 @@ void core1_main_3(void)
           ramAddr = (ramad == BLINKY_ADDR) ? BLINKY_ADDR+1 : (ramad&0x0F)+1;
           ramDev = BLINKY_DEV;
         } else {
+          if( ramad >= MEM_MOD_START && ramad < MEM_MOD_END ) {
+            ramAddr = ramad;
+            ramDev = QUAD_DEV;
+          }
           // ... else it might be XMemory ...
-          if( (ramAddr = getXmemAddr(ramad)) )  // Address = [1..XF_END+1]
+          else if( (ramAddr = getXmemAddr(ramad)) )  // Address = [1..XF_END+1]
             ramDev = XMEM_DEV;
         }
       }
@@ -816,9 +822,53 @@ void core1_main_3(void)
       // Extract register/address information from the instruction ...
       r = (cmd >> 6) & 0x0F;
       // Save info about sync in logged data ..
-      if( bIsSync )
+      if( bIsSync ) {
         pBus->cmd |= CMD_SYNC;
-
+        switch( cmd ) {
+        case INST_SETHEX:
+          isBase = ARITHM_HEX;
+          cmd = 0;
+          break;
+        case INST_SETDEC:
+          isBase = ARITHM_DEC;
+          cmd = 0;
+          break;
+        case INST_RAM_SLCT:
+          // Fetch selected RAM in the next run ...
+          bSelRam = true;
+          // ... and reset any chip previously enabled ...
+          perph = 0;
+          cmd = 0;
+          break;
+        case INST_PRPH_SLCT:
+          // Fetch selected peripheral from DATA in the next run ...
+          bSelPa = true;
+          blinky.select(false);
+          cmd = 0;
+          break;
+        case INST_SEL_PRT:
+          // Blinky Printer is selected
+          // Handle NPIC commands in next cykle
+          blinky.select(true);
+          bPrinter = true;
+          cmd = 0;
+          break;
+        case INST_SEL_TINY:
+          // Tiny41 special instructions
+          // Handle NPIC commands in next cykle
+          bTiny = true;
+          cmd = 0;
+          break;
+        case INST_ENBANK1:
+        case INST_ENBANK2:
+        case INST_ENBANK3:
+        case INST_ENBANK4:
+            // Switch bank (if any) ...
+            mp->bank(cmd);
+          cmd = 0;
+          break;
+        }
+      }
       // Remember last queue write pointer ...
       last_data_wr = data_wr;
       break;
@@ -849,6 +899,11 @@ void core1_main_3(void)
         __mem[xmem.bwr-1] = data56;
         xmem.bwr = 0;
 #endif
+#ifdef USE_QUAD_MODULE
+      } else if( ram.bwr ) { // Check for pending writes to Memory Module
+        __ram[ram.bwr-MEM_MOD_START] = data56;
+        ram.bwr = 0;
+#endif
 #ifdef USE_TIME_MODULE
       } else if( mTime.bwr ) { // Check for pending writes to Time Module
         mTime.write(mTime.bwr-1, data56);
@@ -857,51 +912,16 @@ void core1_main_3(void)
       }
 
       if( bIsSync ) {
-        switch( cmd ) {
-        case INST_SETHEX:
-          isBase = ARITHM_HEX;
-          break;
-        case INST_SETDEC:
-          isBase = ARITHM_DEC;
-          break;
-        case INST_RAM_SLCT:
-          // Fetch selected RAM in the next run ...
-          bSelRam = true;
-          // ... and reset any chip previously enabled ...
-          perph = 0;
-          break;
-        case INST_PRPH_SLCT:
-          // Fetch selected peripheral from DATA in the next run ...
-          bSelPa = true;
-          blinky.select(false);
-          break;
-        case INST_SEL_PRT:
-          // Blinky Printer is selected
-          // Handle NPIC commands in next cykle
-          blinky.select(true);
-          bPrinter = true;
-          break;
-        case INST_SEL_TINY:
-          // Tiny41 special instructions
-          // Handle NPIC commands in next cykle
-          bTiny = true;
-          break;
-        case INST_ENBANK1:
-        case INST_ENBANK2:
-        case INST_ENBANK3:
-        case INST_ENBANK4:
-            // Switch bank (if any) ...
-            mp->bank(cmd);
-          break;
-        default:
+        if( cmd ) {
           // If perph == 0 then RAM is accessible
           // Handle any device in the normal RAM address space
           // - Memory module (not done yet)
           // - XMemory
           // - Blinky RAM
           if( !perph ) {
-            // Look for read/write towards the Blinky RAM
-            if( ramDev == BLINKY_DEV ) {
+            switch( ramDev ) {
+            case BLINKY_DEV:
+              // Look for read/write towards the Blinky RAM
               // Accessing RAM 0x20-0x2F
               if( cmd == INST_WDATA ) {
                 // Note! A write to BLINKY_ADDR (0x20) should be treated special
@@ -916,10 +936,10 @@ void core1_main_3(void)
                 if( blinky.flags() & BLINKY_RAM_ENABLE)
                   blinky.bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
               }
-            }
+              break;
 #ifdef USE_XF_MODULE
-            // Handle emulated XMemory
-            else if( ramDev == XMEM_DEV ) {
+            case XMEM_DEV:
+              // Handle emulated XMemory
               // X-Function module
               if( cmd == INST_WDATA ) {
                 xmem.bwr = ramAddr;
@@ -930,25 +950,27 @@ void core1_main_3(void)
                 ramad = (ramad & 0x3F0) | r;
                 xmem.bwr = getXmemAddr(ramad);
               }
-            }
+              break;
 #endif
 #ifdef USE_QUAD_MODULE
             // Handle emulated QUAD memory module (for HP41C)
             // TBD - Is there a way to detect RAM?
-            else if( ramAddr ) {
-              // QUAD RAM module
-              if( cmd == INST_WDATA ) {
-                ram.bwr = ramAddr;
-              } else if( cmd6 == INST_READ_DATA ) {
-                DATA_OUTPUT(__ram[ramAddr-1]);
-              } else if( cmd6 == INST_WRITE_DATA ) {
-                // Update ram select pointer
-                ramad = (ramad & 0x3F0) | r;
-                ramAddr = getRamAddr(ramad);
-                ram.bwr = ramAddr;
-              }
-            }
+            case QUAD_DEV:
+//              if( ramAddr >= MEM_MOD_START && ramAddr < MEM_MOD_END ) {
+                // QUAD RAM module
+                if( cmd == INST_WDATA ) {
+                  ram.bwr = ramAddr;
+                } else if( cmd6 == INST_READ_DATA ) {
+                  DATA_OUTPUT(__ram[ramAddr-MEM_MOD_START]);
+                } else if( cmd6 == INST_WRITE_DATA ) {
+                  // Update ram select pointer
+                  ramad = (ramad & 0x3F0) | r;
+                  ram.bwr = ramad;
+                }
+//              }
+              break;
 #endif
+            } // End switch RAM-device
           } else {
             // A peripherial is selected ...
             switch( perph ) {
@@ -1303,7 +1325,7 @@ void dump_dregs(void)
 
 void updateDispReg(uint64_t data, uint8_t r)
 {
-  Inst_t  *inst = &inst50cmd[r];
+  const Inst_t  *inst = &inst50cmd[r];
 
   uint64_t *ra = (inst->reg & REG_A) ? &dreg_a : NULL;
   uint64_t *rb = (inst->reg & REG_B) ? &dreg_b : NULL;
@@ -1342,7 +1364,7 @@ void updateDispReg(uint64_t data, uint8_t r)
 
 void rotateDispReg(uint8_t r)
 {
-  Inst_t  *inst = &inst70cmd[r];
+  const Inst_t  *inst = &inst70cmd[r];
 
   uint64_t *ra = (inst->reg & REG_A) ? &dreg_a : NULL;
   uint64_t *rb = (inst->reg & REG_B) ? &dreg_b : NULL;
@@ -1370,45 +1392,13 @@ void rotateDispReg(uint8_t r)
 
 CPeripherial peripheral;
 
-/*
-int peripheral_ce = 0;
-void setPeripheral(int pa)
-{
-  switch (pa) {
-  case DISP_ADDR:
-  case WAND_ADDR:
-  case TIMR_ADDR:
-  case CRDR_ADDR:
-    peripheral_ce = pa;
-    break;
-  default:
-    peripheral_ce = NONE_ADDR;
-  }
-}
-int selectedPeripheral(void)
-{
-  return peripheral_ce;
-}
-void printPeripheral(void)
-{
-  switch (selectedPeripheral()) {
-  case DISP_ADDR:
-  case WAND_ADDR:
-  case TIMR_ADDR:
-  case CRDR_ADDR:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%c ", "TCDW"[selectedPeripheral() - TIMR_ADDR]);
-    break;
-  default:
-    nCpu2 += sprintf(cpu2buf + nCpu2, "  ");
-  }
-}
-*/
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // This function is passed all of the traffic on the bus. It can do
 // various things with that.
 //
+
+const char arithMode[] = " dx?";
 
 // Handle bus-trace ...
 void handle_bus(volatile Bus_t *pBus)
@@ -1416,10 +1406,11 @@ void handle_bus(volatile Bus_t *pBus)
   static int oCnt = -1;
   static int pending_data_inst = 0;
   static int oAddr = ADDR_MASK;
+  static char mode = arithMode[ARITHM_UKN];   // Dec or Hex mode
 
   int addr = pBus->addr;
   int inst = pBus->cmd & INST_MASK;
-  int base = pBus->cmd & ARITHM_MSK;
+  int base = (pBus->cmd & ARITHM_MSK) >> ARITHM_SHFT;
   int sync = (pBus->cmd & CMD_SYNC) ? 1 : 0;
   int fi   = pBus->fi;
   int cnt  = pBus->cnt;
@@ -1444,16 +1435,6 @@ void handle_bus(volatile Bus_t *pBus)
     }
   }
 
-#define CPUX_PRT
-#ifdef CPUX_PRT
-  // Any printouts from the other CPU ... ?
-  if (cpuXbuf[0]) {
-    printf("\nCPUX[%s]", cpuXbuf);
-    cpuXbuf[0] = 0;
-  }
-#endif
-
-
 #if 1
 #ifdef QUEUE_STATUS
   int remaining = (data_wr - data_rd) + (-((int) (data_wr <= data_rd)) & NUM_BUS_MASK);
@@ -1475,12 +1456,12 @@ void handle_bus(volatile Bus_t *pBus)
 
   nCpu2 += peripheral.print(cpu2buf+nCpu2);
 
-  uint8_t q = (addr >> 10) & 0b1111;
+  uint8_t quad = (addr >> 10) & 0b1111;
 #ifdef TRACE_ISA
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X (Q%2d:%03X) %03X",
-            data56, isa, addr, q, addr & 0x3FF, inst);
+            data56, isa, addr, quad, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %014llX | %04X           %03X",
@@ -1488,24 +1469,26 @@ void handle_bus(volatile Bus_t *pBus)
   }
 #else
 #if 1
+  mode = arithMode[base];
   // Show current artihmetic mode
-  char mode = '?';
-  if( base == ARITHM_DEC )  mode = 'd';
-  if( base == ARITHM_HEX )  mode = 'x';
+//  if( base == ARITHM_DEC )  mode = 'd';
+//  if( base == ARITHM_HEX )  mode = 'x';
+
+  nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c%c %04X ",
+            cnt, fi, data56, sync ? '*':' ', mode, addr);
+
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c%c %04X (Q%2d:%03X) %03X",
-            cnt, fi, data56, sync ? '*':' ', mode, addr, q, addr & 0x3FF, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "(Q%2d:%03X) %03X", quad, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
-    nCpu2 += sprintf(cpu2buf + nCpu2, "%04X>%04X|%014llX %c%c %04X           %03X",
-            cnt, fi, data56, sync ? '*':' ', mode, addr, inst);
+    nCpu2 += sprintf(cpu2buf + nCpu2, "          %03X", inst);
   }
 #else
   if( PAGE(addr) < 3 ) {
     // Dump information about which quad rom (easy find in VASM)
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X (Q%2d:%03X) %03X",
-            data56, fi, sync ? '*':' ', addr, q, addr & 0x3FF, inst);
+            data56, fi, sync ? '*':' ', addr, quad, addr & 0x3FF, inst);
   } else {
     // No need in an external rom
     nCpu2 += sprintf(cpu2buf + nCpu2, " %014llX %X %c| %04X           %03X",
@@ -1652,14 +1635,14 @@ void handle_bus(volatile Bus_t *pBus)
       if (inst == INST_WRITE_ANNUNCIATORS)
         pending_data_inst = inst;
       else {
-        switch (inst & 000077) {
-        case 000050:
+        switch (inst & INST_RW_MASK) {
+        case INST_WRITE_DATA:
 #if CF_DBG_DISP_INST
           printf("\n\r%s", inst50disp[inst >> 6]);
 #endif
           pending_data_inst = inst;
           break;
-        case 000070:
+        case INST_READ_DATA:
 #if CF_DBG_DISP_INST
           printf("\n\r%s", inst70disp[inst >> 6]);
 #endif

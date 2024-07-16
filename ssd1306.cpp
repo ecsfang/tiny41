@@ -29,10 +29,10 @@ void SSD1306_send_cmd(uint8_t cmd) {
 }
 
 void SSD1306_send_cmd_list(uint8_t *buf, int num) {
-    printf(" -- Send %d bytes to I2C ...\n", num);
+    //printf(" -- Send %d bytes to I2C ...\n", num);
     for (int i=0;i<num;i++)
         SSD1306_send_cmd(buf[i]);
-    printf(" -- Done!\n");
+    //printf(" -- Done!\n");
 }
 
 void SSD1306_send_X_cmd_list(uint8_t *buf, int num) {

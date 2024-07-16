@@ -57,4 +57,14 @@ public:
 
 void initXMem(int xpg);
 
+#define MEM_MOD_START 0x100
+#define MEM_MOD_END   0x200
+#define MEM_MOD_SIZE  (MEM_MOD_END-MEM_MOD_START)
+
+// Memory for Quad Memory module
+class CMem {
+public:
+  int bwr;
+};
+
 #endif//__XFMEM_H__

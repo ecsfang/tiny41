@@ -13,6 +13,9 @@
 //#include <cdc_device.h>
 #include "usb/cdc_helper.h"
 
+extern char cbuff[CDC_PRINT_BUFFER_SIZE];
+extern int send2console(const char* dispBuf, bool bClear);
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // Overclock as needed
@@ -88,6 +91,7 @@ void dispOverflow(bool bOvf)
     bRend |= REND_STATUS;
 }
 
+// Current Wand state
 typedef enum {
     W_IDLE,
     W_DATA,
@@ -96,7 +100,6 @@ typedef enum {
 WState_e wState = W_IDLE;
 
 char cc[32];
-char ccb[128];
 int wn = 0;
 
 void log(const char *s)
@@ -133,6 +136,11 @@ int main()
     while( cdc_read_byte(ITF_CONSOLE) != -1 )
         ;
 
+ //   serial_loop();
+
+//    logC("Hello world!\r\n");
+    //logC("Hello world - again!\r\n");
+
 //    cdc_send_console((char*)"\n\r*************");
 //    cdc_send_console((char*)"\n\r*  Tiny 41  *");
 //    cdc_send_console((char*)"\n\r*************");
@@ -147,6 +155,7 @@ int main()
 #ifdef USE_XFUNC
     initXMem(0);
 #endif
+//    serial_loop();
 
     /* Overclock */
     log("Overclock ...");
@@ -169,9 +178,14 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
+    //sleep_ms(1000);
     // run through the complete initialization process
     log(" - init OLED display");
     SSD1306_init();
+
+//    sleep_ms(5000);
+
+//    logC("Hello world - again!");
 
     logC("Launch CORE 1 ...");
     multicore_launch_core1(core1_main_3);
@@ -229,7 +243,9 @@ int main()
                         brk.stopBrk(a); \
                         brk.setBrk(c);\
                        } while (0)
-
+#if 1
+    // Clear all breakpoints ...
+    brk.clrAllBrk();
     // Reset keyboard (RST10)
     IGNORE_LOOP(0x00A0);
     // Ignore key at DISOFF
@@ -291,7 +307,10 @@ int main()
     IGNORE_FUNC(0x42D8, 0x42E5);
     IGNORE_FUNC(0x4050, 0x406B);
     IGNORE_FUNC(0x4C55, 0x4C71);
-
+#else
+    // Just testing ...
+    IGNORE_LOOP(0x5117);
+#endif
     bool bErr = false;
 
 //    send_to_printer((char *)"Hello from Tiny2040!\n");
@@ -305,9 +324,7 @@ int main()
 
     int pwo = 0;
     int w;
-    bReady = true;
-    while (1)
-    {
+    while (1) {
         // Process the USB interfaces
         tud_task();
         process_bus();
@@ -334,8 +351,8 @@ int main()
             switch( wState ) {
             case W_IDLE:    // Got length
                 cc[0] = w;
-                sprintf(ccb, "Got len: %d\n\r", cc[0]);
-                cdc_send_console(ccb);
+                sprintf(cbuff, "Got len: %d\n\r", cc[0]);
+                cdc_send_console(cbuff);
                 wState = W_DATA;
                 wn = 0;
                 break;
@@ -347,11 +364,11 @@ int main()
             case W_DONE:
                 cdc_send_console((char*)"Got barcode: ");
                 {
-                    int n = sprintf(ccb,"[");
+                    int n = sprintf(cbuff,"[");
                     for( int i=0; i<cc[0]; i++ )
-                        n += sprintf(ccb+n,"%02X.", cc[i+1]);
-                    sprintf(ccb+n-1,"]\n\r");
-                    cdc_send_console(ccb);
+                        n += sprintf(cbuff+n,"%02X.", cc[i+1]);
+                    sprintf(cbuff+n-1,"]\n\r");
+                    cdc_send_console(cbuff);
                 }
                 cdc_send_string(ITF_WAND, (char*)"OK", 2);
                 cdc_flush(ITF_WAND);
@@ -362,24 +379,29 @@ int main()
         }
 
 #ifdef DEBUG_ANALYZER
-    {
-        extern volatile Mode_e cpuMode;
-        static Mode_e oldMode = NO_MODE;
-        
-        char mm[8];
-        if( oldMode != cpuMode ) {
-            switch( cpuMode ) {
-            case NO_MODE:     strcpy(mm, "---    "); break;
-            case RUNNING:     strcpy(mm, "Running"); break;
-            case LIGHT_SLEEP: strcpy(mm, "Light  "); break;
-            case DEEP_SLEEP:  strcpy(mm, "Deep   "); break;
+        {
+            extern volatile Mode_e cpuMode;
+            static Mode_e oldMode = NO_MODE;
+
+            char mm[8];
+            if( oldMode != cpuMode ) {
+                switch( cpuMode ) {
+                case NO_MODE:     strcpy(mm, "---    "); break;
+                case RUNNING:     strcpy(mm, "Running"); break;
+                case LIGHT_SLEEP: strcpy(mm, "Light  "); break;
+                case DEEP_SLEEP:  strcpy(mm, "Deep   "); break;
+                }
+                WriteString(disp41.buf(), 5, STATUS2_ROW, mm);
+                disp41.rend(REND_STATUS);
+                oldMode = cpuMode;
             }
-            WriteString(disp41.buf(), 5, STATUS2_ROW, mm);
-            disp41.rend(REND_STATUS);
-            oldMode = cpuMode;
-        }
-    }   
+        }   
 #endif // DEBUG_ANALYZER
+        if( !bReady ) {
+            cdc_flush(ITF_CONSOLE);
+            cdc_flush(ITF_TRACE);
+        }
+        bReady = true;
         // Need to update the display ... ?
         disp41.render();
     }

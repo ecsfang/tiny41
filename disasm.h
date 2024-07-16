@@ -40,7 +40,6 @@ typedef struct {
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 
-extern Inst_t inst50cmd[16];
-extern Inst_t inst70cmd[16];
+#include "disstr.h"
 
 #endif
