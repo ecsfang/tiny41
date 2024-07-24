@@ -37,7 +37,7 @@ public:
     pt = PT_A;
     memset((void*)reg, 0xFF, sizeof(CRegs_t)*2);
     interval = 0x111111;
-    accuracy = 0x222222;
+    accuracy = 0x2222;
     status   = PUS;
     bwr = 0;
   }
@@ -47,32 +47,32 @@ public:
   volatile static uint16_t  status;    // 20 bits
   int       pt;   // Current pointer
   int       bwr;  // Delayed write
-  inline void write(int r, uint64_t data) {
-    switch( r ) {
+  inline void write(uint64_t *data) {
+    switch( bwr-1 ) {
     case 000: // WRTIME
-      reg[pt].clock = data;
+      reg[pt].clock = *data;
       tm = time_us_64();
       break;
     case 001: // WDTIME
-      reg[pt].clock = data;
+      reg[pt].clock = *data;
       tm = time_us_64();
       break;
     case 002: // WRALM
-      reg[pt].alarm = data;
+      reg[pt].alarm = *data;
       break;
     case 003: // WRSTS
       if( pt == PT_A ) {
         // Only first 6 bits can be cleard, rest untuched ...
-        status &= data | 0x1FC0;
+        status &= *data | 0x1FC0;
       } else {
-        accuracy = (data >> 4) & 0x1FFF;
+        accuracy = (*data >> 4) & 0x1FFF;
       }
       break;
     case 004: // WRSCR
-      reg[pt].scratch = data;
+      reg[pt].scratch = *data;
       break;
     case 005: // WSINT
-      interval = data & 0xFFFFF;
+      interval = *data & 0xFFFFF;
       break;
     case 007: // Stop interval timer
       status &= ~ITEN;
@@ -104,6 +104,7 @@ public:
       pt=PT_A;
       break;
     }
+    bwr = 0;
   }
   inline uint64_t read(int r) {
     switch( r ) {

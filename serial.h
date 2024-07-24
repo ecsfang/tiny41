@@ -7,5 +7,6 @@ extern volatile uint8_t bTrace;
 void toggle_trace(void);
 void toggle_disasm(void);
 void list_modules(void);
+int send2console(const char* dispBuf, bool bClear);
 
 #endif//__SERIAL_H__

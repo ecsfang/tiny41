@@ -1,3 +1,6 @@
+#ifndef __TINY41_H__
+#define __TINY41_H__
+
 #define CF_DUMP_DBG_DREGS 0
 #define CF_DISPLAY_LCD 1
 #define CF_DISPLAY_OLED 0
@@ -12,12 +15,17 @@
 #define USE_40190
 #define MEASURE_TIME
 #define LOG_FI          // If true - add FI flags to output log
-//#define ET_11967        // Emulate FI-wired service module
+#define ET_11967        // Emulate FI-wired service module
 
-//#define USE_TIME_MODULE
+#define USE_TIME_MODULE
 #define USE_XF_MODULE
 //#define DISABLE_DISPRINT
-#define USE_QUAD_MODULE
+//#define USE_QUAD_MODULE
+#ifdef USE_XF_MODULE
+#define USE_XFUNC       // XFunction module
+#define USE_XMEM1       // First XMemory module
+#define USE_XMEM2       // Second XMemory module
+#endif
 
 #ifdef USE_40190
 #define ENABLE_OE   1
@@ -109,9 +117,10 @@
 #define LAST_CYCLE (BUS_CYCLES-1)
 
 extern void UpdateLCD(char *, bool *, bool);
+extern void printLCD(const char *txt, int x, int row);
 extern void UpdateAnnun(uint16_t ann, bool nl);
 
-enum {
+enum ETrace {
     TRACE_NONE =    0b000, // No tracing
     TRACE_ON =      0b001, // Tracing enabled
     TRACE_BRK =     0b010, // Trace on (from breakpoint)
@@ -206,3 +215,5 @@ public:
     }
     uint8_t *buf() { return m_buf; }
 };
+
+#endif//__TINY41_H__

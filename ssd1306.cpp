@@ -52,9 +52,10 @@ void SSD1306_send_buf(uint8_t buf[], int buflen) {
     uint8_t *temp_buf = &buf[-1];
 
     uint8_t old = temp_buf[0];
+    // Add command as first byte ...
     temp_buf[0] = 0x40;
-
     i2c_write_blocking(i2c_default, SSD1306_I2C_ADDR, temp_buf, buflen + 1, false);
+    // Restore first byte ...
     temp_buf[0] = old;
 }
 
@@ -229,7 +230,7 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     if (reversed[0] == 0) 
         FillReversedCache();
 
-    if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
+    if (x > (SSD1306_WIDTH - 8) || y > (SSD1306_HEIGHT - 8))
         return;
 
     // For the moment, only write on Y row boundaries (every 8 vertical pixels)
@@ -281,8 +282,8 @@ int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp) {
 }
 
 void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str) {
-    // Cull out any string off the screen
-    if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
+    // Cut out any string off the screen
+    if (x > (SSD1306_WIDTH - 8) || y > (SSD1306_HEIGHT - 8))
         return;
 
     while (*str) {

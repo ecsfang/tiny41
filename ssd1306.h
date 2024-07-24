@@ -1,3 +1,5 @@
+#ifndef __SSD1306_H__
+#define __SSD1306_H__
 #include "hardware/i2c.h"
 /* Example code to talk to an SSD1306-based OLED display
 
@@ -91,3 +93,4 @@ void render(uint8_t *buf, struct render_area *area);
 void WriteString(uint8_t *buf, int16_t x, int16_t y, char *str);
 int16_t Write41Char(uint8_t *buf, int16_t x, int16_t y, uint8_t ch, bool bp);
 void Write41String(uint8_t *buf, int16_t x, int16_t y, char *str, bool *pbp);
+#endif//__SSD1306_H__

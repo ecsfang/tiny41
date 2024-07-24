@@ -8,6 +8,7 @@
 #include "pico/multicore.h"
 #include "tiny41.h"
 #include "core_bus.h"
+#include "blinky.h"
 #include "disasm.h"
 #include "serial.h"
 #include <malloc.h>
@@ -35,16 +36,6 @@ volatile uint32_t  CTime::interval;  // 20 bits interval timer
 volatile uint16_t  CTime::accuracy;  // 13 bits
 volatile uint16_t  CTime::status;    // 20 bits
 #endif//USE_TIME_MODULE
-
-#ifdef USE_XF_MODULE
-CXFM xmem;
-static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
-#endif
-
-#ifdef USE_QUAD_MODULE
-CMem ram;
-static volatile uint64_t __ram[MEM_MOD_SIZE];
-#endif
 
 uint32_t getTotalHeap(void)
 {
@@ -174,13 +165,6 @@ extern const char *inst50disp[16];
 extern const char *inst70disp[16];
 #endif
 
-// Each port contains two 4k flash pages since 10 bits are stored (4k * uint16_t)
-// ROM is not packed in flash due to compatibility with ROM file format
-// And packed file would still be larger than 4k ...
-#define PAGEn(n,i) (FLASH_TARGET_OFFSET + (2 * n + i) * FLASH_SECTOR_SIZE)
-#define PAGE1(n) PAGEn(n,0)
-#define PAGE2(n) PAGEn(n,1)
-
 // Writing to flash can only be done page wise!
 int pageAdjust(int addr)
 {
@@ -270,60 +254,28 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
   // Point at the wanted flash image ...
   const uint8_t *fp = flashPointer(offs);
   memcpy(data, fp, size);
-  cdc_printf_(ITF_TRACE, " <-- Read flash @ %08X %d bytes\n\r", offs, size);
+  sprintf(cbuff, " <-- Read flash @ %08X %d bytes\n\r", offs, size);
+  cdc_send_string_and_flush(ITF_TRACE, cbuff);
 }
 
 // Save a ram image to flash (emulate Q-RAM)
 void saveRam(int port, int ovr = 0)
 {
+  int n = 0;
   if( port >= FIRST_PAGE && port < NR_PAGES ) {
     if (ovr || modules.isDirty(port)) {
       modules.clear(port);
       erasePort(port, false);
       writePort(port, modules.image(port,0));
-      cdc_printf_(ITF_TRACE, "Wrote RAM[%X] to flash\n\r", port);
+      n = sprintf(cbuff, "Wrote RAM[%X] to flash\n\r", port);
     }
   } else {
-      cdc_printf_(ITF_TRACE, "Invalid page! [%X]\n\r", port);
+      n = sprintf(cbuff, "Invalid page! [%X]\n\r", port);
   }
+  if( n )
+    cdc_send_string_and_flush(ITF_TRACE, cbuff);
 }
 
-#ifdef USE_XFUNC
-void saveXMem(int xpg)
-{
-  xpg += XF_PAGE;
-  // Save copy - clear dirty ...
-  uint8_t pg[FLASH_PAGE_SIZE];
-  xmem.saveMem();
-  erasePort(xpg);
-  // Save all XMemory ...
-  write8Port(xpg, (uint8_t*)xmem.mem, xmem.size());
-  // Save checksum too ...
-  int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
-  pg[0] = xmem.chkSum();
-  writeFlash(chkAddr, pg, FLASH_PAGE_SIZE);
-  printf(" -- Saved XMemory (%d bytes [%02X]) to flash!\n", xmem.size(), xmem.chkSum());
-}
-
-void initXMem(int xpg)
-{
-  xpg += XF_PAGE;
-  xmem.mem = __mem;
-  uint8_t chk = 0;
-  int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
-  readFlash(PAGE1(xpg), (uint8_t*)xmem.mem, xmem.size());
-  readFlash(chkAddr, &chk, 1);
-  printf(" -- Read XMemory (%d bytes [%02X]) from flash!\n", xmem.size(), chk);
-  // Save copy - clear dirty - check checksum ...
-  xmem.saveMem();
-  if( xmem.chkSum() != chk ) {
-    printf("XMem checksum failure: %02X != %02X!\n", chk, xmem.chkSum());
-    printf("ERROR: MEMORY LOST of XMemory!\n");
-    memset((void*)xmem.mem, 0, xmem.size());
-    xmem.saveMem();
-  }
-}
-#endif//USE_XFUNC
 
 // Swap 16-bit word (n - number of 16-bit words)
 void swapRam(uint16_t *dta, int n)
@@ -338,12 +290,14 @@ void qRam(int page)
   CModule *m = modules[page];
   if (m->isInserted()) {
     m->setRam();
-    printf("Add QRAM[%X] @ %04X - %04X\n", page, page*PAGE_SIZE, (page*PAGE_SIZE)|PAGE_MASK);
+    sprintf(cbuff, "Add QRAM[%X] @ %04X - %04X\n\r", page, page*PAGE_SIZE, (page*PAGE_SIZE)|PAGE_MASK);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
   }
 }
 
 void loadPage(int page, int bank = 0)
 {
+  int n;
   // Read flash image
   uint16_t *img = new uint16_t[PAGE_SIZE];
   if( !img )
@@ -363,22 +317,31 @@ void loadPage(int page, int bank = 0)
 #if 1
   // Verify loaded code
   if( nClr == PAGE_SIZE ) {
-    cdc_printf_(ITF_TRACE, "%04X -> Image is cleared!", page*PAGE_SIZE);
+    n = sprintf(cbuff, "%04X -> Image is cleared!", page*PAGE_SIZE);
   } else {
-    if( nErr ) cdc_printf_(ITF_TRACE, "%d errors in image 0x%X!\n\r", nErr, page);
-    cdc_printf_(ITF_TRACE, "%04X ->", page*PAGE_SIZE);
-    for(int i=0; i<8; i++)
-      cdc_printf_(ITF_TRACE, " %03X", img[0x000+i]);
-    cdc_printf_(ITF_TRACE, " ...", page*PAGE_SIZE+0xFF0);
-    for(int i=0; i<8; i++)
-      cdc_printf_(ITF_TRACE, " %03X", img[0xff8+i]);
+    if( nErr ) {
+      sprintf(cbuff, "%d errors in image 0x%X!\n\r", nErr, page);
+      cdc_send_string(ITF_TRACE, cbuff);
+    }
+    n = sprintf(cbuff, "%04X ->", page*PAGE_SIZE);
+    for(int i=0; i<8; i++) {
+      n += sprintf(cbuff+n, " %03X", img[0x000+i]);
+    }
+    cdc_send_string(ITF_TRACE, cbuff);
+    n = sprintf(cbuff, " ...", page*PAGE_SIZE+0xFF0);
+    for(int i=0; i<8; i++) {
+      n += sprintf(cbuff+n, " %03X", img[0xff8+i]);
+    }
   }
-  cdc_printf_(ITF_TRACE, "\n\r");
+  n += sprintf(cbuff+n, "\n\r");
+  cdc_send_string(ITF_TRACE, cbuff);
 #endif
   if( !nErr ) {
     modules.add(page, img, bank);
-    if( modules[page]->haveBank() )
-      cdc_printf_(ITF_TRACE, "HaveBank: %d\n\r", modules[page]->haveBank());
+    if( modules[page]->haveBank() ) {
+      sprintf(cbuff, "HaveBank: %d\n\r", modules[page]->haveBank());
+      cdc_send_string(ITF_TRACE, cbuff);
+    }
   } else
     delete[] img;
   cdc_flush(ITF_TRACE);
@@ -461,6 +424,7 @@ volatile int data_rd = 0;
 #define DATA_OUTPUT(x) do { output_data = 1; data56_out = x;} while(0)
 volatile uint64_t data56_out = 0;
 #ifdef ET_11967
+bool bET11967 = false;
 volatile uint64_t data2FI = 0;
 #endif
 
@@ -497,40 +461,6 @@ void reset_bus_buffer(void)
   }
 }
 
-bool isXmemAddr(uint16_t addr)
-{
-#if defined(USE_XFUNC)
-  if( (addr >= XMEM_XF_START && addr < XMEM_XF_END) )
-    return true;
-#if defined(USE_XMEM1) || defined(USE_XMEM2)
-  if( (addr >= XMEM_XM1_START && addr < XMEM_XM1_END) )
-    return true;
-#endif
-#if defined(USE_XMEM2)
-  if( (addr >= XMEM_XM2_START && addr < XMEM_XM2_END) )
-    return true;
-#endif
-#endif
-  return false;
-}
-
-// Return XMemAddress in range [1..MaxAddr+1]
-int getXmemAddr(uint16_t addr)
-{
-#if defined(USE_XFUNC)
-  if( (addr >= XMEM_XF_START && addr < XMEM_XF_END) )
-    return addr - XMEM_XF_START + 1;
-#if defined(USE_XMEM1) || defined(USE_XMEM2)
-  if( (addr >= XMEM_XM1_START && addr < XMEM_XM1_END) )
-    return addr - XMEM_XM1_START + XMEM_XM1_OFFS + 1;
-#endif
-#if defined(USE_XMEM2)
-  if( (addr >= XMEM_XM2_START && addr < XMEM_XM2_END) )
-    return addr - XMEM_XM2_START + XMEM_XM2_OFFS + 1;
-#endif
-#endif
-  return 0;
-}
 
 bool bT0Carry = false;
 
@@ -561,7 +491,7 @@ void core1_main_3(void)
   volatile Bus_t *pBus;         // Pointer into trace buffer
   static int last_data_wr;      // Keep track of trace overflow
   static uint16_t iCnt = 0;     // Cycle counter for trace
-  static RamDevice_e ramDev = RAM_DEV;
+  static RamDevice_e ramDev = NO_RAM_DEV;
   static uint32_t ramAddr = 0;
   static uint8_t r = 0;
   static uint16_t cmd = 0;
@@ -569,6 +499,7 @@ void core1_main_3(void)
   static bool bPWO = false;
   static bool bPullIsa = false;
   static uint16_t isBase = ARITHM_UKN;
+  static CRamDev *pRamDev = NULL;
 
   pBus = &bus[data_wr];
 
@@ -635,10 +566,11 @@ void core1_main_3(void)
       isa = data56 = 0LL;
       // Setup FI-signal for next round ...
 #ifdef ET_11967
-      gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
-      dataFI = 0;
-      for(int f=0; f<14; f++) {
-
+      if( bET11967 ) {
+        gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
+        dataFI = 0;
+        //for(int f=0; f<14; f++) {
+        //}
       }
 #else
       dataFI = getFI();
@@ -655,10 +587,11 @@ void core1_main_3(void)
     // Drive the FI carry flags for each nibble
     if( (bit_no & 0b11) == 0b11 ) {
 #ifdef ET_11967
-      gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
-#else
-      gpio_put(P_FI_OE, (dataFI>>fiShift) & 1);
+      if( bET11967 )
+        gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
+      else
 #endif
+        gpio_put(P_FI_OE, (dataFI>>fiShift) & 1);
       fiShift++;
     }
 
@@ -747,21 +680,31 @@ void core1_main_3(void)
         ramad = data56 & 0x3FF;
         bSelRam = false;
       }
-      ramDev = RAM_DEV;
+      ramDev = NO_RAM_DEV;
       if( !perph ) {
         // Check if Blinky RAM is being accessed ...
-        if( (ramad & 0x3F0) == BLINKY_ADDR ) {
-          ramAddr = (ramad == BLINKY_ADDR) ? BLINKY_ADDR+1 : (ramad&0x0F)+1;
-          ramDev = BLINKY_DEV;
-        } else {
-          if( ramad >= MEM_MOD_START && ramad < MEM_MOD_END ) {
-            ramAddr = ramad;
-            ramDev = QUAD_DEV;
-          }
-          // ... else it might be XMemory ...
-          else if( (ramAddr = getXmemAddr(ramad)) )  // Address = [1..XF_END+1]
-            ramDev = XMEM_DEV;
+        pRamDev = NULL;
+        if( blinky.isAddress(ramad) ) {
+          pRamDev = &blinky;
         }
+#ifdef USE_QUAD_MODULE
+        else if( ram.isAddress(ramad) ) {
+          pRamDev = &ram;
+        } else
+#endif
+#ifdef USE_XF_MODULE
+        // ... else it might be XMemory ...
+        else if( xmem.isAddress(ramad) ) {
+          pRamDev = &xmem;
+        }
+#endif
+      }
+      break;
+
+    case 11:
+      if( pRamDev ) {
+        ramAddr = pRamDev->getAddress(ramad);
+        ramDev = pRamDev->devID();
       }
       break;
 
@@ -882,32 +825,12 @@ void core1_main_3(void)
       output_data = 0;
       data56 &= MASK_56_BIT;
 
-
-      // Check for pending writes to Blinky
-      if( blinky.bwr ) {
-        // bwr is incremented to distinguish it from zero (0)
-        blinky.bwr--;
-        if( blinky.bwr == BLINKY_ADDR ) {
-          // This is a special DATA WRITE to reg 0x20
-          blinky.wrStatus((uint8_t)((data56 >> 48LL) & 0xFF));
-        } else {
-          blinky.write(blinky.bwr, data56, true);
-        }
-        blinky.bwr = 0;
-#ifdef USE_XF_MODULE
-      } else if( xmem.bwr ) { // Check for pending writes to XMemory
-        __mem[xmem.bwr-1] = data56;
-        xmem.bwr = 0;
-#endif
-#ifdef USE_QUAD_MODULE
-      } else if( ram.bwr ) { // Check for pending writes to Memory Module
-        __ram[ram.bwr-MEM_MOD_START] = data56;
-        ram.bwr = 0;
-#endif
+      // Check for any pending writes
+      if (pRamDev ) {
+	      pRamDev->write(&data56);
 #ifdef USE_TIME_MODULE
       } else if( mTime.bwr ) { // Check for pending writes to Time Module
-        mTime.write(mTime.bwr-1, data56);
-        mTime.bwr = 0;
+        mTime.write(&data56);
 #endif//USE_TIME_MODULE
       }
 
@@ -919,58 +842,17 @@ void core1_main_3(void)
           // - XMemory
           // - Blinky RAM
           if( !perph ) {
-            switch( ramDev ) {
-            case BLINKY_DEV:
-              // Look for read/write towards the Blinky RAM
-              // Accessing RAM 0x20-0x2F
+            if( ramDev != NO_RAM_DEV ) {
+              // Update any RAM device (QUAD, XMEM etc)
               if( cmd == INST_WDATA ) {
-                // Note! A write to BLINKY_ADDR (0x20) should be treated special
-                // Should be interpreted as a Write Status instruction
-                blinky.bwr = ramAddr; // (0x20 or 0x01-0x0F) + 1
+                pRamDev->delaydWrite(ramAddr);
               } else if( cmd6 == INST_READ_DATA ) {
-                //DATA_OUTPUT(r < 8 ? blinky.reg[r] : blinky.reg8[r]);
-                DATA_OUTPUT( blinky[r] );
+                DATA_OUTPUT(pRamDev->read(ramAddr,r));
               } else if( cmd6 == INST_WRITE_DATA ) {
                 // Update ram select pointer
-                ramad = BLINKY_ADDR | r;
-                if( blinky.flags() & BLINKY_RAM_ENABLE)
-                  blinky.bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
+                ramad = pRamDev->write(ramad, r);
               }
-              break;
-#ifdef USE_XF_MODULE
-            case XMEM_DEV:
-              // Handle emulated XMemory
-              // X-Function module
-              if( cmd == INST_WDATA ) {
-                xmem.bwr = ramAddr;
-              } else if( cmd6 == INST_READ_DATA ) {
-                DATA_OUTPUT(__mem[ramAddr-1]);
-              } else if( cmd6 == INST_WRITE_DATA ) {
-                // Update ram select pointer
-                ramad = (ramad & 0x3F0) | r;
-                xmem.bwr = getXmemAddr(ramad);
-              }
-              break;
-#endif
-#ifdef USE_QUAD_MODULE
-            // Handle emulated QUAD memory module (for HP41C)
-            // TBD - Is there a way to detect RAM?
-            case QUAD_DEV:
-//              if( ramAddr >= MEM_MOD_START && ramAddr < MEM_MOD_END ) {
-                // QUAD RAM module
-                if( cmd == INST_WDATA ) {
-                  ram.bwr = ramAddr;
-                } else if( cmd6 == INST_READ_DATA ) {
-                  DATA_OUTPUT(__ram[ramAddr-MEM_MOD_START]);
-                } else if( cmd6 == INST_WRITE_DATA ) {
-                  // Update ram select pointer
-                  ramad = (ramad & 0x3F0) | r;
-                  ram.bwr = ramad;
-                }
-//              }
-              break;
-#endif
-            } // End switch RAM-device
+            }
           } else {
             // A peripherial is selected ...
             switch( perph ) {
@@ -1000,7 +882,7 @@ void core1_main_3(void)
         if( bPrinter ) {
           switch(cmd & 0b110) {
             case NPIC_IR_PRT_WRITE:  // Write ...
-              blinky.write(r, data56);
+              blinky.write(r, &data56);
               break;
             case NPIC_IR_PRT_READ:  // Read ...
               DATA_OUTPUT(blinky[r]);
@@ -1053,8 +935,10 @@ void core1_main_3(void)
 #endif
 
 #ifdef ET_11967
-      // Copy C-register to the FI data line
-      data2FI = ~data56;
+      if( bET11967 ) {
+        // Copy C-register to the FI data line
+        data2FI = ~data56;
+      }
 #endif
 
       // Prepare logging data ...
@@ -1537,7 +1421,7 @@ void handle_bus(volatile Bus_t *pBus)
   if( IS_TRACE() ) {
     //printf("%s", cpu2buf);
     //cdc_printf_(ITF_TRACE, "%s", cpu2buf);
-    cdc_send_string(ITF_TRACE, cpu2buf, nCpu2);
+    cdc_send_string(ITF_TRACE, cpu2buf);
     //cdc_send_console(cpu2buf);
   }
 #endif

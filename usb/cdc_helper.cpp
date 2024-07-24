@@ -40,9 +40,16 @@ const char* __in_flash() ITF_str[] = {  "ITF_CONSOLE",
 
 // printf version for printing into the console
 // and flushes the buffer
-void cdc_printf_console(const char *format, ...) {
-
-    char buffer[CDC_PRINT_BUFFER_SIZE];
+#if 0
+void cdc_printf_console(const char *format, ...)
+{
+#if 0
+  va_list vl;
+  va_start(vl, format);
+  cdc_printf_(ITF_CONSOLE, format, vl);
+  va_end(vl);
+#endif
+/*    char buffer[CDC_PRINT_BUFFER_SIZE];
 
     int i = CDC_PRINT_BUFFER_SIZE;
     int len;
@@ -53,8 +60,9 @@ void cdc_printf_console(const char *format, ...) {
     {
         tud_cdc_n_write(ITF_CONSOLE, buffer, len);
         // tud_cdc_n_write_flush(ITF_CONSOLE);
-    }
+    }*/
 }
+#endif
 
 static void wait_for_write(int itf, uint32_t len)
 {
@@ -66,20 +74,32 @@ static void wait_for_write(int itf, uint32_t len)
 
 }
 
+#if 0
 // printf version for printing a formatted string
 // does not flush
-void cdc_printf_(int itf, const char *format, ...) {
-
+void cdc_printf_(int itf, const char *format, ...)
+{
+  char buffer[CDC_PRINT_BUFFER_SIZE];
+  int len;
+#if 0
+  va_list vl;
+  va_start(vl, format);
+  len = sprintf(buffer, format, vl);
+  va_end(vl);
+#endif
+/*
     char buffer[CDC_PRINT_BUFFER_SIZE];
     int len;
     
     len = sprintf(buffer, format);
+    ***/
     if (len >= 0) 
     {
         wait_for_write(itf, len);
         tud_cdc_n_write(itf, buffer, len);
     }
 }
+#endif
 
 int cdc_send_console(char* buffer) //, int len)
 {
@@ -104,15 +124,10 @@ void cdc_flush_console()
 
 // send the string in buffer with len characters
 // the function does not flush
-void cdc_send_string(int itf, char* buffer, int len)
+void cdc_send_string(int itf, char* buffer) //, int len)
 {
-    // while (len) {
-    //     wait_for_write(ITF_CONSOLE, len + 50);
-    //     uint32_t w = tud_cdc_n_write(ITF_CONSOLE, buffer, len);
-    //     buffer += w;
-    //     len -= w;
-    // }
-    int sent;       // number of bytes really sent
+    int len = strlen(buffer);   // number of bytes to send
+    int sent;                   // number of bytes really sent
 
     wait_for_write(itf, len);                   // wait until len bytes available in the send buffer
     sent = tud_cdc_n_write(itf, buffer, len);
@@ -121,6 +136,12 @@ void cdc_send_string(int itf, char* buffer, int len)
         // something going on
         printf("\n** len: %d - sent: %d  %.10s\n", len, sent, buffer);
     }
+}
+
+void cdc_send_string_and_flush(int itf, char* buffer)
+{
+    cdc_send_string(itf, buffer);
+    tud_cdc_n_write_flush(itf);
 }
 
 // function to send one char to the printerport, and flush buffer

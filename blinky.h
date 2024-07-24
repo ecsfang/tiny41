@@ -1,7 +1,9 @@
 #ifndef __BLINKY_H__
 #define __BLINKY_H__
 
-#include "core_bus.h"
+#include "tiny41.h"
+#include "ramdev.h"
+#include "xfmem.h"
 
 #define TIMER_FAST  75
 #define TIMER_SLOW  825
@@ -20,7 +22,7 @@
 #define FLAGS_REG           14
 
 // Memory and registers for Blinky module
-class CBlinky {
+class CBlinky : public CRamDev {
   uint16_t  m_fiFlags;  // Current FI flags
   bool      bSelected;  // True when selected (FI visible)
   bool      bOutBuf;    // True when character is in output buffer
@@ -36,7 +38,6 @@ public:
   volatile static uint64_t  reg[8];    // First 8 registers
   volatile static uint8_t   reg8[16];  // Last 8 registers (0-7 not used)
   int       nAlm;
-  int       bwr;
   int       busyCnt;
   // Flag 6 in reg 8 indicates slow or fast clock
   uint16_t  timerCnt() { return reg8[STATUS_REG] & BLINKY_SLOW_CLK ? TIMER_SLOW : TIMER_FAST; }
@@ -66,13 +67,13 @@ public:
   void wrStatus(uint8_t st) {
     reg8[FLAGS_REG] = st;
   }
-  inline void write(int r, uint64_t data, bool bRam = false) {
+  inline void write(int r, uint64_t *data, bool bRam = false) {
     if( r < 8 ) {
       // Lower 56 bit register 0-7
-      reg[r] = data;
+      reg[r] = *data;
     } else if( r < 14 ) {
       // Upper 8 bit register 8-13
-      reg8[r] = (uint8_t)(data & 0xFF);
+      reg8[r] = (uint8_t)(*data & 0xFF);
       if( !bRam ) {
         switch(r) {
         case STATUS_REG:
@@ -187,5 +188,38 @@ public:
   inline void fiClr(uint16_t f) {
     m_fiFlags &= ~f;
   }
+
+  void write(uint64_t *dta) {
+    if( bwr ) {
+      bwr--;
+      if( bwr == BLINKY_ADDR ) {
+        // This is a special DATA WRITE to reg 0x20
+        wrStatus((uint8_t)((*dta >> 48LL) & 0xFF));
+      } else {
+        write(bwr, dta, true);
+      }
+      bwr = 0;
+    }
+  }
+  uint32_t write(uint32_t addr, int r) {
+    // Update ram select pointer
+    addr = BLINKY_ADDR | r;
+    if( flags() & BLINKY_RAM_ENABLE)
+      bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
+    return addr;
+  }
+  void delaydWrite(uint32_t addr) {
+    bwr = addr;
+  }
+  uint64_t read(uint32_t addr, int r) {
+    return read(r);
+  }
+  bool isAddress(int a) {
+    return (a & 0x3F0) == BLINKY_ADDR;
+  }
+  uint16_t getAddress(uint16_t a) {
+    return (a == BLINKY_ADDR) ? BLINKY_ADDR+1 : (a&0x0F)+1;
+  }
+  RamDevice_e devID() { return BLINKY_DEV; }
 };
 #endif//__BLINKY_H__

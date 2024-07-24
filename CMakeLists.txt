@@ -20,6 +20,7 @@ add_executable(tiny41
   serial.cpp
   ir_led.cpp
   modfile.cpp
+  xfmem.cpp
   usb/cdc_helper.cpp            # helper functions for the multi-CDC USB interface
   usb/usb-descriptors.cpp       # descriptors for the multi-CDC USB interface
 )

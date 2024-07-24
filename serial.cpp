@@ -13,31 +13,20 @@
 #include "tiny41.h"
 #include "serial.h"
 #include "core_bus.h"
+#include "blinky.h"
 #include "usb/cdc_helper.h"
 #include "hardware/flash.h"
 #include "module.h"
-
-#define CON_PRINTF cdc_printf_console
-//#define CON_PRINTF printf
+#include "xfmem.h"
 
 char cbuff[CDC_PRINT_BUFFER_SIZE];
-
-/*void xxcdc_printf_console(const char *format, ...) {
-
-    char buffer[CDC_PRINT_BUFFER_SIZE];
-
-   va_list arg_ptr;                                                             
-                                                                                
-   va_start(arg_ptr, format);                                                      
-   vsprintf(buffer, format, arg_ptr);                                              
-   va_end(arg_ptr); 
-
-  cdc_send_console(buffer);
-}*/
 
 int pcount = 0;
 extern CModules modules;
 extern CBreakpoint brk;
+
+//extern CMem ram;
+//extern unsigned int nMemMods;
 
 // Memory that emulates a pak
 typedef unsigned char BYTE;
@@ -58,15 +47,28 @@ void toggle_trace(void)
 {
   bTrace ^= TRACE_ON;
   if( bTrace & TRACE_ON ) bTrace |= TRACE_BRK;
-  cdc_printf_( ITF_CONSOLE,"Turn trace %s\n\r", bTrace & TRACE_ON ? "on":"off");
-  cdc_flush_console();
+  sprintf(cbuff,"Turn trace %s\n\r", bTrace & TRACE_ON ? "on":"off");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 // Toggle disassembler (on -> call disassembler if trace is on)
 void toggle_disasm(void)
 {
   bTrace ^= TRACE_DISASM;
-  cdc_printf_( ITF_CONSOLE,"Turn disassemble %s\n\r", IS_DISASM() ? "on":"off");
+  sprintf(cbuff,"Turn disassemble %s\n\r", IS_DISASM() ? "on":"off");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
+
+#ifdef ET_11967
+extern bool bET11967;
+void service(void)
+{
+  // Toggle module
+  bET11967 = !bET11967;
+  sprintf(cbuff,"ET_11967 %sabled.\n\r", bET11967 ? "en":"dis");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+}
+#endif
+
 #define BAR_T()   cdc_send_console((char*)"/------+------+------+-----+-----+\n\r")
 #define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+-----+\n\r")
 #define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+-----/\n\r")
@@ -82,16 +84,20 @@ void list_modules(void)
   BAR_M();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
     n = sprintf(cbuff,"|  #%X  | ", i);
-    if( i>=8)
+    switch( i ) {
+    case 4: n += sprintf(cbuff+n,"Srv  | "); break;
+    case 5: n += sprintf(cbuff+n,"Tmr  | "); break;
+    case 6: n += sprintf(cbuff+n,"Prt  | "); break;
+    case 7: n += sprintf(cbuff+n,"HPIL | "); break;
+    default:
       n += sprintf(cbuff+n,"%d %s | ", (i-6)/2, i&1 ? "Hi":"Lo");
-    else 
-      n += sprintf(cbuff+n,"     | ");
+    }
 
     if( modules.isInserted(i) ) {
       n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
       n += sprintf(cbuff+n,"%3.3s |", modules.isRam(i) ? "Yes" : "" );
     } else {
-      n += sprintf(cbuff+n," --  |     |");
+      n += sprintf(cbuff+n,"     |     |");
     }
     n += sprintf(cbuff+n," %3.3s |\n\r", modules[i]->haveBank() ? "Yes" : "" );
     cdc_send_console(cbuff);
@@ -126,7 +132,8 @@ typedef enum {
   ST_NONE,
   ST_QRAM,
   ST_PLUG,
-  ST_BRK
+  ST_BRK,
+  ST_MEM
 } State_e;
 
 State_e state = ST_NONE;
@@ -172,6 +179,18 @@ void plug_unplug(void)
   state = ST_PLUG;  // Expect port address
 }
 
+void mem_modules(void)
+{
+#ifdef USE_QUAD_MODULE
+  cdc_send_console((char*)"\n\rNumber of memory modules: -\b");
+  cdc_flush_console();
+  state = ST_MEM;  // Expect port address
+#else
+  cdc_send_console((char*)"\n\rMemory modules not emulated!\n\r");
+  cdc_flush_console();
+#endif
+}
+
 void listBreakpoints(void)
 {
   brk.list_brks();
@@ -189,10 +208,12 @@ void dump_blinky(void)
   int i;
   cdc_send_console((char*)"Blinky registers and RAM\n\r=====================================\n\r");
   for(i=0; i<0x08; i++) {
-    cdc_printf_( ITF_CONSOLE,"Reg%02d: %014llx (56)\n\r", i, blinky.reg[i]);
+    sprintf(cbuff,"Reg%02d: %014llx (56)\n\r", i, blinky.reg[i]);
+    cdc_send_string(ITF_CONSOLE, cbuff);
   }
   for(; i<0x10; i++) {
-    cdc_printf_( ITF_CONSOLE,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
+    sprintf(cbuff,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
+    cdc_send_string(ITF_CONSOLE, cbuff);
   }
   cdc_send_console((char*)"\n\r\r");
   cdc_flush_console();
@@ -205,14 +226,21 @@ void dump_time(void)
   int i;
   cdc_send_console((char*)"Time Module registers\n\r=====================================\n\r");
   for(i=0; i<2; i++) {
-    cdc_printf_( ITF_CONSOLE,"Reg %c:\n\r", i==0?'A':'B');
-    cdc_printf_( ITF_CONSOLE,"  Clock:   %014llx (56)\n\r", mTime.reg[i].clock);
-    cdc_printf_( ITF_CONSOLE,"  Alarm:   %014llx (56)\n\r", mTime.reg[i].alarm);
-    cdc_printf_( ITF_CONSOLE,"  Scratch: %014llx (56)\n\r", mTime.reg[i].scratch);
+    sprintf(cbuff,"Reg %c:\n\r", i==0?'A':'B');
+    cdc_send_string(ITF_CONSOLE, cbuff);
+    sprintf(cbuff,"  Clock:   %014llx (56)\n\r", mTime.reg[i].clock);
+    cdc_send_string(ITF_CONSOLE, cbuff);
+    sprintf(cbuff,"  Alarm:   %014llx (56)\n\r", mTime.reg[i].alarm);
+    cdc_send_string(ITF_CONSOLE, cbuff);
+    sprintf(cbuff,"  Scratch: %014llx (56)\n\r", mTime.reg[i].scratch);
+    cdc_send_string(ITF_CONSOLE, cbuff);
   }
-  cdc_printf_( ITF_CONSOLE,"\n\r  Interval: %05X  (20)\n\r", mTime.interval);
-  cdc_printf_( ITF_CONSOLE,"  Accuracy: %05X  (13)\n\r", mTime.accuracy);
-  cdc_printf_( ITF_CONSOLE,"  Status:   %05X  (20)\n\r", mTime.status);
+  sprintf(cbuff,"\n\r  Interval: %05X  (20)\n\r", mTime.interval);
+  cdc_send_string(ITF_CONSOLE, cbuff);
+  sprintf(cbuff,"  Accuracy: %05X  (13)\n\r", mTime.accuracy);
+  cdc_send_string(ITF_CONSOLE, cbuff);
+  sprintf(cbuff,"  Status:   %05X  (20)\n\r", mTime.status);
+  cdc_send_string(ITF_CONSOLE, cbuff);
   cdc_send_console((char*)"\n\r\r");
   cdc_flush_console();
 }
@@ -281,11 +309,27 @@ void clr_xmem(void)
 }
 #endif//USE_XF_MODULE
 
+void core1_void(void)
+{
+}
+
 void rp2040_bootsel()
 {
-  cdc_send_console((char*)"\n\r RESETTING THE RP2040-TUP to BOOTSEL mode!!\n\r");
-  cdc_flush_console();
-  sleep_ms(1000);
+/**
+  cdc_send_console((char*)"\n\r************************************************");
+  cdc_send_console((char*)"\n\r** RESETTING THE RP2040-TUP to BOOTSEL mode!! **");
+  cdc_send_console((char*)"\n\r************************************************\n\r");
+  **/
+  for(int port=0; port<ITF_MAX; port++)
+    cdc_flush(port);
+
+  while( cdc_read_byte(ITF_CONSOLE) != -1 )
+    ;
+//  sleep_ms(5000);
+  set_sys_clock_khz(133000, 1);
+  sleep_ms(100);
+//	multicore_reset_core1();
+//  multicore_launch_core1(core1_void);
   // reboots the RP2040, uses the standard LED for activity monitoring
   reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
@@ -294,43 +338,61 @@ void quit_log()
 {
   cdc_send_console((char*)"\n\r Stopping logging\n\r");
   cdc_flush_console();
-  cdc_send_string(ITF_TRACE, (char*)"\nQuit\n", 6);
+  cdc_send_string(ITF_TRACE, (char*)"\nQuit\n");
   cdc_flush(ITF_TRACE);
+}
+
+void addString(const char *str)
+{
+  strcpy(cbuff, str);
+  cdc_send_string(ITF_CONSOLE, cbuff);
+}
+void addString(const char *fmt, int val)
+{
+  sprintf(cbuff, fmt, val);
+  cdc_send_string(ITF_CONSOLE, cbuff);
+}
+void addString(const char *fmt, int val, int val2)
+{
+  sprintf(cbuff, fmt, val, val2);
+  cdc_send_string(ITF_CONSOLE, cbuff);
 }
 
 void info(void)
 {
-  cdc_printf_( ITF_CONSOLE, "\r\nSystem information\r\n=========================\r\n");
-  cdc_printf_( ITF_CONSOLE, "Flash offset:  0x%X\r\n", FLASH_TARGET_OFFSET);
-  cdc_printf_( ITF_CONSOLE, "XIP_BASE:      0x%X\r\n", XIP_BASE);
-  cdc_printf_( ITF_CONSOLE, "Sector size:   %6d (0x%X)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
-  cdc_printf_( ITF_CONSOLE, "Page size:     %6d (0x%X)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
-  cdc_printf_( ITF_CONSOLE, "Total heap:    %6d bytes \r\n", getTotalHeap());
-  cdc_printf_( ITF_CONSOLE, "Free heap:     %6d bytes\r\n", getFreeHeap());
-  cdc_printf_( ITF_CONSOLE, "Trace element: %6d bytes\r\n", sizeof(Bus_t));
-  cdc_printf_( ITF_CONSOLE, "Trace buffer:  %6d bytes\r\n", sizeof(Bus_t)*NUM_BUS_T);
-  cdc_printf_( ITF_CONSOLE, "\r\nHP41 information\r\n-------------------------\r\n");
+  addString("\r\nSystem information\r\n=========================\r\n");
+  addString("Flash offset:  0x%X\r\n", FLASH_TARGET_OFFSET);
+  addString("XIP_BASE:      0x%X\r\n", XIP_BASE);
+  addString("Sector size:   %6d (0x%X)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+  addString("Page size:     %6d (0x%X)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
+  addString("Total heap:    %6d bytes \r\n", getTotalHeap());
+  addString("Free heap:     %6d bytes\r\n", getFreeHeap());
+  addString("Trace element: %6d bytes\r\n", sizeof(Bus_t));
+  addString("Trace buffer:  %6d bytes (%d entries)\r\n", sizeof(Bus_t)*NUM_BUS_T, NUM_BUS_T);
+  addString("\r\nHP41 information\r\n-------------------------\r\n");
 #ifdef USE_XF_MODULE
-  cdc_printf_( ITF_CONSOLE, "XMemory:       %6d bytes (%d registers)\r\n",
+  addString("XMemory:       %6d bytes (%d registers)\r\n",
                   sizeof(uint64_t)*(XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE),
                   XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE);
 #endif
 #ifdef USE_QUAD_MODULE
-  cdc_printf_( ITF_CONSOLE, "Quad Memory:   %6d bytes (%d registers)\r\n",
+  addString("Quad Memory:   %6d bytes (%d registers)\r\n",
                   sizeof(uint64_t)*(MEM_MOD_SIZE),
                   MEM_MOD_SIZE);
 #endif
-
+#ifdef USE_QUAD_MODULE
+  if( nMemMods )
+    addString("Memory:        %6d module%c\r\n", nMemMods, nMemMods > 1 ? 's':' ');
+#endif
   cdc_flush_console();
 }
 
 void tag(void) {
   static unsigned int nTag = 0;
   nTag++;
-  cdc_printf_(ITF_TRACE, "\n\r###  TAG %d ###\n\r\n\r", nTag);
-  cdc_flush(ITF_TRACE);
-  cdc_printf_(ITF_CONSOLE, "###  TAG %d ###\n\r", nTag);
-  cdc_flush(ITF_CONSOLE);
+  sprintf(cbuff, "\n\r###  TAG %d ###\n\r\n\r", nTag);
+  cdc_send_string_and_flush(ITF_TRACE, cbuff);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 extern void reset_bus_buffer(void);
@@ -351,6 +413,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
+  { 'm', mem_modules,       "Memory modules"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
@@ -360,6 +423,9 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
   { 'g', tag,               "Enter trace tag"  },
+#ifdef ET_11967
+  { 'S', service,           "Service ROM (11967) FI+DATA" },
+#endif
 #ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
 #endif//USE_TIME_MODULE
@@ -369,12 +435,14 @@ const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
 
 void serial_help(void)
 {
-  cdc_printf_( ITF_CONSOLE,"\n\rCmd | Description\n\r----+------------------------");
+  sprintf(cbuff,"\n\rCmd | Description\n\r----+------------------------");
+  cdc_send_string(ITF_CONSOLE, cbuff);
   for (int i = 0; i < helpSize; i++) {
-    cdc_printf_( ITF_CONSOLE,"\n\r  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
+    sprintf(cbuff,"\n\r  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
+    cdc_send_string(ITF_CONSOLE, cbuff);
   }
-  cdc_printf_( ITF_CONSOLE, (char*)"\n\r====+========================\n\r");
-  cdc_flush_console();
+  sprintf(cbuff, (char*)"\n\r====+========================\n\r");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 int getHexKey(int ky)
@@ -397,6 +465,8 @@ int send2console(const char* dispBuf, bool bClear = false)
   return n;
 }
 
+//extern void printLCD(const char *txt, int row);
+
 extern bool bReady;
 void serial_loop(void)
 {
@@ -410,11 +480,7 @@ void serial_loop(void)
     {
       static unsigned long k=0;
       char kk[16];
-      extern CDisplay    disp41;
       k = (k<<8) | (key&0xFF);
-      sprintf(kk, "[%08lX] ", k);
-      WriteString(disp41.buf(), 0, STATUS1_ROW, kk);
-      disp41.rend(REND_STATUS);
       if( !bReady )
         return;
     }
@@ -476,6 +542,30 @@ void serial_loop(void)
               sBrk = nBrk = 0;
               state = ST_NONE;
             }
+            break;
+          case ST_MEM:
+#ifdef USE_QUAD_MODULE
+            if( x >= 0 && x <= 4 ) {
+              nMemMods = x;
+              switch( x ) {
+              case 0:
+                sprintf(cbuff,"\rNo memory modules emulated  ");
+                break;
+              case 1:
+                sprintf(cbuff,"\r1 Memory module emulated   ");
+                break;
+              default:
+                sprintf(cbuff,"\r%d Memory modules emulated  ", x);
+              }
+              ram.modules(x);
+            } else {
+              sprintf(cbuff,"\rInvalid number of memory modules - %d!!", x);
+            }
+            conChars += send2console(cbuff);
+            conChars += send2console("\n\r");
+#endif
+            state = ST_NONE;
+            break;
           }
         }
       }

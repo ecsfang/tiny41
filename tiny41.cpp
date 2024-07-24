@@ -10,11 +10,7 @@
 #include "ir_led.h"
 #include "tusb_config.h"
 #include <tusb.h>
-//#include <cdc_device.h>
 #include "usb/cdc_helper.h"
-
-extern char cbuff[CDC_PRINT_BUFFER_SIZE];
-extern int send2console(const char* dispBuf, bool bClear);
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -69,7 +65,7 @@ void bus_init(void)
 
 
 uint8_t CDisplay::m_dispBuf[SSD1306_BUF_LEN+1];
-uint8_t *CDisplay::m_buf = &CDisplay::m_dispBuf[1];
+uint8_t *CDisplay::m_buf = &CDisplay::m_dispBuf[1]; // Leave first byte for command
 
 CDisplay    disp41;
 
@@ -86,8 +82,9 @@ void dispOverflow(bool bOvf)
 #ifdef PIMORONI_TINY2040_8MB
     gpio_put(LED_PIN_R, bOvf ? LED_ON : LED_OFF);
 #endif
+    printLCD("OV_FLOW", 1, STATUS_ROW);
     const char *bErr = bOvf ? "Buffer overflow!" : "                ";
-    WriteString(disp41.buf(), 5, (STATUS_START+2)*8, (char *)bErr);
+    WriteString(disp41.buf(), 5, STATUS2_ROW, (char *)bErr);
     bRend |= REND_STATUS;
 }
 
@@ -104,15 +101,13 @@ int wn = 0;
 
 void log(const char *s)
 {
-    cdc_printf_(ITF_TRACE, s);
-    cdc_printf_(ITF_TRACE, "\n\r");
-    cdc_flush(ITF_TRACE);
+    sprintf( cbuff, "%s\n\r", s);
+    cdc_send_string_and_flush(ITF_TRACE, cbuff);
 }
 void logC(const char *s)
 {
-    cdc_printf_(ITF_CONSOLE, s);
-    cdc_printf_(ITF_CONSOLE, "\n\r");
-    cdc_flush(ITF_CONSOLE);
+    sprintf( cbuff, "%s\n\r", s);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 bool bReady = false;
@@ -131,14 +126,16 @@ int main()
     usbd_serial_init();
     tusb_init();
 
-    sleep_ms(2000);
+    sleep_ms(500);
+
+    serial_loop();
 
     while( cdc_read_byte(ITF_CONSOLE) != -1 )
         ;
+ 
+    sleep_ms(100);
 
- //   serial_loop();
-
-//    logC("Hello world!\r\n");
+    logC("\r\nHello world!\r\n");
     //logC("Hello world - again!\r\n");
 
 //    cdc_send_console((char*)"\n\r*************");
@@ -148,20 +145,20 @@ int main()
 
 
     // Must read flash before we goto highspeed ...
-    log("Init ROMs ...");
+    logC("Init ROMs ...");
     initRoms();
 
-    log("Init XMemory ...");
+    logC("Init XMemory ...");
 #ifdef USE_XFUNC
     initXMem(0);
 #endif
 //    serial_loop();
 
     /* Overclock */
-    log("Overclock ...");
+    logC("Overclock ...");
     set_sys_clock_khz(OVERCLOCK, 1);
 
-    log("Init all pins ...");
+    logC("Init all pins ...");
     bus_init();
 
 #ifdef USE_PIO
@@ -171,7 +168,7 @@ int main()
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
-    log("Init I2C ...");
+    logC("Init I2C ...");
     i2c_init(i2c_default, SSD1306_I2C_CLK * 1000);
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
@@ -180,7 +177,7 @@ int main()
 
     //sleep_ms(1000);
     // run through the complete initialization process
-    log(" - init OLED display");
+    logC(" - init OLED display");
     SSD1306_init();
 
 //    sleep_ms(5000);
@@ -317,10 +314,8 @@ int main()
 
     while( cdc_read_byte(ITF_CONSOLE) != -1 )
         ;
-//    while( !tud_cdc_n_connected(ITF_CONSOLE) )
-//        sleep_ms(100);
-//    cdc_send_console((char*)"\n\rStarting Tiny 41!\n\r");
-//    cdc_flush(ITF_CONSOLE);
+
+    gpio_put(LED_PIN_B, LED_OFF);
 
     int pwo = 0;
     int w;
@@ -345,7 +340,6 @@ int main()
             }
         }
 
-// gpio_put(LED_PIN_B, LED_ON); do { } while (1);
         w = cdc_read_byte(ITF_WAND);
         if( w != -1 ) {
             switch( wState ) {
@@ -370,8 +364,7 @@ int main()
                     sprintf(cbuff+n-1,"]\n\r");
                     cdc_send_console(cbuff);
                 }
-                cdc_send_string(ITF_WAND, (char*)"OK", 2);
-                cdc_flush(ITF_WAND);
+                cdc_send_string_and_flush(ITF_WAND, (char*)"OK");
                 wState = W_IDLE;
                 extern void wand_data(unsigned char *dta);
                 wand_data((unsigned char*)cc);
@@ -414,7 +407,8 @@ static int cAnn = 0;
 void UpdateLCD(char *txt, bool *bp, bool on)
 {
     if( IS_TRACE() ) {
-        cdc_printf_(ITF_TRACE, "\n\r\n\r[%s] (%s)\n\r", txt, on ? "ON" : "OFF");
+        sprintf( cbuff, "\n\r\n\r[%s] (%s)\n\r", txt, on ? "ON" : "OFF");
+        cdc_send_string_and_flush(ITF_TRACE, cbuff);
     }
     if (on) {
         Write41String(disp41.buf(), 3, LCD_ROW, txt, bp);
@@ -425,6 +419,13 @@ void UpdateLCD(char *txt, bool *bp, bool on)
         UpdateAnnun(ANN_OFF, false);
     }
     disp41.rend(REND_LCD);
+}
+
+void printLCD(const char *txt, int x, int row)
+{
+    WriteString(disp41.buf(), x, row, (char*)txt);
+    disp41.rend(REND_STATUS);
+    disp41.render();
 }
 
 typedef struct

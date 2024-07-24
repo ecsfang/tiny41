@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "instr.h"
+#include "ramdev.h"
 
 #include "usb/cdc_helper.h"
 
@@ -126,13 +127,6 @@ typedef struct {
 #define NUM_BUS_T (0x1000/2)
 #endif
 
-typedef enum {
-  RAM_DEV,
-  XMEM_DEV,
-  QUAD_DEV,
-  BLINKY_DEV
-} RamDevice_e;
-
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
 
 #define INIT_PIN(n,io,def)      \
@@ -197,8 +191,8 @@ public:
     m_brkpt[BRK_WORD(addr)] &= ~(BRK_MASK << BRK_SHFT(addr,bank));
   }
   void clrAllBrk(void) {
-    cdc_printf_( ITF_CONSOLE, "Clear all breakpoints\r\n");
-    cdc_flush_console();
+    sprintf(cbuff, "Clear all breakpoints\r\n");
+    cdc_send_string(ITF_CONSOLE, cbuff);
     memset(m_brkpt, 0, sizeof(uint32_t) * BRK_SIZE);
   }
   // Set breakpoint on given address
@@ -208,7 +202,7 @@ public:
   }
   void stopBrk(uint16_t addr, int bank = 0) {
     clrBrk(addr, bank); // Remove previous settings
-    cdc_printf_( ITF_CONSOLE, "Clear breakpoint @ %04X\r\n", addr);
+    sprintf(cbuff, "Clear breakpoint @ %04X\r\n", addr);
     cdc_flush_console();
     m_brkpt[BRK_WORD(addr)] |= BRK_END << BRK_SHFT(addr,bank);
   }
@@ -231,13 +225,13 @@ public:
               default: i += sprintf(cbuff+i, "?%X", br); break;
             }
             i += sprintf(cbuff+i, "\n\r");
-            cdc_printf_( ITF_CONSOLE, "%s", cbuff);
+            cdc_send_string(ITF_CONSOLE, cbuff);
           }
         }
       }
     }
     if( !n )
-      cdc_printf_( ITF_CONSOLE, "No breakpoints\n\r");
+      cdc_send_string(ITF_CONSOLE, (char*)"No breakpoints\n\r");
     cdc_flush_console();
   }
 };
@@ -301,6 +295,6 @@ void initRoms(void);
 #ifdef USE_TIME_MODULE
 #include "timemod.h"
 #endif
-#include "blinky.h"
+//#include "blinky.h"
 
 #endif//__CORE_BUS_H__

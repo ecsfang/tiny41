@@ -50,15 +50,20 @@
 #define ITF_PRINT       1           // CDC port 1: printer bytes
 #define ITF_TRACE       2           // CDC port 2: trace listing
 #define ITF_WAND        3           // CDC port 3: HP-IL/ PILBox frames
+#define ITF_MAX         4
+
 //#define ITF_ILSCOPE     4           // CDC port 4: HP-IL scope, PILBox frame monitor
 
 extern const char* __in_flash() ITF_str[];
 
-void cdc_printf_console(const char *format, ...);       // prevent using this function
-void cdc_printf_(int itf, const char *format, ...);     // prevent using this function
+extern char cbuff[CDC_PRINT_BUFFER_SIZE];
+
+//void cdc_printf_console(const char *format, ...);       // prevent using this function
+//void cdc_printf_(int itf, const char *format, ...);     // prevent using this function
 
 int  cdc_send_console(char* buffer); //, int len);
-void cdc_send_string(int itf, char* buffer, int len);
+void cdc_send_string(int itf, char* buffer);
+void cdc_send_string_and_flush(int itf, char* buffer);
 void cdc_send_char(int itf, char c);
 void cdc_send_char_flush(int itf, char c);
 
