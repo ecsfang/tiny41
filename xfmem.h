@@ -33,7 +33,7 @@ int getXmemAddr(uint16_t addr);
 #endif//USE_XFUNC
 
 #ifdef USE_QUAD_MODULE
-extern unsigned int nMemMods;
+//extern unsigned int nMemMods;
 #endif//USE_QUAD_MODULE
 
 #ifdef USE_XF_MODULE
@@ -83,8 +83,6 @@ public:
 extern CXFM xmem;
 #endif
 
-#ifdef USE_QUAD_MODULE
-
 #define MEM_MOD_START     0x100             // Start of first memory module
 #define MEM_MOD_SIZE      0x40              // Size of one memory module
 #define QUAD_MEM_MOD_SIZE (MEM_MOD_SIZE*4)  // Max size of memory module
@@ -105,9 +103,13 @@ public:
     m_start = MEM_MOD_START;
     m_end = m_start + m_mods*MEM_MOD_SIZE;
   }
+  // Get the number of emulated memory modules
+  int modules(void) {
+    return m_mods;
+  }
   // True if address is within the memory modules
   bool isAddress(int a) {
-    return nMemMods && a >= m_start && a < m_end;
+    return isEnabled() && a >= m_start && a < m_end;
   }
   uint16_t getAddress(uint16_t a) {
     // No translation needed ...
@@ -122,6 +124,5 @@ public:
 };
 
 extern CMem ram;
-#endif
 
 #endif//__XFMEM_H__

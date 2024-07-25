@@ -58,7 +58,6 @@ void toggle_disasm(void)
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
-#ifdef ET_11967
 extern bool bET11967;
 void service(void)
 {
@@ -67,7 +66,6 @@ void service(void)
   sprintf(cbuff,"ET_11967 %sabled.\n\r", bET11967 ? "en":"dis");
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
-#endif
 
 #define BAR_T()   cdc_send_console((char*)"/------+------+------+-----+-----+\n\r")
 #define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+-----+\n\r")
@@ -179,16 +177,29 @@ void plug_unplug(void)
   state = ST_PLUG;  // Expect port address
 }
 
+void mem_emulate(void)
+{
+  ram.enable( !ram.isEnabled() );
+  if( ram.isEnabled() ) {
+    sprintf(cbuff, "\n\r%d memory modules enabled\n\r", ram.modules());
+    cdc_send_console(cbuff);
+    cdc_flush_console();
+  } else {
+    cdc_send_console((char*)"\n\rMemory modules disabled\n\r");
+    cdc_flush_console();
+  }
+}
+
 void mem_modules(void)
 {
-#ifdef USE_QUAD_MODULE
-  cdc_send_console((char*)"\n\rNumber of memory modules: -\b");
-  cdc_flush_console();
-  state = ST_MEM;  // Expect port address
-#else
-  cdc_send_console((char*)"\n\rMemory modules not emulated!\n\r");
-  cdc_flush_console();
-#endif
+  if( ram.isEnabled() ) {
+    cdc_send_console((char*)"\n\rNumber of memory modules: -\b");
+    cdc_flush_console();
+    state = ST_MEM;  // Expect port address
+  } else {
+    cdc_send_console((char*)"\n\rMemory modules not emulated!\n\r");
+    cdc_flush_console();
+  }
 }
 
 void listBreakpoints(void)
@@ -320,16 +331,13 @@ void rp2040_bootsel()
   cdc_send_console((char*)"\n\r** RESETTING THE RP2040-TUP to BOOTSEL mode!! **");
   cdc_send_console((char*)"\n\r************************************************\n\r");
   **/
-  for(int port=0; port<ITF_MAX; port++)
+  for(int port=0; port<ITF_MAX; port++) {
     cdc_flush(port);
-
-  while( cdc_read_byte(ITF_CONSOLE) != -1 )
-    ;
-//  sleep_ms(5000);
+    while( cdc_read_byte(port) != -1 )
+      ;
+  }
   set_sys_clock_khz(133000, 1);
   sleep_ms(100);
-//	multicore_reset_core1();
-//  multicore_launch_core1(core1_void);
   // reboots the RP2040, uses the standard LED for activity monitoring
   reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
@@ -375,15 +383,15 @@ void info(void)
                   sizeof(uint64_t)*(XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE),
                   XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE);
 #endif
-#ifdef USE_QUAD_MODULE
-  addString("Quad Memory:   %6d bytes (%d registers)\r\n",
-                  sizeof(uint64_t)*(MEM_MOD_SIZE),
-                  MEM_MOD_SIZE);
-#endif
-#ifdef USE_QUAD_MODULE
-  if( nMemMods )
-    addString("Memory:        %6d module%c\r\n", nMemMods, nMemMods > 1 ? 's':' ');
-#endif
+  if( ram.isEnabled() ) {
+    addString("Quad Memory:   %6d bytes (%d registers)\r\n",
+                    sizeof(uint64_t)*(MEM_MOD_SIZE)*ram.modules(),
+                    MEM_MOD_SIZE*ram.modules());
+    if( ram.modules() )
+      addString("Memory:        %6d module%c\r\n", ram.modules(), ram.modules() > 1 ? 's':' ');
+  } else {
+    addString("Quad Memory:   Not enabled\r\n");
+  }
   cdc_flush_console();
 }
 
@@ -413,7 +421,8 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
-  { 'm', mem_modules,       "Memory modules"  },
+  { 'M', mem_emulate,       "Enable Memory modules"  },
+  { 'm', mem_modules,       "Number of Memory modules"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
@@ -423,9 +432,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
   { 'g', tag,               "Enter trace tag"  },
-#ifdef ET_11967
   { 'S', service,           "Service ROM (11967) FI+DATA" },
-#endif
 #ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
 #endif//USE_TIME_MODULE
@@ -544,26 +551,26 @@ void serial_loop(void)
             }
             break;
           case ST_MEM:
-#ifdef USE_QUAD_MODULE
-            if( x >= 0 && x <= 4 ) {
-              nMemMods = x;
-              switch( x ) {
-              case 0:
-                sprintf(cbuff,"\rNo memory modules emulated  ");
-                break;
-              case 1:
-                sprintf(cbuff,"\r1 Memory module emulated   ");
-                break;
-              default:
-                sprintf(cbuff,"\r%d Memory modules emulated  ", x);
+            if( ram.isEnabled() ) {
+              if( x >= 0 && x <= 4 ) {
+                ram.modules(x);
+                switch( x ) {
+                case 0:
+                  sprintf(cbuff,"\rNo memory modules emulated  ");
+                  break;
+                case 1:
+                  sprintf(cbuff,"\r1 Memory module emulated   ");
+                  break;
+                default:
+                  sprintf(cbuff,"\r%d Memory modules emulated  ", x);
+                }
+                ram.modules(x);
+              } else {
+                sprintf(cbuff,"\rInvalid number of memory modules - %d!!", x);
               }
-              ram.modules(x);
-            } else {
-              sprintf(cbuff,"\rInvalid number of memory modules - %d!!", x);
+              conChars += send2console(cbuff);
+              conChars += send2console("\n\r");
             }
-            conChars += send2console(cbuff);
-            conChars += send2console("\n\r");
-#endif
             state = ST_NONE;
             break;
           }

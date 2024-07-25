@@ -129,6 +129,7 @@ void _power_on()
   gpio_put(P_ISA_OE, DISABLE_OE); // Disable ISA driver
   gpio_put(P_ISA_DRV, 0);
   sleep_ms(10);
+  _clrFI_PBSY();
 }
 void power_on(void)
 {
@@ -423,10 +424,8 @@ volatile int data_rd = 0;
 
 #define DATA_OUTPUT(x) do { output_data = 1; data56_out = x;} while(0)
 volatile uint64_t data56_out = 0;
-#ifdef ET_11967
 bool bET11967 = false;
 volatile uint64_t data2FI = 0;
-#endif
 
 volatile Bus_t bus[NUM_BUS_T];
 
@@ -562,19 +561,17 @@ void core1_main_3(void)
 // DATA  |  T51   |  T52   |  T53   |  T54   |  T55   |  T0    |  T1    |  T2    |
 
     if( bit_no >= LAST_CYCLE ) {
-      // Clear for next cykle ...
-      isa = data56 = 0LL;
       // Setup FI-signal for next round ...
-#ifdef ET_11967
       if( bET11967 ) {
+        // Service module installed, shortcut DATA and FI
+        data2FI = ~data56;
         gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
         dataFI = 0;
-        //for(int f=0; f<14; f++) {
-        //}
+      } else {
+        dataFI = getFI();
       }
-#else
-      dataFI = getFI();
-#endif
+      // Clear for next cykle ...
+      isa = data56 = 0LL;
       fiShift = 0;
       carry_fi = 0;
       // Check if ISA should be active during T0 (peripherial carry)
@@ -586,11 +583,9 @@ void core1_main_3(void)
 
     // Drive the FI carry flags for each nibble
     if( (bit_no & 0b11) == 0b11 ) {
-#ifdef ET_11967
       if( bET11967 )
         gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
       else
-#endif
         gpio_put(P_FI_OE, (dataFI>>fiShift) & 1);
       fiShift++;
     }
@@ -687,11 +682,9 @@ void core1_main_3(void)
         if( blinky.isAddress(ramad) ) {
           pRamDev = &blinky;
         }
-#ifdef USE_QUAD_MODULE
-        else if( ram.isAddress(ramad) ) {
+        else if( ram.isEnabled() && ram.isAddress(ramad) ) {
           pRamDev = &ram;
-        } else
-#endif
+        }
 #ifdef USE_XF_MODULE
         // ... else it might be XMemory ...
         else if( xmem.isAddress(ramad) ) {
@@ -932,13 +925,6 @@ void core1_main_3(void)
       if( !(pBus->cmd|pBus->addr) )
         continue;
       bErr = false;
-#endif
-
-#ifdef ET_11967
-      if( bET11967 ) {
-        // Copy C-register to the FI data line
-        data2FI = ~data56;
-      }
 #endif
 
       // Prepare logging data ...
