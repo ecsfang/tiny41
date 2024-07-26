@@ -10,7 +10,47 @@
 
 #include <signal.h>
 
+#include <map>
+
 static int keepRunning = 1;
+
+typedef struct label
+{
+    int   address;
+    char  lbl[7];
+} label_t;
+
+using namespace std;
+
+map<int, char *> mLabels;
+map<int, char *>::iterator iLbls;
+
+
+void readSymbols(const char *symFile)
+{
+  char sBuf[1024];
+  char *p;
+  int addr;
+  char lbl[10];
+  printf("Try to read symbols from \"%s\".\n", symFile);
+  FILE *fp = fopen(symFile, "r");
+  if( !fp ) {
+    printf("Can't open file <%s>!\n", symFile);
+  }
+  while( fgets(sBuf, 1024, fp) ) {
+    if( sscanf(sBuf, "%4X     %6s", &addr, lbl) ) {
+      mLabels[addr] = strdup(lbl);
+      //printf("%6.6s @ %04X\n", lbl, addr);
+    }
+  }
+
+#if 0
+   for(iLbls=mLabels.begin(); iLbls!=mLabels.end(); ++iLbls){
+      printf("%s --> %d\n", iLbls->second, iLbls->first);
+   }
+   printf("Test: %s\n", mLabels[0x27F8]);
+#endif
+}
 
 /**
  * Program exit codes
@@ -104,7 +144,8 @@ FILE *flog = NULL;
 
 int main(int argc, char *argv[])
 {
-    char *portname = TERMINAL;
+
+    const char *portname = TERMINAL;
     flog = fopen(argv[1],"wb");
     if (!flog) {
         printf("Error opening %s: %s\n", argv[1], strerror(errno));
@@ -116,6 +157,8 @@ int main(int argc, char *argv[])
         printf("Error opening %s: %s\n", portname, strerror(errno));
         return -1;
     }
+
+    readSymbols("SYSTEMLABELS.TXT");
 
   //  struct sigaction act;
   ///  act.sa_handler = intHandler;
@@ -137,7 +180,9 @@ int main(int argc, char *argv[])
     unsigned long len = 0;
     int nl=0;
     unsigned char buf[1024];
-    int rdlen;
+    int rdlen, addr;
+    char *p;
+    char *sym;
     while (keepRunning) {
         rdlen = read(fd, buf, sizeof(buf) - 1);
         if (rdlen > 0) {
@@ -150,6 +195,16 @@ int main(int argc, char *argv[])
                 printf("Got stop signal!\nPress Ctrl+C to stop and save!\n");
                 keepRunning=0;
                 continue;
+              }
+            }
+            p = strchr((char*)buf, '[');
+            if( p && *(p+5) == ']' && *(p+6) == 0xa ) {
+              if( sscanf(p, "[%4X]", &addr) == 1 ) {
+                sym = mLabels[addr];
+                if( sym ) {
+                  sprintf(p, "%s [%04X]\n", sym, addr);
+                  rdlen = strlen((char*)buf);
+                }
               }
             }
             fwrite(buf, 1, rdlen, flog);
