@@ -490,7 +490,6 @@ void core1_main_3(void)
   volatile Bus_t *pBus;         // Pointer into trace buffer
   static int last_data_wr;      // Keep track of trace overflow
   static uint16_t iCnt = 0;     // Cycle counter for trace
-  static RamDevice_e ramDev = NO_RAM_DEV;
   static uint32_t ramAddr = 0;
   static uint8_t r = 0;
   static uint16_t cmd = 0;
@@ -675,10 +674,9 @@ void core1_main_3(void)
         ramad = data56 & 0x3FF;
         bSelRam = false;
       }
-      ramDev = NO_RAM_DEV;
+      pRamDev = NULL;
       if( !perph ) {
         // Check if Blinky RAM is being accessed ...
-        pRamDev = NULL;
         if( blinky.isAddress(ramad) ) {
           pRamDev = &blinky;
         }
@@ -697,7 +695,6 @@ void core1_main_3(void)
     case 11:
       if( pRamDev ) {
         ramAddr = pRamDev->getAddress(ramad);
-        ramDev = pRamDev->devID();
       }
       break;
 
@@ -835,7 +832,7 @@ void core1_main_3(void)
           // - XMemory
           // - Blinky RAM
           if( !perph ) {
-            if( ramDev != NO_RAM_DEV ) {
+            if( pRamDev ) {
               // Update any RAM device (QUAD, XMEM etc)
               if( cmd == INST_WDATA ) {
                 pRamDev->delaydWrite(ramAddr);
