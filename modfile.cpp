@@ -110,6 +110,8 @@ their page number hardcoded.
 #include "module.h"
 #include "modfile.h"
 
+extern CModules modules;
+
 /*******************************/
 #if 0
 write_rom_file(const char *FullFileName, const word *ROM)
@@ -178,10 +180,17 @@ int get_file_format(const char *lpszFormat)
   return 0;
 }
 
+int mod_info(const char *flashPtr, char *buf)
+{
+  ModuleFileHeader *pMFH;
+  pMFH = (ModuleFileHeader *)flashPtr;
+  return sprintf(buf,"%s", pMFH->Title);
+}
+
 /******************************/
 /* Returns 0 for success, 1 for open fail, 2 for read fail, 3 for invalid file, 4 for allocation error */
 /******************************/
-int extract_roms( const char *flashPtr, CModule *mod )
+int extract_roms( const char *flashPtr, int port) //CModule *mod )
 {
   int nFileFormat;
   ModuleFileHeader *pMFH;
@@ -193,9 +202,8 @@ int extract_roms( const char *flashPtr, CModule *mod )
   dwModulePageSize = sizeof(ModuleHeader_t);
   dwModulePageSize += (1 == nFileFormat) ? sizeof(V1_t) : sizeof(V2_t);
 
-  // validate file size
-  // TBD!
-  // if( FileSize != sizeof(ModuleFileHeader) + pMFH->NumPages * dwModulePageSize ||
+  sprintf(cbuff,"Extract ROM (%d) @ 0x%X - %s (%d)\n\r", port, flashPtr, pMFH->FileFormat, nFileFormat);
+  cdc_send_string_and_flush(ITF_TRACE, cbuff);
 
   // check header
   if( (1 != nFileFormat && 2 != nFileFormat) || pMFH->MemModules > 4 || pMFH->XMemModules > 3 ||
@@ -203,16 +211,28 @@ int extract_roms( const char *flashPtr, CModule *mod )
       pMFH->Hardware > HARDWARE_MAX) { /* out of range */
     return (3);
   }
+
   // go through each page
   ModuleFilePage *pMFP;
   #define ROM_SIZE  0x1000
   word *pwImage;
-
+  int nBank = 0;
+  // Loop over all images in the file
   for (int bank = 0; bank < pMFH->NumPages; bank++) {
+    nBank = 0;
     word *ROM = new word[ROM_SIZE];
-    if( !ROM )
+    if( !ROM ) {
+      sprintf(cbuff,"No memory in extract_roms!\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
       return 4;
+    }
     pMFP = (ModuleFilePage *)(flashPtr + sizeof(ModuleFileHeader) + dwModulePageSize * bank);
+    // Any hardcoded port ... ?
+    if( pMFP->header.Page <= 0x0F )
+      port = pMFP->header.Page;
+    // Which bank?
+    if( pMFP->header.Bank )
+      nBank = pMFP->header.Bank - 1;
     // write the ROM file
     pwImage = (word *)&pMFP->image;
     switch(nFileFormat) {
@@ -226,12 +246,17 @@ int extract_roms( const char *flashPtr, CModule *mod )
       }
       break;
     default:  // Unknown format ...
-      pwImage = NULL;
+      sprintf(cbuff,"Error: Unknown format (%d)!\n\r",nFileFormat);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
       delete[] ROM;
+      ROM = NULL;
     }
-    if( pwImage ) {
+    if( ROM ) {
       // Add image to module ...
-      mod->set(ROM, bank);
+      sprintf(cbuff,"Load MOD %s to port %d bank %d ...\n\r", pMFP->header.Name, port, nBank);
+      cdc_send_string_and_flush(ITF_TRACE, cbuff);
+      modules.addImage(port, ROM, nBank, pMFP->header.Name);
+      port++;
     }
   }
   return (0);

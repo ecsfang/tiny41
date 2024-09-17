@@ -18,6 +18,7 @@
 #include "hardware/flash.h"
 #include "module.h"
 #include "xfmem.h"
+#include "fltools/fltools.h"
 
 char cbuff[CDC_PRINT_BUFFER_SIZE];
 
@@ -67,18 +68,43 @@ void service(void)
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
-#define BAR_T()   cdc_send_console((char*)"/------+------+------+-----+-----+\n\r")
-#define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+-----+\n\r")
-#define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+-----/\n\r")
+#define BAR_T()   cdc_send_console((char*)"/------+------+------+-----+------------------+\n\r")
+#define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+------------------+\n\r")
+#define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+------------------/\n\r")
+
+extern void readFlash(int offs, uint8_t *data, uint16_t size);
+extern int mod_info(const char *flashPtr, char *buf);
+
+void all_modules(void)
+{
+  FL_Head_t fl;
+  int i, n = 0;
+  const char *typ;
+  readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
+  while( fl.offs ) {
+    n++;
+    if( fl.type == FL_MOD ) typ = "MOD";
+    else if( fl.type == FL_ROM ) typ = "ROM";
+    else typ = "???";
+    i = sprintf(cbuff,"| %3d | %-16.16s | %3.3s | %08X | ",
+      n, fl.name, typ, fl.offs );
+    i += mod_info((const char *)fl.offs, cbuff+i);
+    i += sprintf(cbuff+i,"\n\r");
+    cdc_send_console(cbuff);
+    readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
+  }
+}
 
 void list_modules(void)
 {
   extern CModules modules;
   int n;
 
+  cdc_send_string_and_flush(ITF_TRACE,(char*)"\n\rDump modules\n\r");
+  modules.dump();
   cdc_send_console((char*)"\n\rLoaded modules\n\r");
   BAR_T();
-  cdc_send_console((char*)"| Page | Port | XROM | RAM | Bank|\n\r");
+  cdc_send_console((char*)"| Page | Port | XROM | RAM | Name             |\n\r");
   BAR_M();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
     n = sprintf(cbuff,"|  #%X  | ", i);
@@ -92,15 +118,29 @@ void list_modules(void)
     }
 
     if( modules.isInserted(i) ) {
-      n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
+      if( i == 4 )
+        n += sprintf(cbuff+n," --  | ");  // No XROM values in page 4
+      else
+        n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
       n += sprintf(cbuff+n,"%3.3s |", modules.isRam(i) ? "Yes" : "" );
+      n += sprintf(cbuff+n," %-16.16s |", modules[i]->getName() );
+      if( modules[i]->haveBank(1))
+        n += sprintf(cbuff+n," %s", modules[i]->getName(1) );
     } else {
       n += sprintf(cbuff+n,"     |     |");
+      n += sprintf(cbuff+n," %16.16s |", "" );
     }
-    n += sprintf(cbuff+n," %3.3s |\n\r", modules[i]->haveBank() ? "Yes" : "" );
+    n += sprintf(cbuff+n,"\n\r" );
     cdc_send_console(cbuff);
   }
   BAR_B();
+/*
+  FL_Head_t fx;
+  for(int m=0; m<3; m++) {
+    readFlash(PAGE1(0)+ m*sizeof(FL_Head_t), (uint8_t*)&fx, sizeof(FL_Head_t));
+    sprintf(cbuff, "(%d) Read flash --> offs %08X <%s>\n\r", sizeof(FL_Head_t), fx.offs, fx.name);
+    cdc_send_console(cbuff);
+  }*/
 }
 
 extern void list_brks(void);
@@ -404,6 +444,7 @@ void tag(void) {
 }
 
 extern void reset_bus_buffer(void);
+extern void initRoms(void);
 
 SERIAL_COMMAND serial_cmds[] = {
   { 'h', serial_help,       "Serial command help"  },
@@ -421,11 +462,13 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'l', list_modules,      "List modules"  },
+  { 'L', all_modules,       "All modules"  },
   { 'M', mem_emulate,       "Enable Memory modules"  },
   { 'm', mem_modules,       "Number of Memory modules"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
+  { 'O', initRoms,          "Init Roms" },
   { 'w', wand_test,         "Example bar code"  },
   { 'q', sel_qram,          "Select QRAM page"  },
   { 'Q', quit_log,          "Stop logging"  },

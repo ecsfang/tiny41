@@ -48,18 +48,23 @@ void bus_init(void)
     INIT_PIN(P_DATA_DRV, GPIO_OUT, 0);
     // Init the FI driver ...
     INIT_PIN(P_FI_OE, GPIO_OUT, DISABLE_OE);
-#ifdef PIMORONI_PICOLIPO_16MB
+#if defined(PIMORONI_PICOLIPO_16MB)
     // Init leds ...
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
     INIT_PIN(P_IR_LED, GPIO_OUT, LED_OFF);
     INIT_PIN(P_PWO, GPIO_IN, 0);
 //    gpio_pull_down(P_PWO);
 //    gpio_pull_down(P_SYNC);
-#endif
-#ifdef PIMORONI_TINY2040_8MB
+#elif defined(PIMORONI_TINY2040_8MB)
     // Init leds ...
     INIT_PIN(LED_PIN_R, GPIO_OUT, LED_OFF);
     INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
+#elif defined(RASPBERRYPI_PICO2)
+    INIT_PIN(LED_PIN_B, GPIO_OUT, LED_OFF);
+    INIT_PIN(P_IR_LED, GPIO_OUT, LED_OFF);
+    INIT_PIN(P_PWO, GPIO_IN, 0);
+#else
+#error("Must define a board!")
 #endif
 }
 
@@ -76,11 +81,12 @@ void Render(int r)
 
 void dispOverflow(bool bOvf)
 {
-#ifdef PIMORONI_PICOLIPO_16MB
+#if defined(PIMORONI_PICOLIPO_16MB)
     gpio_put(LED_PIN_B, bOvf ? LED_ON : LED_OFF);
-#endif
-#ifdef PIMORONI_TINY2040_8MB
+#elif defined(PIMORONI_TINY2040_8MB)
     gpio_put(LED_PIN_R, bOvf ? LED_ON : LED_OFF);
+#elif defined(RASPBERRYPI_PICO2)
+    gpio_put(LED_PIN_B, bOvf ? LED_ON : LED_OFF);
 #endif
     printLCD("OV_FLOW", 1, STATUS_ROW);
     const char *bErr = bOvf ? "Buffer overflow!" : "                ";
@@ -314,6 +320,9 @@ int main()
 
     while( cdc_read_byte(ITF_CONSOLE) != -1 )
         ;
+
+    sprintf( cbuff, "LED @ pin %d\n\r", LED_PIN_B);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 
     gpio_put(LED_PIN_B, LED_OFF);
 

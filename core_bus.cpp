@@ -19,6 +19,7 @@
 #include "usb/cdc_helper.h"
 #include "module.h"
 #include "modfile.h"
+#include "fltools/fltools.h"
 
 //#define RESET_FLASH
 //#define RESET_RAM
@@ -179,15 +180,16 @@ int pageAdjust(int addr)
 void erasePort(int n, bool bPrt=true)
 {
   if( bPrt ) {
-    printf("\nErasing target region %X ", n);
-    printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
+    int i = sprintf(cbuff, "\n\rErasing target region %X ", n);
+    sprintf(cbuff+i, "-- [%05X - %05X]\n\r", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
   }
   uint32_t ints = save_and_disable_interrupts();
   flash_range_erase(PAGE1(n), FLASH_SECTOR_SIZE);
   flash_range_erase(PAGE2(n), FLASH_SECTOR_SIZE);
   restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
   if( bPrt ) {
-    printf("Done!\n");
+    cdc_send_string_and_flush(ITF_CONSOLE, (char*)"Done!\n\r");
   }
 }
 
@@ -196,7 +198,8 @@ void writeFlash(int offs, uint8_t *data, int sz)
   uint32_t ints = save_and_disable_interrupts();
   flash_range_program(offs, data, sz);
   restore_interrupts(ints);
-  printf(" --> Write flash @ %08X %d bytes\n", offs, sz);
+  sprintf(cbuff, " --> Write flash @ %08X %d bytes\n\r", offs, sz);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 // Write data to given flash port
@@ -233,22 +236,6 @@ const uint8_t *flashPointer(int offs)
 // Make space for information about all flash images
 CModules modules;
 
-// Read flash into ram with right endian
-void readPort(int n, uint16_t *data)
-{
-  // Point at the wanted flash image ...
-  const char *fp8 = (char*)flashPointer(PAGE1(n));
-  if( get_file_format(fp8) ) {
-    // Read MOD format
-    extract_roms(fp8, modules.port(n));
-    return;
-  }
-  const uint16_t *fp16 = (uint16_t*)fp8;
-  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
-    // Swap order to get right endian of 16-bit word ...
-    data[i] = swap16(*fp16++);
-  }
-}
 // Read flash into ram whitout swapping
 void readFlash(int offs, uint8_t *data, uint16_t size)
 {
@@ -259,6 +246,41 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
   cdc_send_string_and_flush(ITF_TRACE, cbuff);
 }
 
+FL_Head_t flHead;
+
+int findModule(const char *mod)
+{
+  int n = 0;
+  readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&flHead, sizeof(FL_Head_t));
+  while( flHead.offs ) {
+    n++;
+    if( strcmp(flHead.name, mod) == 0 )
+      return n;
+    readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&flHead, sizeof(FL_Head_t));
+  }
+  return 0;
+}
+
+// Read flash #n into ram with right endian
+int readPort(int n, int page, uint16_t *data)
+{
+  // Read from config to get offset to image
+  const char *fp8 = (char*)flHead.offs;
+
+  if( get_file_format(fp8) ) {
+    // Read MOD format
+    delete[] data; // Not used ...
+    extract_roms(fp8, page);
+    return 1; // MOD file - handled!
+  }
+  const uint16_t *fp16 = (uint16_t*)fp8;
+  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
+    // Swap order to get right endian of 16-bit word ...
+    data[i] = swap16(*fp16++);
+  }
+  return 0; // ROM file - just read ...
+}
+
 // Save a ram image to flash (emulate Q-RAM)
 void saveRam(int port, int ovr = 0)
 {
@@ -267,14 +289,14 @@ void saveRam(int port, int ovr = 0)
     if (ovr || modules.isDirty(port)) {
       modules.clear(port);
       erasePort(port, false);
-      writePort(port, modules.image(port,0));
+      writePort(port, modules.image(port));
       n = sprintf(cbuff, "Wrote RAM[%X] to flash\n\r", port);
     }
   } else {
       n = sprintf(cbuff, "Invalid page! [%X]\n\r", port);
   }
   if( n )
-    cdc_send_string_and_flush(ITF_TRACE, cbuff);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 
@@ -296,15 +318,25 @@ void qRam(int page)
   }
 }
 
-void loadPage(int page, int bank = 0)
+void loadPage(const char *mod, int page, int bank = 0)
 {
   int n;
-  // Read flash image
+
+  // Check that the module is loaded in flash
+  int rom = findModule(mod);
+  if( !rom )
+    return;
+
+  // Create space for flash image
   uint16_t *img = new uint16_t[PAGE_SIZE];
   if( !img )
     return;
 
-  readPort(page+(bank?NR_PAGES:0), img);
+  // Read ROM or MOD file into img
+  if( readPort(rom, page, img) )
+    return; // MOD file - all set and done!
+
+  // If ROM file read - check it ...
   int nErr = 0; // Nr of errors
   int nClr = 0; // Nr of erased words
   // Check that image is valid (10 bits)
@@ -315,7 +347,6 @@ void loadPage(int page, int bank = 0)
         nClr++;
     }
   }
-#if 1
   // Verify loaded code
   if( nClr == PAGE_SIZE ) {
     n = sprintf(cbuff, "%04X -> Image is cleared!", page*PAGE_SIZE);
@@ -336,19 +367,19 @@ void loadPage(int page, int bank = 0)
   }
   n += sprintf(cbuff+n, "\n\r");
   cdc_send_string(ITF_TRACE, cbuff);
-#endif
   if( !nErr ) {
-    modules.add(page, img, bank);
-    if( modules[page]->haveBank() ) {
-      sprintf(cbuff, "HaveBank: %d\n\r", modules[page]->haveBank());
-      cdc_send_string(ITF_TRACE, cbuff);
-    }
-  } else
+    // If no errors - insert into the specified port
+    sprintf(cbuff,"Load ROM %s to port %X bank %d ...\n\r", flHead.name, page, bank);
+    cdc_send_string_and_flush(ITF_TRACE, cbuff);
+    modules.addImage(page, img, bank, flHead.name);
+  } else {
+    // Release the memory
     delete[] img;
+  }
   cdc_flush(ITF_TRACE);
 }
 
-void initRoms()
+void initRoms(void)
 {
 
 #ifdef RESET_RAM
@@ -365,18 +396,16 @@ void initRoms()
   // Remove all modules ...
   modules.clearAll();
 
-  // Check for existing images and load them ...
-  for (int port = FIRST_PAGE; port <= LAST_PAGE; port++) {
-    int pIdx = port - FIRST_PAGE;
-    loadPage(port);
-  }
-  // Load second bank of printer-ROM (if available)
-  loadPage(6, 1);
+  loadPage("PPC", 8);
+  loadPage("IR-PRINT", 0);
+  loadPage("ZENROM", 12);
+  loadPage("EXT-FUNS", 10);
+
   // Unplug Service ROM if inserted (has to be done manually)
   if( modules.isInserted(4) )
     modules.unplug(4);
   // TBD - Now RAM-page is hardcoded to port C
-  qRam(0xC);
+  //qRam(0xC);
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
@@ -797,7 +826,7 @@ void core1_main_3(void)
         case INST_ENBANK3:
         case INST_ENBANK4:
             // Switch bank (if any) ...
-            mp->bank(cmd);
+            mp->selectBank(cmd);
           cmd = 0;
           break;
         }
@@ -887,6 +916,18 @@ void core1_main_3(void)
         }
         if( bTiny ) {
           // Handle any specific Tiny41 instructions
+#if 1
+          switch(cmd) {
+            case 0x03A:
+              // C=PIL
+              DATA_OUTPUT(0x12345678ABCDEL);
+              break;
+            case 0x003:
+              break;
+            case 0x005:
+              break;
+          }
+#else
           switch(cmd & 0b1110) {
             case NPIC_TINY_RAW_INIT:
               // Init raw file transfer...
@@ -902,6 +943,7 @@ void core1_main_3(void)
               // Done with raw file transfer!
               break;
           }
+#endif
           // Check if return-bit is set
           if( cmd & 1)
             bTiny = false;
@@ -1476,7 +1518,8 @@ void handle_bus(volatile Bus_t *pBus)
         CModule *m = modules[p];
         if( m->isLoaded() && m->isRam() && m->isDirty() ) {
           saveRam(p);
-          printf("Updated QRAM in page #X\n\r", p);
+          sprintf(cbuff, "Updated QRAM in page #X\n\r", p);
+          cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
         }
       }
 #ifdef USE_XF_MODULE

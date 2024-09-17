@@ -305,6 +305,37 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync)
 					}
 				}
 				break;
+			case PER_HPIL_0:
+			case PER_HPIL_1:
+			case PER_HPIL_2:
+			case PER_HPIL_3:
+			case PER_HPIL_4:
+			case PER_HPIL_5:
+			case PER_HPIL_6:
+			case PER_HPIL_7:
+				switch(inst & 0x3F) {
+				case 0x3A:
+					pDis = disMod("C=PREG %X", mod);
+					break;
+				case 0x03:
+					pDis = disMod("?PFSET %X", mod);
+					break;
+				default:
+					if( (inst & 0x003) == 0x001) {
+						pDis = disMod("CH= @%03o", inst >> 2);
+/*						switch( inst >> 2 ) {
+						case 0001: pDis = sprintf(disBuf, "SET MASTER CLEAR"); break;
+						case 0201: pDis = sprintf(disBuf, "COMMAND CLASS (BIT 7)"); break;
+						case 0232: pDis = sprintf(disBuf, "AAU - AUTO ADDR UNCONFIGURE"); break;
+						case 0241: pDis = sprintf(disBuf, "READY CLASS (BITS 7 & 5)"); break;
+						case 0301: pDis = sprintf(disBuf, "IDENTIFY CLASS (BITS 7 & 6)"); break;
+						case 0342: pDis = sprintf(disBuf, "SC=CA=TA=1"); break;
+						***/
+					} else {
+					pDis = sprintf(disBuf, "0x%03X o%04o", inst, inst);
+					}
+				}
+			  break;
 			default:
 				switch( inst & 0x3F ) {
 				case 0x03:	// Check peripheral flag N

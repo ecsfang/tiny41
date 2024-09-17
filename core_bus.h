@@ -30,6 +30,7 @@
 #define INST_MASK   (BIT_10-1)
 #define FIRST_PAGE  0x04
 #define NR_PAGES    0x10
+#define NR_BANKS    4
 #define LAST_PAGE   (NR_PAGES - 1)
 #define PAGE(p)     (p>>12)
 #define ISA_SHIFT   44

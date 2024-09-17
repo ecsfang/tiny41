@@ -94,5 +94,5 @@ typedef struct {
   };
 } ModuleFilePage;
 
-int extract_roms( const char *flashPtr, CModule *mod );
+int extract_roms( const char *flashPtr, int page);
 int get_file_format(const char *lpszFormat);

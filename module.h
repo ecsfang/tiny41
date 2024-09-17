@@ -10,49 +10,81 @@ enum {
 };
 
 // Helper to decode the bank instruction
-static uint8_t nBank[4] = {0,2,1,3};
+static uint8_t nBank[NR_BANKS] = {0,2,1,3};
 
 // This class handles a single module (with up to 4 banks)
 class CModule {
-  uint16_t  *m_banks[4];  // Pointer to each bank (up to 4 images)
-  uint16_t  *m_img;       // Pointer to current image
-  uint8_t   m_flgs;       // Status of the module
-//  uint8_t   m_bank;
-//  uint8_t   m_port;
+  uint16_t  *m_banks[NR_BANKS];      // Pointer to each bank (up to 4 images)
+  char       m_name[NR_BANKS][16+1]; // Name of the module
+  uint16_t  *m_img;                  // Pointer to current image
+  uint8_t    m_flgs;                 // Status of the module
+  uint8_t    m_cBank;                // Currently selected bank
 public:
+  void dump(int p) {
+    sprintf(cbuff, "%X: [%X:%X:%X:%X][%s:%s:%s:%s][%X]-%02X-%d\n\r",
+      p,
+      m_banks[0],m_banks[1],m_banks[2],m_banks[3],
+      m_name[0],m_name[1],m_name[2],m_name[3],
+      m_img, m_flgs,m_cBank);
+    cdc_send_string_and_flush(ITF_TRACE, cbuff);
+  }
   CModule() {
     m_img = NULL;
-//    m_bank = 0;
-//    m_port = 0;
-    for( int i=0; i<4; i++ )
-      m_banks[i] = NULL;
+    memset(m_banks, 0, NR_BANKS*sizeof(uint16_t));
+    memset(m_name,  0, NR_BANKS*(16+1));
+    m_cBank = 0;
+  }
+  void removeBank(int bank) {
+    if( image(bank) ) {
+//      sprintf(cbuff, "Remove bank %d\n\r", bank);
+//      cdc_send_string_and_flush(ITF_TRACE, cbuff);
+      delete[] m_banks[bank];
+      m_banks[bank] = 0;
+      m_name[bank][0] = 0;
+    }
+  }
+  void remove() {
+    m_flgs = m_cBank = 0;
+    m_img = NULL;
+//    sprintf(cbuff, "Remove port!\n\r");
+//    cdc_send_string_and_flush(ITF_TRACE, cbuff);
+    for(int b=0; b<NR_BANKS; b++)
+      removeBank(b);
+    memset(m_name,  0, NR_BANKS*(16+1));
   }
   // Connect an image to the correct bank of the module
-  void set(uint16_t *image, int bank = 0) {
-    // Remove any previous image
-    if( m_banks[bank] )
-      delete[] m_banks[bank];
-    m_banks[bank] = image;
+  void setImage(uint16_t *img, int bank = 0, char *name=NULL) {
+    // Remove any previous image and name
+    removeBank(bank);
+    m_banks[bank] = img;
     m_img = m_banks[0];
-    m_flgs = IMG_INSERTED;
+    if( name )
+      strncpy(m_name[bank], name, 16);
+    if( bank == 0 )
+      m_flgs = IMG_INSERTED;
   }
   // Select current bank given bank-instruction
-  void bank(int bank) {
+  void selectBank(int bank) {
     // Convert from instruction to bank #
     bank = nBank[(bank>>6)&0b11];
     // If bank is present - update image pointer
-    if( image(bank) )
-      m_img = image(bank);
+    if( image(bank) ) {
+      m_cBank = bank;
+      m_img = image(m_cBank);
+    }
   }
   // Return pointer to bank image
   uint16_t *image(int bank) {
     return m_banks[bank];
   }
-  void port(int p) {
-//    m_port = p;
+  //
+  char *getName(int bank = 0) {
+    return m_name[bank];
   }
   // True if more than the default bank
-  bool haveBank(void) {
+  bool haveBank(int bank = 0) {
+    if( bank )
+      return m_banks[bank] ? true : false;
     return (m_banks[1]||m_banks[2]||m_banks[3]) ? true : false;
   }
   // Deselect any bank and pull from address space
@@ -116,19 +148,23 @@ public:
   CModules() {
     clearAll();
   }
-  void add(int port, uint16_t *image, int bank) {
-	  if( image ) {
-      m_modules[port].set(image, bank);
-      printf("Add ROM @ %04X - %04X [bank %d]\n", port * PAGE_SIZE, (port * PAGE_SIZE)|PAGE_MASK, bank);
+  void addImage(int port, uint16_t *img, int bank, char *name) {
+	  if( img ) {
+      m_modules[port].setImage(img, bank, name);
   	} 
   }
-  uint16_t *image(int port, int bank) {
+  void dump(void) {
+    for(int p=0; p<NR_PAGES; p++)
+      m_modules[p].dump(p);
+  }
+  uint16_t *image(int port, int bank=0) {
     return m_modules[port].image(bank);
   }
+  // Remove all modules and clear all settings
   void clearAll() {
-    memset(m_modules, 0, sizeof(CModule) * NR_PAGES);
     for(int p=0; p<NR_PAGES; p++)
-      m_modules[p].port(p);
+      m_modules[p].remove();
+    memset(m_modules, 0, sizeof(CModule) * NR_PAGES);
   }
   void remove(int port) {
     m_modules[port].clr();
