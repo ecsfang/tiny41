@@ -37,8 +37,8 @@ int main(int argc, char *argv[])
 {
   char buf[1024];
   FL_Head_t fl;
-  int x = 0;
-  int startOffs = 0x10080000;
+  int x = 8;  // Start of FAT
+  int startOffs = 0x10080000 + x*4*1024;
   char *p;
   long fz;
 
@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
   FILE *ini = fopen("iflash.ini", "w");
  
   initBin(bin, startOffs);
-  x += 2;
+  x += 4;  // Size of FAT
 	while(fgets(buf, 1024, cfg)) {
     if( buf[0] == '#' )
       continue;
@@ -57,6 +57,10 @@ int main(int argc, char *argv[])
     if( *p == 0x0A )
       *p = 0;
     fz = GetFileSize(buf);
+    if( fz == -1 ) {
+      printf("File <%s> not found ...\n",  buf);
+      continue;
+    }
     fl.offs = startOffs + x * 4 * 1024;
     saveBin(bin, x, fl.offs, buf, fz);
     while(*p != '.')

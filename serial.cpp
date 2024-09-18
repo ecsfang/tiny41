@@ -80,18 +80,23 @@ void all_modules(void)
   FL_Head_t fl;
   int i, n = 0;
   const char *typ;
-  readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
-  while( fl.offs ) {
-    n++;
-    if( fl.type == FL_MOD ) typ = "MOD";
-    else if( fl.type == FL_ROM ) typ = "ROM";
-    else typ = "???";
-    i = sprintf(cbuff,"| %3d | %-16.16s | %3.3s | %08X | ",
-      n, fl.name, typ, fl.offs );
-    i += mod_info((const char *)fl.offs, cbuff+i);
-    i += sprintf(cbuff+i,"\n\r");
-    cdc_send_console(cbuff);
-    readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
+  readFlash(PAGE1(4)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
+  if( fl.offs ) {
+    cdc_send_console((char*)"\n\rInstalled modules\n\r");
+    while( fl.offs ) {
+      n++;
+      if( fl.type == FL_MOD ) typ = "MOD";
+      else if( fl.type == FL_ROM ) typ = "ROM";
+      else typ = "???";
+      i = sprintf(cbuff,"| %3d | %-16.16s | %3.3s | %08X | ",
+        n, fl.name, typ, fl.offs );
+      i += mod_info((const char *)fl.offs, cbuff+i);
+      i += sprintf(cbuff+i,"\n\r");
+      cdc_send_console(cbuff);
+      readFlash(PAGE1(4)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
+    }
+  } else {
+    cdc_send_console((char*)"\n\rNo installed modules!\n\r");
   }
 }
 

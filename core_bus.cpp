@@ -251,12 +251,12 @@ FL_Head_t flHead;
 int findModule(const char *mod)
 {
   int n = 0;
-  readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&flHead, sizeof(FL_Head_t));
+  readFlash(PAGE1(4), (uint8_t*)&flHead, sizeof(FL_Head_t));
   while( flHead.offs ) {
     n++;
     if( strcmp(flHead.name, mod) == 0 )
       return n;
-    readFlash(PAGE1(0)+ n*sizeof(FL_Head_t), (uint8_t*)&flHead, sizeof(FL_Head_t));
+    readFlash(PAGE1(4)+ n*sizeof(FL_Head_t), (uint8_t*)&flHead, sizeof(FL_Head_t));
   }
   return 0;
 }
@@ -396,10 +396,10 @@ void initRoms(void)
   // Remove all modules ...
   modules.clearAll();
 
-  loadPage("PPC", 8);
-  loadPage("IR-PRINT", 0);
-  loadPage("ZENROM", 12);
-  loadPage("EXT-FUNS", 10);
+//  loadPage("PPC", 8);
+//  loadPage("IR-PRINT", 0);
+//  loadPage("ZENROM", 12);
+//  loadPage("EXT-FUNS", 10);
 
   // Unplug Service ROM if inserted (has to be done manually)
   if( modules.isInserted(4) )
