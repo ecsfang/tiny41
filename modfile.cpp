@@ -111,6 +111,7 @@ their page number hardcoded.
 #include "modfile.h"
 
 extern CModules modules;
+extern void qRam(int page);
 
 /*******************************/
 #if 0
@@ -256,6 +257,8 @@ int extract_roms( const char *flashPtr, int port) //CModule *mod )
       sprintf(cbuff,"Load MOD %s to port %d bank %d ...\n\r", pMFP->header.Name, port, nBank);
       cdc_send_string_and_flush(ITF_TRACE, cbuff);
       modules.addImage(port, ROM, nBank, pMFP->header.Name);
+      if( pMFP->header.RAM )
+        qRam(port);
       port++;
     }
   }

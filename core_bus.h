@@ -318,12 +318,36 @@ extern volatile uint8_t wprt;
 
 extern void readFlash(int offs, uint8_t *data, uint16_t size);
 
+#define FLASH_PAGE(n) (FLASH_TARGET_OFFSET + (n) * FLASH_SECTOR_SIZE)
+
+/*
+There is a very simple FAT table, consiting of:
+name (<24 characters describing the entry)
+offset - offset in flash for the start of the data
+type   - type of entry: MOD/RAM/ROM
+Last entry have offset == 0
+4 pages are reserved for the FAT:
+--> 4 * 4 * 1024 / 32 bytes -> 512 entries (modules)
+*/
+
+#if defined(PIMORONI_PICOLIPO_16MB)
+#define FLASH_SIZE  ((16*1024*1024)-1)
+#elif defined(PIMORONI_TINY2040_8MB)
+#define FLASH_SIZE  ((8*1024*1024)-1)
+#elif defined(RASPBERRYPI_PICO2)
+#define FLASH_SIZE  ((4*1024*1024)-1)
+#else
+#error("Must define a board!")
+#endif
+
 class CFat_t {
-  FL_Head_t fatEntry;
+  FL_Head_t *p_fatEntry;
   int m_pos;
 public:
   void next() {
-    readFlash(PAGE1(FAT_PAGE/2) + m_pos*sizeof(FL_Head_t), (uint8_t*)&fatEntry, sizeof(FL_Head_t));
+    // Reads FAT entry
+    p_fatEntry = (FL_Head_t*)(XIP_BASE + FLASH_PAGE(FAT_PAGE) + m_pos*sizeof(FL_Head_t));
+    //readFlash(FLASH_PAGE(FAT_PAGE) + m_pos*sizeof(FL_Head_t), (uint8_t*)&fatEntry, sizeof(FL_Head_t));
     m_pos++;
   }
   void first() {
@@ -333,16 +357,16 @@ public:
   int find(const char *mod) {
     first();
     while( offs() > 0 ) {
-      if( strcmp(fatEntry.name, mod) == 0 )
+      if( strcmp(p_fatEntry->name, mod) == 0 )
         return m_pos;
       next();
     }
     return 0;
   }
   int offs(void) {
-    if( fatEntry.offs > 0xFFFFFF )
+    if( p_fatEntry->offs > FLASH_SIZE )
       return 0;
-    return fatEntry.offs & 0xFFFFFF;
+    return p_fatEntry->offs & FLASH_SIZE;
   }
   char *offset(void) {
     return (char*)offs();
@@ -351,10 +375,10 @@ public:
     return (char*)(offs() | XIP_BASE);
   }
   char *name(void) {
-    return fatEntry.name;
+    return p_fatEntry->name;
   }
   int type(void) {
-    return fatEntry.type;
+    return p_fatEntry->type;
   }
 };
 

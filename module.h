@@ -16,6 +16,7 @@ static uint8_t nBank[NR_BANKS] = {0,2,1,3};
 class CModule {
   uint16_t  *m_banks[NR_BANKS];      // Pointer to each bank (up to 4 images)
   char       m_name[NR_BANKS][16+1]; // Name of the module
+  int        offset;                 // Offset to file in flash
   uint16_t  *m_img;                  // Pointer to current image
   uint8_t    m_flgs;                 // Status of the module
   uint8_t    m_cBank;                // Currently selected bank
@@ -36,8 +37,6 @@ public:
   }
   void removeBank(int bank) {
     if( image(bank) ) {
-//      sprintf(cbuff, "Remove bank %d\n\r", bank);
-//      cdc_send_string_and_flush(ITF_TRACE, cbuff);
       delete[] m_banks[bank];
       m_banks[bank] = 0;
       m_name[bank][0] = 0;
@@ -46,8 +45,6 @@ public:
   void remove() {
     m_flgs = m_cBank = 0;
     m_img = NULL;
-//    sprintf(cbuff, "Remove port!\n\r");
-//    cdc_send_string_and_flush(ITF_TRACE, cbuff);
     for(int b=0; b<NR_BANKS; b++)
       removeBank(b);
     memset(m_name,  0, NR_BANKS*(16+1));

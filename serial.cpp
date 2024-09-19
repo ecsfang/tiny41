@@ -77,19 +77,25 @@ extern int mod_info(const char *flashPtr, char *buf);
 
 extern CFat_t fat;
 
+/*
+ * List all modules that are installed in flash
+ */
 void all_modules(void)
 {
   int i, n = 0;
-  const char *typ;
+  char typ[5];
   fat.first();
   if( fat.offset() ) {
     cdc_send_console((char*)"\n\rInstalled modules\n\r");
     while( fat.offset() ) {
       n++;
-      if( fat.type() == FL_MOD ) typ = "MOD";
-      else if( fat.type() == FL_ROM ) typ = "ROM";
-      else typ = "???";
-      i = sprintf(cbuff,"| %3d | %-16.16s | %3.3s | %08X | ",
+      switch( fat.type() ) {
+      case FL_MOD: strcpy(typ, " MOD"); break;
+      case FL_RAM: strcpy(typ, "+RAM"); break;
+      case FL_ROM: strcpy(typ, " ROM"); break;
+      default:     strcpy(typ, " ???");
+      }
+      i = sprintf(cbuff,"| %3d | %-16.16s |%4.4s | %08X | ",
         n, fat.name(), typ, fat.offset() );
       i += mod_info(fat.flOffset(), cbuff+i);
       i += sprintf(cbuff+i,"\n\r");
@@ -101,6 +107,9 @@ void all_modules(void)
   }
 }
 
+/*
+ * List all modules that are plugged into the emulator
+ */
 void list_modules(void)
 {
   extern CModules modules;
@@ -140,15 +149,6 @@ void list_modules(void)
     cdc_send_console(cbuff);
   }
   BAR_B();
-
-  extern CFat_t fat;
-/*
-  fat.first();
-  for(int m=0; m<3; m++) {
-    sprintf(cbuff, "(%d) Read flash --> offs %08X <%s>\n\r", sizeof(FL_Head_t), fat.offs(), fat.name());
-    cdc_send_console(cbuff);
-    fat.next();
-  }**/
 }
 
 extern void list_brks(void);

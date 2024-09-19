@@ -152,7 +152,7 @@ int main()
 
     // Must read flash before we goto highspeed ...
     logC("Init ROMs ...");
-    initRoms();
+    initRoms(1); // Load all current modules ...
 
     logC("Init XMemory ...");
 #ifdef USE_XFUNC

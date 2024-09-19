@@ -22,7 +22,7 @@
 //#define RESET_FLASH
 //#define RESET_RAM
 
-CFat_t fat;
+CFat_t fat; // Holds the current FAT entry
 
 extern CDisplay    disp41;
 
@@ -247,8 +247,6 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
     return;
   }
   memcpy(data, fp, size);
-  sprintf(cbuff, " <-- Read flash @ %08X %d bytes\n\r", offs, size);
-  cdc_send_string_and_flush(ITF_TRACE, cbuff);
 }
 
 // Read flash #n into ram with right endian
@@ -272,8 +270,13 @@ int readPort(int n, int page, uint16_t *data)
 }
 
 // Save a ram image to flash (emulate Q-RAM)
+// This must be updated!
+// If loaded from ROM, then that page should be updated
+// If loaded from MOD, the we must check which page etc that
+// needs to be updated.
 void saveRam(int port, int ovr = 0)
 {
+#if 0
   int n = 0;
   if( port >= FIRST_PAGE && port < NR_PAGES ) {
     if (ovr || modules.isDirty(port)) {
@@ -287,6 +290,9 @@ void saveRam(int port, int ovr = 0)
   }
   if( n )
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  sprintf(cbuff, "Save RAM @ page %d implemented yet! [%X]\n\r", port);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 
@@ -313,6 +319,7 @@ void loadPage(const char *mod, int page, int bank = 0)
   int n;
 
   // Check that the module is loaded in flash
+  // FAT is updatedt to point to this entry
   int rom = fat.find(mod);
   if( !rom )
     return;
@@ -363,7 +370,7 @@ void loadPage(const char *mod, int page, int bank = 0)
     cdc_send_string_and_flush(ITF_TRACE, cbuff);
     modules.addImage(page, img, bank, fat.name());
   } else {
-    // Release the memory
+    // Error - release the memory
     delete[] img;
   }
   cdc_flush(ITF_TRACE);
@@ -371,32 +378,21 @@ void loadPage(const char *mod, int page, int bank = 0)
 
 void initRoms(int set)
 {
-
-#ifdef RESET_RAM
-  for (int i = 0; i < RAM_SIZE; i++)
-    rom_pages[0xC - FIRST_PAGE][i] = 0x0000;
-  printf("Clear MLDL RAM-page ...\n");
-  saveRam(0xC, 1);
-#endif
-#ifdef RESET_FLASH
-  // Erase all images from flash
-  for (int p = 0; p < NR_PAGES; p++)
-    erasePort(p);
-#endif
   // Remove all modules ...
   modules.clearAll();
 
   if( set ) {
+    // This list should be read from saved config data
     loadPage("PPC", 8);
     loadPage("IR-PRINT", 0);
     loadPage("ZENROM", 12);
-    loadPage("EXT-FUNS", 10);
+    loadPage("RAM8K", 10);
   }
   // Unplug Service ROM if inserted (has to be done manually)
-  if( modules.isInserted(4) )
-    modules.unplug(4);
-  // TBD - Now RAM-page is hardcoded to port C
-  //qRam(0xC);
+  if( modules.isInserted(4) ) {
+    if( strncmp(modules[4]->getName(), "SERVICE", 7) )
+      modules.unplug(4);
+  }
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
