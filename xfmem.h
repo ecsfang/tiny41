@@ -6,31 +6,6 @@
 // Each port contains two 4k flash pages since 10 bits are stored (4k * uint16_t)
 // ROM is not packed in flash due to compatibility with ROM file format
 // And packed file would still be larger than 4k ...
-#define PAGEn(n,i) (FLASH_TARGET_OFFSET + (2 * (n) + i) * FLASH_SECTOR_SIZE)
-#define PAGE1(n) PAGEn(n,0)
-#define PAGE2(n) PAGEn(n,1)
-
-
-#define XMEM_XF_START   0x40
-#define XMEM_XF_END     0xC0
-#define XMEM_XF_SIZE    (XMEM_XF_END-XMEM_XF_START)
-#define XMEM_XF_OFFS    0x000
-#define XMEM_XM1_START  0x201
-#define XMEM_XM1_END    0x2F0
-#define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START)
-#define XMEM_XM1_OFFS   XMEM_XF_SIZE
-#define XMEM_XM2_START  0x301
-#define XMEM_XM2_END    0x3F0
-#define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
-#define XMEM_XM2_OFFS   (XMEM_XF_SIZE+XMEM_XM1_SIZE)
-// Start of XMEMORY
-#define XF_PAGE         (0)
-#define XF_PAGES        (8)
-// Start of module FAT
-#define FAT_PAGE        (XF_PAGE+XF_PAGES)
-#define FAT_PAGES       (4)
-// Start of module pages
-#define MOD_PAGE        (FAT_PAGE+FAT_PAGES)
 
 #ifdef USE_XFUNC
 void saveXMem(int xpg);

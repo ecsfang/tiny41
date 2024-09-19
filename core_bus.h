@@ -8,8 +8,11 @@
 
 #include "instr.h"
 #include "ramdev.h"
-
+#include "fltools/fltools.h"
 #include "usb/cdc_helper.h"
+#include "hardware/flash.h"
+
+#include "tiny41.h"
 
 #define MASK_64_BIT    (0xFFFFFFFFFFFFFFFFL)
 #define MASK_56_BIT    (0x00FFFFFFFFFFFFFFL)
@@ -36,6 +39,31 @@
 #define ISA_SHIFT   44
 //#define TRACE_ISA
 #define QUEUE_STATUS
+
+#define PAGEn(n,i) (FLASH_TARGET_OFFSET + (2 * (n) + i) * FLASH_SECTOR_SIZE)
+#define PAGE1(n) PAGEn(n,0)
+#define PAGE2(n) PAGEn(n,1)
+
+#define XMEM_XF_START   0x40
+#define XMEM_XF_END     0xC0
+#define XMEM_XF_SIZE    (XMEM_XF_END-XMEM_XF_START)
+#define XMEM_XF_OFFS    0x000
+#define XMEM_XM1_START  0x201
+#define XMEM_XM1_END    0x2F0
+#define XMEM_XM1_SIZE   (XMEM_XM1_END-XMEM_XM1_START)
+#define XMEM_XM1_OFFS   XMEM_XF_SIZE
+#define XMEM_XM2_START  0x301
+#define XMEM_XM2_END    0x3F0
+#define XMEM_XM2_SIZE   (XMEM_XM2_END-XMEM_XM2_START)
+#define XMEM_XM2_OFFS   (XMEM_XF_SIZE+XMEM_XM1_SIZE)
+// Start of XMEMORY
+#define XF_PAGE         (0)
+#define XF_PAGES        (8)
+// Start of module FAT
+#define FAT_PAGE        (XF_PAGE+XF_PAGES)
+#define FAT_PAGES       (4)
+// Start of module pages
+#define MOD_PAGE        (FAT_PAGE+FAT_PAGES)
 
 // One bus cycle is about 1/6300 = 160us
 #define ONE_BUS_CYCLE 160 //us
@@ -288,7 +316,49 @@ inline void clrFI(int flag = FI_MASK) {
 extern volatile uint8_t prtBuf[PRT_BUF_LEN];
 extern volatile uint8_t wprt;
 
-void initRoms(void);
+extern void readFlash(int offs, uint8_t *data, uint16_t size);
+
+class CFat_t {
+  FL_Head_t fatEntry;
+  int m_pos;
+public:
+  void next() {
+    readFlash(PAGE1(FAT_PAGE/2) + m_pos*sizeof(FL_Head_t), (uint8_t*)&fatEntry, sizeof(FL_Head_t));
+    m_pos++;
+  }
+  void first() {
+    m_pos = 0;
+    next();
+  }
+  int find(const char *mod) {
+    first();
+    while( offs() > 0 ) {
+      if( strcmp(fatEntry.name, mod) == 0 )
+        return m_pos;
+      next();
+    }
+    return 0;
+  }
+  int offs(void) {
+    if( fatEntry.offs > 0xFFFFFF )
+      return 0;
+    return fatEntry.offs & 0xFFFFFF;
+  }
+  char *offset(void) {
+    return (char*)offs();
+  }
+  const char *flOffset(void) {
+    return (char*)(offs() | XIP_BASE);
+  }
+  char *name(void) {
+    return fatEntry.name;
+  }
+  int type(void) {
+    return fatEntry.type;
+  }
+};
+
+void initRoms(int set = 0);
 
 #ifdef USE_XF_MODULE
 #include "xfmem.h"

@@ -12,17 +12,17 @@
 #include "disasm.h"
 #include "serial.h"
 #include <malloc.h>
-#include "hardware/flash.h"
 #ifdef USE_PIO
 #include "ir_led.h"
 #endif
 #include "usb/cdc_helper.h"
 #include "module.h"
 #include "modfile.h"
-#include "fltools/fltools.h"
 
 //#define RESET_FLASH
 //#define RESET_RAM
+
+CFat_t fat;
 
 extern CDisplay    disp41;
 
@@ -241,31 +241,21 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
 {
   // Point at the wanted flash image ...
   const uint8_t *fp = flashPointer(offs);
+  if( ((int)fp) < 0x10000000 || ((int)fp) > 0x10FFFFFF ) {
+    sprintf(cbuff, "BAD FLASH POINTER: %p!\n\r", fp);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+    return;
+  }
   memcpy(data, fp, size);
   sprintf(cbuff, " <-- Read flash @ %08X %d bytes\n\r", offs, size);
   cdc_send_string_and_flush(ITF_TRACE, cbuff);
-}
-
-FL_Head_t flHead;
-
-int findModule(const char *mod)
-{
-  int n = 0;
-  readFlash(PAGE1(4), (uint8_t*)&flHead, sizeof(FL_Head_t));
-  while( flHead.offs ) {
-    n++;
-    if( strcmp(flHead.name, mod) == 0 )
-      return n;
-    readFlash(PAGE1(4)+ n*sizeof(FL_Head_t), (uint8_t*)&flHead, sizeof(FL_Head_t));
-  }
-  return 0;
 }
 
 // Read flash #n into ram with right endian
 int readPort(int n, int page, uint16_t *data)
 {
   // Read from config to get offset to image
-  const char *fp8 = (char*)flHead.offs;
+  const char *fp8 = (const char *)flashPointer(fat.offs());
 
   if( get_file_format(fp8) ) {
     // Read MOD format
@@ -323,7 +313,7 @@ void loadPage(const char *mod, int page, int bank = 0)
   int n;
 
   // Check that the module is loaded in flash
-  int rom = findModule(mod);
+  int rom = fat.find(mod);
   if( !rom )
     return;
 
@@ -369,9 +359,9 @@ void loadPage(const char *mod, int page, int bank = 0)
   cdc_send_string(ITF_TRACE, cbuff);
   if( !nErr ) {
     // If no errors - insert into the specified port
-    sprintf(cbuff,"Load ROM %s to port %X bank %d ...\n\r", flHead.name, page, bank);
+    sprintf(cbuff,"Load ROM %s to port %X bank %d ...\n\r", fat.name(), page, bank);
     cdc_send_string_and_flush(ITF_TRACE, cbuff);
-    modules.addImage(page, img, bank, flHead.name);
+    modules.addImage(page, img, bank, fat.name());
   } else {
     // Release the memory
     delete[] img;
@@ -379,7 +369,7 @@ void loadPage(const char *mod, int page, int bank = 0)
   cdc_flush(ITF_TRACE);
 }
 
-void initRoms(void)
+void initRoms(int set)
 {
 
 #ifdef RESET_RAM
@@ -396,11 +386,12 @@ void initRoms(void)
   // Remove all modules ...
   modules.clearAll();
 
-//  loadPage("PPC", 8);
-//  loadPage("IR-PRINT", 0);
-//  loadPage("ZENROM", 12);
-//  loadPage("EXT-FUNS", 10);
-
+  if( set ) {
+    loadPage("PPC", 8);
+    loadPage("IR-PRINT", 0);
+    loadPage("ZENROM", 12);
+    loadPage("EXT-FUNS", 10);
+  }
   // Unplug Service ROM if inserted (has to be done manually)
   if( modules.isInserted(4) )
     modules.unplug(4);

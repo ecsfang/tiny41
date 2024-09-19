@@ -21,7 +21,7 @@ void initBin(FILE *bin, int offs)
 
 void saveBin(FILE *bin, int x, int offs, char *rom, long size )
 {
-  fprintf(bin, "\necho Flash to %d\n", x);
+  fprintf(bin, "\necho Flash to 0x%X\n", offs);
   fprintf(bin, "mod=\"%s\" # The ROM file to flash (%ld bytes)\n", rom, size );
   fprintf(bin, "sudo $picotool load -v $mod -t bin -o 0x%X\n", offs);
 }
@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
   char buf[1024];
   FL_Head_t fl;
   int x = 8;  // Start of FAT
-  int startOffs = 0x10080000 + x*4*1024;
+  int startOffs = 0x00080000 + x*4*1024;
   char *p;
   long fz;
 
@@ -61,8 +61,8 @@ int main(int argc, char *argv[])
       printf("File <%s> not found ...\n",  buf);
       continue;
     }
-    fl.offs = startOffs + x * 4 * 1024;
-    saveBin(bin, x, fl.offs, buf, fz);
+    fl.offs = (startOffs + x * 4 * 1024);
+    saveBin(bin, x, fl.offs | 0x10000000, buf, fz);
     while(*p != '.')
       p--;
     if( !strcasecmp(p+1, "MOD") )

@@ -75,25 +75,26 @@ void service(void)
 extern void readFlash(int offs, uint8_t *data, uint16_t size);
 extern int mod_info(const char *flashPtr, char *buf);
 
+extern CFat_t fat;
+
 void all_modules(void)
 {
-  FL_Head_t fl;
   int i, n = 0;
   const char *typ;
-  readFlash(PAGE1(4)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
-  if( fl.offs ) {
+  fat.first();
+  if( fat.offset() ) {
     cdc_send_console((char*)"\n\rInstalled modules\n\r");
-    while( fl.offs ) {
+    while( fat.offset() ) {
       n++;
-      if( fl.type == FL_MOD ) typ = "MOD";
-      else if( fl.type == FL_ROM ) typ = "ROM";
+      if( fat.type() == FL_MOD ) typ = "MOD";
+      else if( fat.type() == FL_ROM ) typ = "ROM";
       else typ = "???";
       i = sprintf(cbuff,"| %3d | %-16.16s | %3.3s | %08X | ",
-        n, fl.name, typ, fl.offs );
-      i += mod_info((const char *)fl.offs, cbuff+i);
+        n, fat.name(), typ, fat.offset() );
+      i += mod_info(fat.flOffset(), cbuff+i);
       i += sprintf(cbuff+i,"\n\r");
       cdc_send_console(cbuff);
-      readFlash(PAGE1(4)+ n*sizeof(FL_Head_t), (uint8_t*)&fl, sizeof(FL_Head_t));
+      fat.next();
     }
   } else {
     cdc_send_console((char*)"\n\rNo installed modules!\n\r");
@@ -139,13 +140,15 @@ void list_modules(void)
     cdc_send_console(cbuff);
   }
   BAR_B();
+
+  extern CFat_t fat;
 /*
-  FL_Head_t fx;
+  fat.first();
   for(int m=0; m<3; m++) {
-    readFlash(PAGE1(0)+ m*sizeof(FL_Head_t), (uint8_t*)&fx, sizeof(FL_Head_t));
-    sprintf(cbuff, "(%d) Read flash --> offs %08X <%s>\n\r", sizeof(FL_Head_t), fx.offs, fx.name);
+    sprintf(cbuff, "(%d) Read flash --> offs %08X <%s>\n\r", sizeof(FL_Head_t), fat.offs(), fat.name());
     cdc_send_console(cbuff);
-  }*/
+    fat.next();
+  }**/
 }
 
 extern void list_brks(void);
@@ -449,7 +452,12 @@ void tag(void) {
 }
 
 extern void reset_bus_buffer(void);
-extern void initRoms(void);
+extern void initRoms(int set);
+
+void initRom(void)
+{
+  initRoms(1);
+}
 
 SERIAL_COMMAND serial_cmds[] = {
   { 'h', serial_help,       "Serial command help"  },
@@ -473,7 +481,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
   { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
-  { 'O', initRoms,          "Init Roms" },
+  { 'O', initRom,           "Init Roms" },
   { 'w', wand_test,         "Example bar code"  },
   { 'q', sel_qram,          "Select QRAM page"  },
   { 'Q', quit_log,          "Stop logging"  },
