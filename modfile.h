@@ -26,15 +26,59 @@ File size=sizeof(ModuleFileHeader)+NumPages*sizeof(ModuleFilePage)
 
 #pragma once
 
+#ifndef NO_EXTERNAL
+char *getPageName(const char *flashPtr, int page);
+//int extract_roms( const char *flashPtr, int page);
+int extract_roms( CFat_t *pFat, int page);
+int get_file_format(const char *lpszFormat);
+#endif
+
 typedef unsigned char byte;
 typedef unsigned short word;
 typedef unsigned long dword;
 
+#define ROM_FMT   0
+#define MOD1_FMT  1
+#define MOD2_FMT  2
+
 #define MOD_FORMAT  "MOD1"
 #define MOD_FORMAT2 "MOD2"
 
+/* Module type codes */
+#define CATEGORY_UNDEF          0  /* not categorized */
+#define CATEGORY_OS             1  /* base Operating System for C,CV,CX */
+#define CATEGORY_APP_PAC        2  /* HP Application PACs */
+#define CATEGORY_HPIL_PERPH     3  /* any HP-IL related modules and devices */
+#define CATEGORY_STD_PERPH      4  /* standard Peripherals: Wand, Printer, Card Reader, XFuns/Mem, Service, Time, IR Printer */
+#define CATEGORY_CUSTOM_PERPH   5  /* custom Peripherals: AECROM, CCD, HEPAX, PPC, ZENROM, etc */
+#define CATEGORY_BETA           6  /* BETA releases not fully debugged and finished */
+#define CATEGORY_EXPERIMENTAL   7  /* test programs not meant for normal usage */
 #define CATEGORY_MAX            7  /* maximum CATEGORY_ define value */
-#define HARDWARE_MAX            10 /* maximum HARDWARE_ define value */
+
+/* Hardware codes */
+#define HARDWARE_NONE                0  /* no additional hardware specified */
+#define HARDWARE_PRINTER             1  /* 82143A Printer */
+#define HARDWARE_CARDREADER          2  /* 82104A Card Reader */
+#define HARDWARE_TIMER               3  /* 82182A Time Module or HP-41CX built in timer */
+#define HARDWARE_WAND                4  /* 82153A Barcode Wand */
+#define HARDWARE_HPIL                5  /* 82160A HP-IL Module */
+#define HARDWARE_INFRARED            6  /* 82242A Infrared Printer Module */
+#define HARDWARE_HEPAX               7  /* HEPAX Module - has special hardware features (write protect, relocation) */
+#define HARDWARE_WWRAMBOX            8  /* W&W RAMBOX - has special hardware features (RAM block swap instructions) */
+#define HARDWARE_MLDL2000            9  /* MLDL2000 */
+#define HARDWARE_CLONIX              10 /* CLONIX-41 Module */
+#define HARDWARE_MAX                 10 /* maximum HARDWARE_ define value */
+
+/* relative position codes- do not mix these in a group except ODD/EVEN and UPPER/LOWER */
+/* ODD/EVEN, UPPER/LOWER can only place ROMS in 16K blocks */
+#define POSITION_MIN      0x1f   /* minimum POSITION_ define value */
+#define POSITION_ANY      0x1f   /* position in any port page (8-F) */
+#define POSITION_LOWER    0x2f   /* position in lower port page relative to any upper image(s) (8-F) */
+#define POSITION_UPPER    0x3f   /* position in upper port page */
+#define POSITION_EVEN     0x4f   /* position in any even port page (8,A,C,E) */
+#define POSITION_ODD      0x5f   /* position in any odd port page (9,B,D,F) */
+#define POSITION_ORDERED  0x6f   /* position sequentially in order of MOD file loading, one image per page regardless of bank */
+#define POSITION_MAX      0x6f   /* maximum POSITION_ define value */
 
 /* Module header */
 typedef struct {
@@ -94,5 +138,3 @@ typedef struct {
   };
 } ModuleFilePage;
 
-int extract_roms( const char *flashPtr, int page);
-int get_file_format(const char *lpszFormat);

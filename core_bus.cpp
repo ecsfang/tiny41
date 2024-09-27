@@ -38,6 +38,13 @@ volatile uint16_t  CTime::accuracy;  // 13 bits
 volatile uint16_t  CTime::status;    // 20 bits
 #endif//USE_TIME_MODULE
 
+// Special command buffer from Tiny
+volatile char g_cmd[32];
+volatile int  g_pCmd = 0;
+volatile int  g_num = 0;
+volatile int  g_ret = 0;
+volatile bool g_do_cmd = 0;
+
 uint32_t getTotalHeap(void)
 {
   extern char __StackLimit, __bss_end__;
@@ -81,7 +88,7 @@ CBarcode cBar;
 
 CBreakpoint brk;
 
-void swapRam(uint16_t *dta, int n);
+void swapPage(uint16_t *dta, int n);
 
 // Keep track of FI flags (0-13)
 volatile uint16_t carry_fi = 0;
@@ -219,12 +226,12 @@ void write8Port(int n, uint8_t *data, int sz)
 void writePort(int n, uint16_t *data)
 {
   // Swap 16-bit word to get right endian for flash ...
-  swapRam(data, FLASH_SECTOR_SIZE);
+  swapPage(data, FLASH_SECTOR_SIZE);
   uint8_t *dp = (uint8_t*)data;
   printf("\nProgramming target region %X ", n);
   printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
   write8Port(n, (uint8_t*)data, 2*FLASH_SECTOR_SIZE);
-  swapRam(data, FLASH_SECTOR_SIZE);
+  swapPage(data, FLASH_SECTOR_SIZE);
   printf("Done!\n");
 }
 
@@ -250,17 +257,22 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
 }
 
 // Read flash #n into ram with right endian
+// fat should point to the wanted fat-entry
 int readPort(int n, int page, uint16_t *data)
 {
   // Read from config to get offset to image
-  const char *fp8 = (const char *)flashPointer(fat.offs());
+  const char *fp8 = fat.offset();
 
   if( get_file_format(fp8) ) {
     // Read MOD format
     delete[] data; // Not used ...
-    extract_roms(fp8, page);
+    extract_roms(&fat, page);
     return 1; // MOD file - handled!
   }
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Load ROM and swap\n\r");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
   const uint16_t *fp16 = (uint16_t*)fp8;
   for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
     // Swap order to get right endian of 16-bit word ...
@@ -297,7 +309,7 @@ void saveRam(int port, int ovr = 0)
 
 
 // Swap 16-bit word (n - number of 16-bit words)
-void swapRam(uint16_t *dta, int n)
+void swapPage(uint16_t *dta, int n)
 {
   for (int i = 0; i < n; i++) {
     dta[i] = swap16(dta[i]);
@@ -309,30 +321,45 @@ void qRam(int page)
   CModule *m = modules[page];
   if (m->isInserted()) {
     m->setRam();
-    sprintf(cbuff, "Add QRAM[%X] @ %04X - %04X\n\r", page, page*PAGE_SIZE, (page*PAGE_SIZE)|PAGE_MASK);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
   }
 }
 
-void loadPage(const char *mod, int page, int bank = 0)
+bool loadPage(const char *mod, int page, int bank = 0)
 {
   int n;
+  bool ret = true;
 
   // Check that the module is loaded in flash
-  // FAT is updatedt to point to this entry
-  int rom = fat.find(mod);
-  if( !rom )
-    return;
+  // FAT is updated to point to this entry
+  if( !fat.find(mod) )
+    return false;
+
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Load @ page %d:%d \n\r", page, bank);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
 
   // Create space for flash image
   uint16_t *img = new uint16_t[PAGE_SIZE];
   if( !img )
-    return;
+    return false;
 
   // Read ROM or MOD file into img
-  if( readPort(rom, page, img) )
-    return; // MOD file - all set and done!
-
+  if( get_file_format(fat.offset()) ) {
+    // Read MOD format
+    delete[] img; // Not used ...
+    extract_roms(&fat, page);
+    return true; // MOD file - handled!
+  }
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Load ROM and swap\n\r");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  const uint16_t *fp16 = (uint16_t*)fat.offset();
+  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
+    // Swap order to get right endian of 16-bit word ...
+    img[i] = swap16(*fp16++);
+  }
   // If ROM file read - check it ...
   int nErr = 0; // Nr of errors
   int nClr = 0; // Nr of erased words
@@ -344,36 +371,19 @@ void loadPage(const char *mod, int page, int bank = 0)
         nClr++;
     }
   }
-  // Verify loaded code
-  if( nClr == PAGE_SIZE ) {
-    n = sprintf(cbuff, "%04X -> Image is cleared!", page*PAGE_SIZE);
-  } else {
-    if( nErr ) {
-      sprintf(cbuff, "%d errors in image 0x%X!\n\r", nErr, page);
-      cdc_send_string(ITF_TRACE, cbuff);
-    }
-    n = sprintf(cbuff, "%04X ->", page*PAGE_SIZE);
-    for(int i=0; i<8; i++) {
-      n += sprintf(cbuff+n, " %03X", img[0x000+i]);
-    }
-    cdc_send_string(ITF_TRACE, cbuff);
-    n = sprintf(cbuff, " ...", page*PAGE_SIZE+0xFF0);
-    for(int i=0; i<8; i++) {
-      n += sprintf(cbuff+n, " %03X", img[0xff8+i]);
-    }
-  }
-  n += sprintf(cbuff+n, "\n\r");
-  cdc_send_string(ITF_TRACE, cbuff);
   if( !nErr ) {
     // If no errors - insert into the specified port
     sprintf(cbuff,"Load ROM %s to port %X bank %d ...\n\r", fat.name(), page, bank);
     cdc_send_string_and_flush(ITF_TRACE, cbuff);
-    modules.addImage(page, img, bank, fat.name());
+    // Save info about ROM-file with offset to file
+    modules.addImage(page, img, bank, fat.fatEntry(), fat.name());
   } else {
     // Error - release the memory
     delete[] img;
+    ret = false;
   }
   cdc_flush(ITF_TRACE);
+  return ret;
 }
 
 void initRoms(int set)
@@ -387,6 +397,7 @@ void initRoms(int set)
     loadPage("IR-PRINT", 0);
     loadPage("ZENROM", 12);
     loadPage("RAM8K", 10);
+    loadPage("TF-ROM", 13);
   }
   // Unplug Service ROM if inserted (has to be done manually)
   if( modules.isInserted(4) ) {
@@ -904,14 +915,24 @@ void core1_main_3(void)
         if( bTiny ) {
           // Handle any specific Tiny41 instructions
 #if 1
-          switch(cmd) {
+          switch(cmd & 0x3FE) {
             case 0x03A:
-              // C=PIL
-              DATA_OUTPUT(0x12345678ABCDEL);
+              DATA_OUTPUT(g_ret);
               break;
-            case 0x003:
+            case 0b1100:
+              g_do_cmd = 1;
+              _setFI_PBSY();  // Indicate that we are busy!
               break;
-            case 0x005:
+            case 0b1000:
+              g_num = data56 & 0xFF; // Save command byte
+              break;
+            case 0b0100:
+              g_cmd[g_pCmd++] = data56 & 0xFF; // Save character
+              g_cmd[g_pCmd] = 0;
+              break;
+            case 0b0000:
+              g_pCmd = 0;           // Reset command
+              g_cmd[g_pCmd] = 0;
               break;
           }
 #else
@@ -1086,6 +1107,17 @@ void post_handling(uint16_t addr)
   // Update time in Time module
   mTime.tick();
 #endif//USE_TIME_MODULE
+  if( g_do_cmd ) {
+    switch(g_do_cmd ) {
+      case 1:
+        sprintf(cbuff, "Load page with [%s] @ %d\n\r", g_cmd, g_num);
+        cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+        g_ret = loadPage((char*)g_cmd,g_num) ? 0 : 1;
+        _clrFI_PBSY(); // Done with the plugging!
+        break;
+    }
+    g_do_cmd = 0;
+  }
 }
 
 #ifdef DUMP_CYCLE

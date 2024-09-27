@@ -1,6 +1,8 @@
 #ifndef __MODULE_H__
 #define __MODULE_H__
 
+extern char *getPageName(const char *flashPtr, int page);
+
 // Bit-filed for current module status
 enum {
     IMG_NONE = 0x00,
@@ -16,30 +18,42 @@ static uint8_t nBank[NR_BANKS] = {0,2,1,3};
 class CModule {
   uint16_t  *m_banks[NR_BANKS];      // Pointer to each bank (up to 4 images)
   char       m_name[NR_BANKS][16+1]; // Name of the module
-  int        offset;                 // Offset to file in flash
+  FL_Head_t *m_fat[NR_BANKS];        // Pointer to FAT entry
+  int        m_page[NR_BANKS];       // Page in the file image
   uint16_t  *m_img;                  // Pointer to current image
   uint8_t    m_flgs;                 // Status of the module
   uint8_t    m_cBank;                // Currently selected bank
 public:
   void dump(int p) {
-    sprintf(cbuff, "%X: [%X:%X:%X:%X][%s:%s:%s:%s][%X]-%02X-%d\n\r",
-      p,
-      m_banks[0],m_banks[1],m_banks[2],m_banks[3],
-      m_name[0],m_name[1],m_name[2],m_name[3],
-      m_img, m_flgs,m_cBank);
+    int n = sprintf(cbuff, "%X: [ ", p);
+    for(int b=0; b<NR_BANKS; b++) {
+      n += sprintf(cbuff+n, "[");
+      if( m_fat[b] ) {
+        if( m_fat[b]->type == FL_ROM )
+          n += sprintf(cbuff+n, "%s@%X", m_name[b], m_fat[b]);
+        else
+          n += sprintf(cbuff+n, "%s@%X:%d", m_name[b], m_fat[b], m_page[b]);
+      } else {
+        n += sprintf(cbuff+n, "--");
+      }
+      n += sprintf(cbuff+n, "] ");
+    }
+    sprintf(cbuff+n, "]\n\r");
     cdc_send_string_and_flush(ITF_TRACE, cbuff);
   }
   CModule() {
     m_img = NULL;
-    memset(m_banks, 0, NR_BANKS*sizeof(uint16_t));
-    memset(m_name,  0, NR_BANKS*(16+1));
+    memset(m_banks, 0, NR_BANKS*sizeof(uint16_t*));
+    memset(m_name,  0, NR_BANKS*(16+1)*sizeof(char));
+    memset(m_fat,  0, NR_BANKS*(sizeof(FL_Head_t*)));
     m_cBank = 0;
   }
   void removeBank(int bank) {
     if( image(bank) ) {
       delete[] m_banks[bank];
       m_banks[bank] = 0;
-      m_name[bank][0] = 0;
+      m_fat[bank] = NULL;
+      m_page[bank] = 0;
     }
   }
   void remove() {
@@ -47,16 +61,23 @@ public:
     m_img = NULL;
     for(int b=0; b<NR_BANKS; b++)
       removeBank(b);
+    memset(m_fat,  0, NR_BANKS*(sizeof(FL_Head_t*)));
     memset(m_name,  0, NR_BANKS*(16+1));
   }
   // Connect an image to the correct bank of the module
-  void setImage(uint16_t *img, int bank = 0, char *name=NULL) {
+  void setImage(uint16_t *img, int bank, FL_Head_t *fat, char *name, int page) {
     // Remove any previous image and name
     removeBank(bank);
     m_banks[bank] = img;
     m_img = m_banks[0];
-    if( name )
-      strncpy(m_name[bank], name, 16);
+    m_fat[bank] = fat;
+    m_page[bank] = page;
+    strncpy(m_name[bank], name, 16);
+#ifdef DBG_PRINT
+    sprintf(cbuff,"Set image @ %X [%d] -> %s\n\r", fat->offs, fat->type, m_name[bank]);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+    sleep_ms(100);
+#endif
     if( bank == 0 )
       m_flgs = IMG_INSERTED;
   }
@@ -145,9 +166,9 @@ public:
   CModules() {
     clearAll();
   }
-  void addImage(int port, uint16_t *img, int bank, char *name) {
+  void addImage(int port, uint16_t *img, int bank, FL_Head_t *fat, char *name, int page=0) {
 	  if( img ) {
-      m_modules[port].setImage(img, bank, name);
+      m_modules[port].setImage(img, bank, fat, name, page);
   	} 
   }
   void dump(void) {

@@ -175,91 +175,157 @@ void unpack_image( word *ROM, const byte *BIN)
 int get_file_format(const char *lpszFormat)
 {
   if( !strcmp(lpszFormat, MOD_FORMAT) )
-    return 1;
+    return MOD1_FMT;
   if( !strcmp(lpszFormat, MOD_FORMAT2) )
-    return 2;
+    return MOD2_FMT;
   return 0;
 }
 
+// Read module information from a MOD file in flash
 int mod_info(const char *flashPtr, char *buf)
 {
-  ModuleFileHeader *pMFH;
-  pMFH = (ModuleFileHeader *)flashPtr;
+  ModuleFileHeader *pMFH = (ModuleFileHeader *)flashPtr;
   return sprintf(buf,"%s", pMFH->Title);
 }
 
-/******************************/
-/* Returns 0 for success, 1 for open fail, 2 for read fail, 3 for invalid file, 4 for allocation error */
-/******************************/
-int extract_roms( const char *flashPtr, int port) //CModule *mod )
-{
-  int nFileFormat;
+// Class to hanlde a MOD file
+class CModFile {
   ModuleFileHeader *pMFH;
-  dword dwModulePageSize;
-
-  // get file format and module page size
-  pMFH = (ModuleFileHeader *)flashPtr;
-  nFileFormat = get_file_format(pMFH->FileFormat);
-  dwModulePageSize = sizeof(ModuleHeader_t);
-  dwModulePageSize += (1 == nFileFormat) ? sizeof(V1_t) : sizeof(V2_t);
-
-  sprintf(cbuff,"Extract ROM (%d) @ 0x%X - %s (%d)\n\r", port, flashPtr, pMFH->FileFormat, nFileFormat);
-  cdc_send_string_and_flush(ITF_TRACE, cbuff);
-
-  // check header
-  if( (1 != nFileFormat && 2 != nFileFormat) || pMFH->MemModules > 4 || pMFH->XMemModules > 3 ||
-      pMFH->Original > 1 || pMFH->AppAutoUpdate > 1 || pMFH->Category > CATEGORY_MAX ||
-      pMFH->Hardware > HARDWARE_MAX) { /* out of range */
-    return (3);
+  int   m_fileFmt;
+  dword m_pageSize;
+  const char *m_fPtr;
+  char *m_name;
+ public:
+  CModFile(CFat_t *pFat) {
+    m_fPtr = pFat->offset();
+    pMFH = (ModuleFileHeader *)m_fPtr;
+    m_fileFmt = get_file_format(pMFH->FileFormat);
+    m_pageSize = sizeof(ModuleHeader_t) + (MOD1_FMT == m_fileFmt ? sizeof(V1_t) : sizeof(V2_t));
+    m_name = pFat->name();
   }
-
-  // go through each page
-  ModuleFilePage *pMFP;
-  #define ROM_SIZE  0x1000
-  word *pwImage;
-  int nBank = 0;
-  // Loop over all images in the file
-  for (int bank = 0; bank < pMFH->NumPages; bank++) {
-    nBank = 0;
+  ModuleFilePage *getPage(int page) {
+    return (ModuleFilePage *)(m_fPtr + sizeof(ModuleFileHeader) + m_pageSize * page);
+  }
+  char *getPageName(int page) {
+    return getPage(page)->header.Name;
+  }
+  int getInfo(char *buf) {
+    return sprintf(buf,"%s", pMFH->Title);
+  }
+  bool verify() {
+    // check header
+    if( (MOD1_FMT != m_fileFmt && MOD2_FMT != m_fileFmt) ||
+         pMFH->MemModules > 4 || pMFH->XMemModules > 3 ||
+         pMFH->Original > 1 || pMFH->AppAutoUpdate > 1 || pMFH->Category > CATEGORY_MAX ||
+         pMFH->Hardware > HARDWARE_MAX ) { /* out of range */
+      sprintf(cbuff,"Bad format of MOD file %s @ 0x%X\n\r", m_name, m_fPtr);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      return false;
+    }
+    return true;
+  }
+  int nrPages(void) {
+    return pMFH->NumPages;
+  }
+  // Allocate memory for the image and read it
+  // Returns pointer to the allocated image
+  word *getRomImage(int page) {
+    ModuleFilePage *pMFP = getPage(page);
     word *ROM = new word[ROM_SIZE];
     if( !ROM ) {
       sprintf(cbuff,"No memory in extract_roms!\n\r");
       cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      return 4;
+      return NULL;
     }
-    pMFP = (ModuleFilePage *)(flashPtr + sizeof(ModuleFileHeader) + dwModulePageSize * bank);
-    // Any hardcoded port ... ?
-    if( pMFP->header.Page <= 0x0F )
-      port = pMFP->header.Page;
-    // Which bank?
-    if( pMFP->header.Bank )
-      nBank = pMFP->header.Bank - 1;
-    // write the ROM file
-    pwImage = (word *)&pMFP->image;
-    switch(nFileFormat) {
-    case 1:   // MOD1
+    word *pwImage = (word *)&pMFP->image;
+    switch(m_fileFmt) {
+    case MOD1_FMT:   // MOD1 - packed data
       unpack_image(ROM, (byte*)pwImage);
       break;
-    case 2:   // MOD2
-      for(int j = 0; j < ROM_SIZE; ++j ) {
-        // swap bytes
-        ROM[j] = (pwImage[j] >> 8) | (pwImage[j] << 8);
-      }
+    case MOD2_FMT:   // MOD2 - unpacked - needs to be swapped
+      for(int j = 0; j < ROM_SIZE; ++j )
+        ROM[j] = __builtin_bswap16(pwImage[j]);
       break;
     default:  // Unknown format ...
-      sprintf(cbuff,"Error: Unknown format (%d)!\n\r",nFileFormat);
+      sprintf(cbuff,"Error: Unknown format (%d)!\n\r",m_fileFmt);
       cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
       delete[] ROM;
       ROM = NULL;
     }
+    return ROM;
+  }
+
+};
+
+/******************************
+ * extract_rom
+ * Takes a FAT to a MOD file entry and load the module given a port(0-F) number
+ * The MOD file might override the port (if hardcoded)
+ * Returns:
+ *  0 for success
+ *  1 for open fail
+ *  2 for read fail 
+ *  3 for invalid file
+ *  4 for allocation error
+ ******************************/
+int extract_roms( CFat_t *pFat, int port)
+{
+  CModFile *modFile = new CModFile(pFat);
+
+#ifdef DBG_PRINT
+  sprintf(cbuff,"Extract ROM (%d) @ 0x%X\n\r", port, pFat->offs());
+  cdc_send_string_and_flush(ITF_TRACE, cbuff);
+#endif
+
+  // check header
+  if( !modFile->verify() )
+    return (3);
+
+  // go through each page
+  ModuleFilePage *pMFP;
+  int bank = 0;
+  int nPort = 0;
+  // Loop over all images in the file
+  for (int nPage = 0; nPage < modFile->nrPages(); nPage++) {
+    // Point to the specified page in the MOD file
+    pMFP = modFile->getPage(nPage);
+    // Which bank (0-3)?
+    bank = pMFP->header.Bank - 1;
+    // Any hardcoded port ... ?
+    if( pMFP->header.Page <= 0x0F ) {
+      port = pMFP->header.Page;  // Hardcoded port
+      nPort = 0;  // Ignore previous page
+    }
+    if( bank == 0 ) {
+      // First bank - increase the page number according the previous page (if any)
+      port += nPort;
+      {
+        // Now, decide how the next update should be done ...
+        // TBD Look for free page?
+        // Now we just raplace any previous loaded module
+        switch(pMFP->header.Page) {
+        case POSITION_ANY:     /* position in any port page (8-F) */
+        case POSITION_LOWER:   /* position in lower port page relative to any upper image(s) (8-F) */
+        case POSITION_UPPER:   /* position in upper port page */
+        case POSITION_EVEN:    /* position in any even port page (8,A,C,E) */
+        case POSITION_ODD:     /* position in any odd port page (9,B,D,F) */
+        case POSITION_ORDERED: /* position sequentially in order of MOD file loading, one image per page regardless of bank */
+          break;
+        }
+        nPort = 1; // Increase page with 1 for next page
+      }
+    }
+    // Read  the ROM file
+    word *ROM = modFile->getRomImage(nPage);
     if( ROM ) {
-      // Add image to module ...
-      sprintf(cbuff,"Load MOD %s to port %d bank %d ...\n\r", pMFP->header.Name, port, nBank);
-      cdc_send_string_and_flush(ITF_TRACE, cbuff);
-      modules.addImage(port, ROM, nBank, pMFP->header.Name);
+#ifdef DBG_PRINT
+      sprintf(cbuff,"Load MOD page %d [%s] to page %d bank %d (%X)...\n\r", nPage, pMFP->header.Name, port, bank, pFat->fatEntry());
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+      // Add module with info about FAT and with page number in file
+      modules.addImage(port, ROM, bank, pFat->fatEntry(), modFile->getPageName(nPage));
       if( pMFP->header.RAM )
         qRam(port);
-      port++;
     }
   }
   return (0);

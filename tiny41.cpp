@@ -18,12 +18,17 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// #define OVERCLOCK 135000
-// #define OVERCLOCK 200000
-#define OVERCLOCK 270000        // 270 MHz
-// #define OVERCLOCK 360000
-
+#define DO_OVERCLOCK
 #define DEBUG_ANALYZER
+
+#ifdef DO_OVERCLOCK
+// #define OVERCLOCK 135000
+// #define OVERCLOCK 180000
+ #define OVERCLOCK 200000
+//#define OVERCLOCK 270000        // 270 MHz
+// #define OVERCLOCK 360000
+#endif
+
 
 int bRend = REND_NONE;
 
@@ -120,10 +125,12 @@ bool bReady = false;
 
 int main()
 {
+#ifdef DO_OVERCLOCK
 #if OVERCLOCK > 270000
     /* Above this speed needs increased voltage */
     vreg_set_voltage(VREG_VOLTAGE_1_20);
     sleep_ms(1000);
+#endif
 #endif
 
     stdio_init_all();
@@ -152,7 +159,7 @@ int main()
 
     // Must read flash before we goto highspeed ...
     logC("Init ROMs ...");
-    initRoms(1); // Load all current modules ...
+    initRoms(0); // Load all current modules ...
 
     logC("Init XMemory ...");
 #ifdef USE_XFUNC
@@ -160,9 +167,11 @@ int main()
 #endif
 //    serial_loop();
 
+#ifdef DO_OVERCLOCK
     /* Overclock */
     logC("Overclock ...");
     set_sys_clock_khz(OVERCLOCK, 1);
+#endif
 
     logC("Init all pins ...");
     bus_init();

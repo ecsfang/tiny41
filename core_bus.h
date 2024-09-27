@@ -28,6 +28,7 @@
 // #define EMBED_RAM
 #define RAM_SIZE    0x1000
 #define PAGE_SIZE   0x1000
+#define ROM_SIZE    0x1000
 #define PAGE_MASK   0x0FFF
 #define ADDR_MASK   0xFFFF
 #define INST_MASK   (BIT_10-1)
@@ -344,16 +345,18 @@ class CFat_t {
   FL_Head_t *p_fatEntry;
   int m_pos;
 public:
+  // Read next entry in the FAT (and increment pointer)
   void next() {
     // Reads FAT entry
-    p_fatEntry = (FL_Head_t*)(XIP_BASE + FLASH_PAGE(FAT_PAGE) + m_pos*sizeof(FL_Head_t));
-    //readFlash(FLASH_PAGE(FAT_PAGE) + m_pos*sizeof(FL_Head_t), (uint8_t*)&fatEntry, sizeof(FL_Head_t));
-    m_pos++;
+    p_fatEntry = fatEntry(m_pos++);
   }
+  // Read first entry in the FAT
   void first() {
     m_pos = 0;
     next();
   }
+  // Find a given module name in the FAT.
+  // Return position [1..n] if found, otherwise 0
   int find(const char *mod) {
     first();
     while( offs() > 0 ) {
@@ -363,20 +366,32 @@ public:
     }
     return 0;
   }
+  // Return offset to the file data for current FAT entry
   int offs(void) {
-    if( p_fatEntry->offs > FLASH_SIZE )
+    if( p_fatEntry->offs > (FLASH_SIZE+XIP_BASE) ||
+        p_fatEntry->offs < XIP_BASE )
       return 0;
-    return p_fatEntry->offs & FLASH_SIZE;
+    return p_fatEntry->offs;
   }
-  char *offset(void) {
+  // Return offset to the file data for current FAT entry
+  const char *offset(void) {
     return (char*)offs();
   }
-  const char *flOffset(void) {
-    return (char*)(offs() | XIP_BASE);
+  // Return actual flash offset for the current FAT entry
+  //const char *flOffset(void) {
+  //  return (char*)(offs() | XIP_BASE);
+  //}
+  FL_Head_t *fatEntry() {
+    return p_fatEntry;
   }
+  FL_Head_t *fatEntry(int n) {
+    return (FL_Head_t*)(XIP_BASE + FLASH_PAGE(FAT_PAGE) + n*sizeof(FL_Head_t));
+  }
+  // Return the module name from the FAT
   char *name(void) {
     return p_fatEntry->name;
   }
+  // Return the module type from the FAT
   int type(void) {
     return p_fatEntry->type;
   }

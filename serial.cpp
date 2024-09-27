@@ -97,7 +97,7 @@ void all_modules(void)
       }
       i = sprintf(cbuff,"| %3d | %-16.16s |%4.4s | %08X | ",
         n, fat.name(), typ, fat.offset() );
-      i += mod_info(fat.flOffset(), cbuff+i);
+      i += mod_info(fat.offset(), cbuff+i);
       i += sprintf(cbuff+i,"\n\r");
       cdc_send_console(cbuff);
       fat.next();
@@ -119,7 +119,7 @@ void list_modules(void)
   modules.dump();
   cdc_send_console((char*)"\n\rLoaded modules\n\r");
   BAR_T();
-  cdc_send_console((char*)"| Page | Port | XROM | RAM | Name             |\n\r");
+  cdc_send_console((char*)"| Page | Port | XROM | RAM | Name             | Banks\n\r");
   BAR_M();
   for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
     n = sprintf(cbuff,"|  #%X  | ", i);
@@ -179,7 +179,9 @@ typedef enum {
   ST_QRAM,
   ST_PLUG,
   ST_BRK,
-  ST_MEM
+  ST_MEM,
+  ST_INST,
+  ST_MPLUG,
 } State_e;
 
 State_e state = ST_NONE;
@@ -223,6 +225,25 @@ void plug_unplug(void)
   cdc_send_console((char*)"\n\rSelect page to plug or unplug: -\b");
   cdc_flush_console();
   state = ST_PLUG;  // Expect port address
+}
+
+static char m_mod[32];
+static int  m_pMod = 0;
+extern bool loadPage(const char *mod, int page, int bank=0);
+
+void inst_module(void)
+{
+  cdc_send_console((char*)"\n\rWhich module to install: -\b");
+  cdc_flush_console();
+  state = ST_INST;  // Expect port address
+  memset(m_mod, 0, 32);
+  m_pMod = 0;
+}
+void plug_module(void)
+{
+  cdc_send_console((char*)"\n\rSelect page for module: -\b");
+  cdc_flush_console();
+  state = ST_MPLUG;  // Expect port address
 }
 
 void mem_emulate(void)
@@ -456,6 +477,8 @@ extern void initRoms(int set);
 
 void initRom(void)
 {
+  sprintf(cbuff, "Restore all modules to default\n\r");
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
   initRoms(1);
 }
 
@@ -463,31 +486,34 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'h', serial_help,       "Serial command help"  },
   { '?', serial_help,       "Serial command help"  },
   { 'i', info,              "Memory info"  },
+
   { 'd', toggle_disasm,     "Toggle disassembler"  },
   { 't', toggle_trace,      "Toggle trace"  },
+  { 'g', tag,               "Enter trace tag"  },
+
   { 'b', listBreakpoints,   "List breakpoints"  },
   { 'B', set_brk,           "Set breakpoint"  },
   { 'E', end_brk,           "End breakpoint"  },
+  { 'C', clr_brk,           "Clear breakpoint"  },
+  { 'x', clrBreakpoints,    "Clear all breakpoints"  },
+  { 'r', reset_bus_buffer,  "Reset trace buffer"  },
+  { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
+  { 'o', power_on,          "Power On"  },
+  { 'w', wand_test,         "Example bar code"  },
+  { 'q', sel_qram,          "Select QRAM page"  },
+  { 'Q', quit_log,          "Stop logging"  },
+  { 'l', list_modules,      "List modules"  },
+  { 'L', all_modules,       "All modules"  },
+  { 'p', plug_unplug,       "Plug or unplug module"  },
+  { 'P', inst_module,       "Install a module"  },
+  { 'O', initRom,           "Load default modules" },
+  { 'M', mem_emulate,       "Enable Memory modules"  },
+  { 'm', mem_modules,       "Number of Memory modules"  },
 #ifdef USE_XF_MODULE
   { 'f', dump_xmem,         "Dump XMemory"  },
   { 'X', clr_xmem,          "Clear XMemory"  },
 #endif//USE_XF_MODULE
-  { 'C', clr_brk,           "Clear breakpoint"  },
-  { 'x', clrBreakpoints,    "Clear all breakpoints"  },
-  { 'l', list_modules,      "List modules"  },
-  { 'L', all_modules,       "All modules"  },
-  { 'M', mem_emulate,       "Enable Memory modules"  },
-  { 'm', mem_modules,       "Number of Memory modules"  },
-  { 'r', reset_bus_buffer,  "Reset trace buffer"  },
-  { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
-  { 'o', power_on,          "Power On"  },
-  { 'O', initRom,           "Init Roms" },
-  { 'w', wand_test,         "Example bar code"  },
-  { 'q', sel_qram,          "Select QRAM page"  },
-  { 'Q', quit_log,          "Stop logging"  },
-  { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
-  { 'g', tag,               "Enter trace tag"  },
   { 'S', service,           "Service ROM (11967) FI+DATA" },
 #ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
@@ -555,6 +581,47 @@ void serial_loop(void)
         conChars += send2console("\n\rAbort!\n\r");
      } else {
         // Input of hex-digit ... ?
+        if( state == ST_MPLUG) {
+          int x = getHexKey(key);
+          if( x >= 0 ) {
+            sprintf(cbuff,"\rPlug %s into port %d", m_mod, x);
+            conChars += send2console(cbuff, true);  // Clean previous content on page ...
+            // Load the module!
+            if( loadPage(m_mod, x) )
+              sprintf(cbuff,"Success!");
+            else
+              sprintf(cbuff,"Failed!");
+            conChars += send2console(cbuff, true);  // Clean previous content on page ...
+            state = ST_NONE;
+          }
+        } else if( state == ST_INST) {
+          //sprintf(cbuff,"\n\rKEY: %02X\n\r", key);
+          //conChars += send2console(cbuff, true);  // Clean previous content on page ...
+          switch(key) {
+          case 0x0D:
+            // Search for the module and install!
+            state = ST_NONE;
+            if( fat.find(m_mod) ) {
+              sprintf(cbuff,"\rFind module: %s ", m_mod);
+              conChars += send2console(cbuff, true);  // Clean previous content on page ...
+              plug_module();
+            } else {
+              sprintf(cbuff,"\rModule [%s] not found!", m_mod);
+              conChars += send2console(cbuff, true);  // Clean previous content on page ...
+            }
+            break;
+          case 0x08:
+            m_mod[--m_pMod] = 0;
+            send2console("\b \b", false);  // Clean previous content on page ...
+            cdc_flush_console();
+            break;
+          default:
+            m_mod[m_pMod++] = key;
+            sprintf(cbuff,"%c", key);
+            conChars += send2console(cbuff, false);  // Clean previous content on page ...
+            cdc_flush_console();
+          }
+        } else {
         int x = getHexKey(key);
         if( x >= 0 ) {
           CModule *m = modules[x];
@@ -630,6 +697,7 @@ void serial_loop(void)
             state = ST_NONE;
             break;
           }
+        }
         }
       }
     } else {
