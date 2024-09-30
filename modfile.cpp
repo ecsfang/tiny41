@@ -188,77 +188,9 @@ int mod_info(const char *flashPtr, char *buf)
   return sprintf(buf,"%s", pMFH->Title);
 }
 
-// Class to hanlde a MOD file
-class CModFile {
-  ModuleFileHeader *pMFH;
-  int   m_fileFmt;
-  dword m_pageSize;
-  const char *m_fPtr;
-  char *m_name;
- public:
-  CModFile(CFat_t *pFat) {
-    m_fPtr = pFat->offset();
-    pMFH = (ModuleFileHeader *)m_fPtr;
-    m_fileFmt = get_file_format(pMFH->FileFormat);
-    m_pageSize = sizeof(ModuleHeader_t) + (MOD1_FMT == m_fileFmt ? sizeof(V1_t) : sizeof(V2_t));
-    m_name = pFat->name();
-  }
-  ModuleFilePage *getPage(int page) {
-    return (ModuleFilePage *)(m_fPtr + sizeof(ModuleFileHeader) + m_pageSize * page);
-  }
-  char *getPageName(int page) {
-    return getPage(page)->header.Name;
-  }
-  int getInfo(char *buf) {
-    return sprintf(buf,"%s", pMFH->Title);
-  }
-  bool verify() {
-    // check header
-    if( (MOD1_FMT != m_fileFmt && MOD2_FMT != m_fileFmt) ||
-         pMFH->MemModules > 4 || pMFH->XMemModules > 3 ||
-         pMFH->Original > 1 || pMFH->AppAutoUpdate > 1 || pMFH->Category > CATEGORY_MAX ||
-         pMFH->Hardware > HARDWARE_MAX ) { /* out of range */
-      sprintf(cbuff,"Bad format of MOD file %s @ 0x%X\n\r", m_name, m_fPtr);
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      return false;
-    }
-    return true;
-  }
-  int nrPages(void) {
-    return pMFH->NumPages;
-  }
-  // Allocate memory for the image and read it
-  // Returns pointer to the allocated image
-  word *getRomImage(int page) {
-    ModuleFilePage *pMFP = getPage(page);
-    word *ROM = new word[ROM_SIZE];
-    if( !ROM ) {
-      sprintf(cbuff,"No memory in extract_roms!\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      return NULL;
-    }
-    word *pwImage = (word *)&pMFP->image;
-    switch(m_fileFmt) {
-    case MOD1_FMT:   // MOD1 - packed data
-      unpack_image(ROM, (byte*)pwImage);
-      break;
-    case MOD2_FMT:   // MOD2 - unpacked - needs to be swapped
-      for(int j = 0; j < ROM_SIZE; ++j )
-        ROM[j] = __builtin_bswap16(pwImage[j]);
-      break;
-    default:  // Unknown format ...
-      sprintf(cbuff,"Error: Unknown format (%d)!\n\r",m_fileFmt);
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      delete[] ROM;
-      ROM = NULL;
-    }
-    return ROM;
-  }
-
-};
 
 /******************************
- * extract_rom
+ * extract_mod
  * Takes a FAT to a MOD file entry and load the module given a port(0-F) number
  * The MOD file might override the port (if hardcoded)
  * Returns:
@@ -268,15 +200,38 @@ class CModFile {
  *  3 for invalid file
  *  4 for allocation error
  ******************************/
-int extract_roms( CFat_t *pFat, int port)
+int extract_mod( CFat_t *pFat, int port)
 {
-  CModFile *modFile = new CModFile(pFat);
-
 #ifdef DBG_PRINT
   sprintf(cbuff,"Extract ROM (%d) @ 0x%X\n\r", port, pFat->offs());
   cdc_send_string_and_flush(ITF_TRACE, cbuff);
 #endif
 
+  if( pFat->type() == FL_ROM ) {
+    CRomFile  *pRom = new CRomFile(pFat);
+    int ret = 0;
+    int bank = 0;
+    if( pRom->verify() ) {
+      word *img = pRom->getRomImage();
+      if( img ) {
+        // If no errors - insert into the specified port
+        sprintf(cbuff,"Load ROM %s to port %X:%d ...\n\r", pFat->name(), port, bank);
+        cdc_send_string_and_flush(ITF_TRACE, cbuff);
+        // Save info about ROM-file with offset to file
+        modules.addImage(port, img, bank, pFat->fatEntry(), pFat->name());
+      } else
+        ret = 4;
+    }
+    cdc_flush(ITF_TRACE);
+    return ret;
+  }
+  if( pFat->type() != FL_MOD && pFat->type() != FL_RAM ) {
+    sprintf(cbuff,"Unknown FAT type: 0x%02X!\n\r", pFat->type());
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+    return 3;
+  }
+
+  CModFile *modFile = new CModFile(pFat);
   // check header
   if( !modFile->verify() )
     return (3);
@@ -326,7 +281,8 @@ int extract_roms( CFat_t *pFat, int port)
       modules.addImage(port, ROM, bank, pFat->fatEntry(), modFile->getPageName(nPage));
       if( pMFP->header.RAM )
         qRam(port);
-    }
+    } else
+      return (4);
   }
   return (0);
 }

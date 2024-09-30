@@ -256,6 +256,7 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
   memcpy(data, fp, size);
 }
 
+#if 0
 // Read flash #n into ram with right endian
 // fat should point to the wanted fat-entry
 int readPort(int n, int page, uint16_t *data)
@@ -266,7 +267,7 @@ int readPort(int n, int page, uint16_t *data)
   if( get_file_format(fp8) ) {
     // Read MOD format
     delete[] data; // Not used ...
-    extract_roms(&fat, page);
+    extract_mod(&fat, page);
     return 1; // MOD file - handled!
   }
 #ifdef DBG_PRINT
@@ -280,7 +281,7 @@ int readPort(int n, int page, uint16_t *data)
   }
   return 0; // ROM file - just read ...
 }
-
+#endif
 // Save a ram image to flash (emulate Q-RAM)
 // This must be updated!
 // If loaded from ROM, then that page should be updated
@@ -324,66 +325,15 @@ void qRam(int page)
   }
 }
 
-bool loadPage(const char *mod, int page, int bank = 0)
+bool loadModule(const char *mod, int page)
 {
-  int n;
-  bool ret = true;
-
   // Check that the module is loaded in flash
   // FAT is updated to point to this entry
   if( !fat.find(mod) )
     return false;
 
-#ifdef DBG_PRINT
-  sprintf(cbuff, "Load @ page %d:%d \n\r", page, bank);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
+  return extract_mod(&fat, page) ? false : true;
 
-  // Create space for flash image
-  uint16_t *img = new uint16_t[PAGE_SIZE];
-  if( !img )
-    return false;
-
-  // Read ROM or MOD file into img
-  if( get_file_format(fat.offset()) ) {
-    // Read MOD format
-    delete[] img; // Not used ...
-    extract_roms(&fat, page);
-    return true; // MOD file - handled!
-  }
-#ifdef DBG_PRINT
-  sprintf(cbuff, "Load ROM and swap\n\r");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  const uint16_t *fp16 = (uint16_t*)fat.offset();
-  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
-    // Swap order to get right endian of 16-bit word ...
-    img[i] = swap16(*fp16++);
-  }
-  // If ROM file read - check it ...
-  int nErr = 0; // Nr of errors
-  int nClr = 0; // Nr of erased words
-  // Check that image is valid (10 bits)
-  for(int i=0; i<PAGE_SIZE; i++) {
-    if( img[i] > INST_MASK ) {
-      nErr++;
-      if( img[i] == ADDR_MASK )
-        nClr++;
-    }
-  }
-  if( !nErr ) {
-    // If no errors - insert into the specified port
-    sprintf(cbuff,"Load ROM %s to port %X bank %d ...\n\r", fat.name(), page, bank);
-    cdc_send_string_and_flush(ITF_TRACE, cbuff);
-    // Save info about ROM-file with offset to file
-    modules.addImage(page, img, bank, fat.fatEntry(), fat.name());
-  } else {
-    // Error - release the memory
-    delete[] img;
-    ret = false;
-  }
-  cdc_flush(ITF_TRACE);
-  return ret;
 }
 
 void initRoms(int set)
@@ -393,11 +343,11 @@ void initRoms(int set)
 
   if( set ) {
     // This list should be read from saved config data
-    loadPage("PPC", 8);
-    loadPage("IR-PRINT", 0);
-    loadPage("ZENROM", 12);
-    loadPage("RAM8K", 10);
-    loadPage("TF-ROM", 13);
+    loadModule("PPC", 8);
+    loadModule("IR-PRINT", 0);
+    loadModule("ZENROM", 12);
+    loadModule("RAM8K", 10);
+    loadModule("TF-ROM", 13);
   }
   // Unplug Service ROM if inserted (has to be done manually)
   if( modules.isInserted(4) ) {
@@ -1112,7 +1062,7 @@ void post_handling(uint16_t addr)
       case 1:
         sprintf(cbuff, "Load page with [%s] @ %d\n\r", g_cmd, g_num);
         cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-        g_ret = loadPage((char*)g_cmd,g_num) ? 0 : 1;
+        g_ret = loadModule((char*)g_cmd,g_num) ? 0 : 1;
         _clrFI_PBSY(); // Done with the plugging!
         break;
     }

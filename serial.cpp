@@ -229,7 +229,7 @@ void plug_unplug(void)
 
 static char m_mod[32];
 static int  m_pMod = 0;
-extern bool loadPage(const char *mod, int page, int bank=0);
+extern bool loadModule(const char *mod, int page);
 
 void inst_module(void)
 {
@@ -587,7 +587,7 @@ void serial_loop(void)
             sprintf(cbuff,"\rPlug %s into port %d", m_mod, x);
             conChars += send2console(cbuff, true);  // Clean previous content on page ...
             // Load the module!
-            if( loadPage(m_mod, x) )
+            if( loadModule(m_mod, x) )
               sprintf(cbuff,"Success!");
             else
               sprintf(cbuff,"Failed!");

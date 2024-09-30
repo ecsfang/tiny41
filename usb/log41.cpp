@@ -197,12 +197,23 @@ int main(int argc, char *argv[])
                 continue;
               }
             }
+            // Does the line contain a symbol ([xxxx])?
             p = strchr((char*)buf, '[');
             if( p && *(p+5) == ']' && *(p+6) == 0xa ) {
               if( sscanf(p, "[%4X]", &addr) == 1 ) {
                 sym = mLabels[addr];
                 if( sym ) {
                   sprintf(p, "%s [%04X]\n", sym, addr);
+                  rdlen = strlen((char*)buf);
+                }
+              }
+            }
+            // Check for other labels ...
+            if( (p=strstr((char*)buf, "C XQ ")) || (p=strstr((char*)buf, "C GO ")) ) {
+              if( sscanf(p+5, "%4X", &addr) == 1 ) {
+                sym = mLabels[addr];
+                if( sym ) {
+                  sprintf(p+5, "%s [%04X]\n", sym, addr);
                   rdlen = strlen((char*)buf);
                 }
               }

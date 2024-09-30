@@ -28,8 +28,7 @@ File size=sizeof(ModuleFileHeader)+NumPages*sizeof(ModuleFilePage)
 
 #ifndef NO_EXTERNAL
 char *getPageName(const char *flashPtr, int page);
-//int extract_roms( const char *flashPtr, int page);
-int extract_roms( CFat_t *pFat, int page);
+int extract_mod( CFat_t *pFat, int page);
 int get_file_format(const char *lpszFormat);
 #endif
 
@@ -138,3 +137,113 @@ typedef struct {
   };
 } ModuleFilePage;
 
+#ifndef NO_EXTERNAL
+void unpack_image( word *ROM, const byte *BIN);
+
+
+// Class to hanlde a ROM file
+class CRomFile {
+  const word *m_fPtr;
+  char *m_name;
+ public:
+  CRomFile(CFat_t *pFat) {
+    m_fPtr = (word*)pFat->offset();
+    m_name = pFat->name();
+  }
+  bool verify() {
+    bool bOk = true;
+    const word *fp16 = m_fPtr;
+    for (int i = 0; bOk && i < ROM_SIZE; ++i) {
+      // Check that only 10 bit instructions are used ...
+      if( *fp16++ & 0x00F0 )
+        bOk = false;
+    }
+    return bOk;
+  }
+  // Allocate memory for the image and read it
+  // Returns pointer to the allocated image
+  word *getRomImage(void) {
+    word *ROM = new word[ROM_SIZE];
+    const word *fp16 = m_fPtr;
+    if( !ROM ) {
+      sprintf(cbuff,"No memory in CRomFile!\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      return NULL;
+    }
+    for (int i = 0; i < ROM_SIZE; ++i) {
+      // Swap order to get right endian of 16-bit word ...
+      ROM[i] = __builtin_bswap16(*fp16++);
+    }
+    return ROM;
+  }
+};
+
+// Class to hanlde a MOD file
+class CModFile {
+  ModuleFileHeader *pMFH;
+  int   m_fileFmt;
+  dword m_pageSize;
+  const char *m_fPtr;
+  char *m_name;
+ public:
+  CModFile(CFat_t *pFat) {
+    m_fPtr = pFat->offset();
+    pMFH = (ModuleFileHeader *)m_fPtr;
+    m_fileFmt = get_file_format(pMFH->FileFormat);
+    m_pageSize = sizeof(ModuleHeader_t) + (MOD1_FMT == m_fileFmt ? sizeof(V1_t) : sizeof(V2_t));
+    m_name = pFat->name();
+  }
+  ModuleFilePage *getPage(int page) {
+    return (ModuleFilePage *)(m_fPtr + sizeof(ModuleFileHeader) + m_pageSize * page);
+  }
+  char *getPageName(int page) {
+    return getPage(page)->header.Name;
+  }
+  int getInfo(char *buf) {
+    return sprintf(buf,"%s", pMFH->Title);
+  }
+  bool verify() {
+    // check header
+    if( (MOD1_FMT != m_fileFmt && MOD2_FMT != m_fileFmt) ||
+         pMFH->MemModules > 4 || pMFH->XMemModules > 3 ||
+         pMFH->Original > 1 || pMFH->AppAutoUpdate > 1 || pMFH->Category > CATEGORY_MAX ||
+         pMFH->Hardware > HARDWARE_MAX ) { /* out of range */
+      sprintf(cbuff,"Bad format of MOD file %s @ 0x%X\n\r", m_name, m_fPtr);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      return false;
+    }
+    return true;
+  }
+  int nrPages(void) {
+    return pMFH->NumPages;
+  }
+  // Allocate memory for the image and read it
+  // Returns pointer to the allocated image
+  word *getRomImage(int page) {
+    ModuleFilePage *pMFP = getPage(page);
+    word *ROM = new word[ROM_SIZE];
+    if( !ROM ) {
+      sprintf(cbuff,"No memory in extract_mod!\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      return NULL;
+    }
+    word *pwImage = (word *)&pMFP->image;
+    switch(m_fileFmt) {
+    case MOD1_FMT:   // MOD1 - packed data
+      unpack_image(ROM, (byte*)pwImage);
+      break;
+    case MOD2_FMT:   // MOD2 - unpacked - needs to be swapped
+      for(int j = 0; j < ROM_SIZE; ++j )
+        ROM[j] = __builtin_bswap16(pwImage[j]);
+      break;
+    default:  // Unknown format ...
+      sprintf(cbuff,"Error: Unknown format (%d)!\n\r",m_fileFmt);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      delete[] ROM;
+      ROM = NULL;
+    }
+    return ROM;
+  }
+
+};
+#endif
