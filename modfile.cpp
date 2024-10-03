@@ -111,7 +111,7 @@ their page number hardcoded.
 #include "modfile.h"
 
 extern CModules modules;
-extern void qRam(int page);
+//extern void qRam(int page);
 
 /*******************************/
 #if 0
@@ -182,68 +182,70 @@ int get_file_format(const char *lpszFormat)
 }
 
 // Read module information from a MOD file in flash
-int mod_info(const char *flashPtr, char *buf)
+int mod_info(CFat_t *pFat, char *buf)
 {
-  ModuleFileHeader *pMFH = (ModuleFileHeader *)flashPtr;
-  return sprintf(buf,"%s", pMFH->Title);
+  CModFile  mod(pFat);
+  return sprintf(buf,"%s", mod.getTitle());
 }
 
-
-/******************************
- * extract_mod
- * Takes a FAT to a MOD file entry and load the module given a port(0-F) number
- * The MOD file might override the port (if hardcoded)
- * Returns:
- *  0 for success
- *  1 for open fail
- *  2 for read fail 
- *  3 for invalid file
- *  4 for allocation error
- ******************************/
-int extract_mod( CFat_t *pFat, int port)
+// Load a ROM file
+// Image is copied into flash, and a offset to flash is saved
+int loadRomFile(CFat_t *pFat, int port)
 {
+  int ret = 0;
+  int bank = 0; // TBD - must be able to specify bank
+  CRomFile  *pRom = new CRomFile(pFat);
+  if( pRom->verify() ) {
+    word *img = pRom->getRomImage();
+    if( img ) {
+      // ROM - Save image in flash!
+      img = pRom->saveROMMAP(port, bank, img);
+      // Add module with info about FAT and name
+      modules.addImage(port, false, img, bank, pFat->fatEntry(), pFat->name());
+    } else
+      ret = 4;
+  } else
+    ret = 3;
+  delete pRom;
+  return ret;
+}
+
+// Load a MOD file
+// If ROM, then image is copied into flash, and a offset to flash is saved
+// If QROM, then image is copied into RAM, and a offset to RAM is saved
+// if pg != -1, the pg is the page to load
+// In:  pFat - pointer to the FFS entry that holds the file
+//      port - the staring port number (0-F, may be ignored)
+//      pg   - the page in the file to load, or -1 if load all pages
+// TBD - should be possible to specify bank?
+int loadModFile(CFat_t *pFat, int port, int pg)
+{
+  int ret = 0;
+  // Try to read a modfile from FFS
+  CModFile *modFile = new CModFile(pFat);
+  // Verify that the file is correct
+  if( !modFile->verify() ) {
+    delete modFile;
+    return (3);
+  }
+
 #ifdef DBG_PRINT
-  sprintf(cbuff,"Extract ROM (%d) @ 0x%X\n\r", port, pFat->offs());
-  cdc_send_string_and_flush(ITF_TRACE, cbuff);
+  //modFile->dump();
 #endif
 
-  if( pFat->type() == FL_ROM ) {
-    CRomFile  *pRom = new CRomFile(pFat);
-    int ret = 0;
-    int bank = 0;
-    if( pRom->verify() ) {
-      word *img = pRom->getRomImage();
-      if( img ) {
-        // If no errors - insert into the specified port
-        sprintf(cbuff,"Load ROM %s to port %X:%d ...\n\r", pFat->name(), port, bank);
-        cdc_send_string_and_flush(ITF_TRACE, cbuff);
-        // Save info about ROM-file with offset to file
-        modules.addImage(port, img, bank, pFat->fatEntry(), pFat->name());
-      } else
-        ret = 4;
-    }
-    cdc_flush(ITF_TRACE);
-    return ret;
-  }
-  if( pFat->type() != FL_MOD && pFat->type() != FL_RAM ) {
-    sprintf(cbuff,"Unknown FAT type: 0x%02X!\n\r", pFat->type());
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-    return 3;
-  }
-
-  CModFile *modFile = new CModFile(pFat);
-  // check header
-  if( !modFile->verify() )
-    return (3);
-
-  // go through each page
+  // Go through each page in the MOD file
   ModuleFilePage *pMFP;
   int bank = 0;
   int nPort = 0;
   // Loop over all images in the file
   for (int nPage = 0; nPage < modFile->nrPages(); nPage++) {
+    if( pg>=0 && pg!=nPage )
+      continue;
+    if( pg>=0 && pg<nPage )
+      break;
     // Point to the specified page in the MOD file
     pMFP = modFile->getPage(nPage);
+
     // Which bank (0-3)?
     bank = pMFP->header.Bank - 1;
     // Any hardcoded port ... ?
@@ -270,19 +272,59 @@ int extract_mod( CFat_t *pFat, int port)
         nPort = 1; // Increase page with 1 for next page
       }
     }
-    // Read  the ROM file
-    word *ROM = modFile->getRomImage(nPage);
-    if( ROM ) {
+    // Unpack the ROM file into a RAM buffer
+    word *pImage = modFile->getRomImage(nPage);
+    if( pImage ) {
+      // Save the image to ROMMAP (release RAM if not QROM)
+      pImage = modFile->saveROMMAP(port, bank, pImage, pMFP->header.RAM);
 #ifdef DBG_PRINT
-      sprintf(cbuff,"Load MOD page %d [%s] to page %d bank %d (%X)...\n\r", nPage, pMFP->header.Name, port, bank, pFat->fatEntry());
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      int n = sprintf(cbuff,"Load MOD[%d] %s to port %X:%d @ %X ...",
+                  nPage, pMFP->header.Name, port, bank, pImage);
+      if( !pMFP->header.RAM ) {
+        n += sprintf(cbuff+n," ROM");
+      } else {
+        n += sprintf(cbuff+n," QROM");
+      }
+      sprintf(cbuff+n,"\n\r");
+      cdc_send_string_and_flush(ITF_TRACE, cbuff);
 #endif
       // Add module with info about FAT and with page number in file
-      modules.addImage(port, ROM, bank, pFat->fatEntry(), modFile->getPageName(nPage));
-      if( pMFP->header.RAM )
-        qRam(port);
-    } else
-      return (4);
+      modules.addImage(port, pMFP->header.RAM, pImage, bank, pFat->fatEntry(), modFile->getPageName(nPage), nPage);
+    } else {
+      ret = 4;
+    }
   }
-  return (0);
+  delete modFile;
+  return ret;
+}
+
+/******************************
+ * extract_mod
+ * Takes a FAT to a MOD file entry and load the module given a port(0-F) number
+ * The MOD file might override the port (if hardcoded)
+ * Returns:
+ *  0 for success
+ *  1 for open fail
+ *  2 for read fail 
+ *  3 for invalid file
+ *  4 for allocation error
+ ******************************/
+int extract_mod(CFat_t *pFat, int port, int pg)
+{
+#ifdef DBG_PRINT
+  sprintf(cbuff,"Extract ROM (%d) @ 0x%X:%X [Page %d]\n\r", port, pFat->offs(), pFat->type(), pg);
+  cdc_send_string_and_flush(ITF_TRACE, cbuff);
+#endif
+  switch( pFat->type() ) {
+  case FL_ROM:
+    return loadRomFile(pFat, port);
+  case FL_MOD:
+  case FL_RAM:
+    return loadModFile(pFat, port, pg);
+  default:
+    sprintf(cbuff,"Unknown FAT type: 0x%02X!\n\r", pFat->type());
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+    return 3;
+  }
+
 }

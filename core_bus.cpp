@@ -5,7 +5,9 @@
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
+#include "hardware/sync.h"
 #include "pico/multicore.h"
+#include "pico/flash.h"
 #include "tiny41.h"
 #include "core_bus.h"
 #include "blinky.h"
@@ -16,6 +18,7 @@
 #include "ir_led.h"
 #endif
 #include "usb/cdc_helper.h"
+
 #include "module.h"
 #include "modfile.h"
 
@@ -55,11 +58,6 @@ uint32_t getFreeHeap(void)
 {
   struct mallinfo m = mallinfo();
   return getTotalHeap() - m.uordblks;
-}
-
-inline uint16_t swap16(uint16_t b)
-{
-  return __builtin_bswap16(b);
 }
 
 #define BAR_MAXLEN 0x10
@@ -184,6 +182,51 @@ int pageAdjust(int addr)
   return addr;
 }
 
+#define FLASH_LOCK_TIMEOUT_MS 5*1000
+typedef struct {
+  int     addr;
+  uint8_t *buf;
+} flash_write_t;
+
+bool diffPage(void *p1, void *p2)
+{
+  return memcmp(p1, p2, sizeof(uint16_t)*ROM_SIZE) ? true : false;
+}
+
+bool invalidFlashPtr(int fptr)
+{
+  return fptr < (FLASH_START+XIP_BASE) || fptr > (FLASH_SIZE+XIP_BASE);
+}
+
+static void ffs_write_flash(void *param) {
+  flash_write_t *tmp = (flash_write_t *)param;
+  if( invalidFlashPtr(tmp->addr) ) {
+      sprintf(cbuff, "ffs_write_flash: Bad address: %08X\n\r", tmp->addr);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      return;
+  }
+  // Offset the flash pointer
+  int fp1 = tmp->addr-XIP_BASE;
+  int fp2 = tmp->addr-XIP_BASE+PG_SIZE;
+  uint32_t ints = save_and_disable_interrupts();
+  flash_range_erase(fp1, PG_SIZE);
+  flash_range_erase(fp2, PG_SIZE);
+  flash_range_program(fp1, tmp->buf, PG_SIZE);
+  flash_range_program(fp2, tmp->buf+PG_SIZE, PG_SIZE);
+  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
+}
+
+static void write_flash_page(void *param) {
+  flash_write_t *tmp = (flash_write_t *)param;
+  // Offset the flash pointer
+  int fp = tmp->addr-XIP_BASE;
+  uint32_t ints = save_and_disable_interrupts();
+  flash_range_erase(fp, PG_SIZE);
+  flash_range_program(fp, tmp->buf, PG_SIZE);
+  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
+}
+
+
 void erasePort(int n, bool bPrt=true)
 {
   if( bPrt ) {
@@ -222,6 +265,102 @@ void write8Port(int n, uint8_t *data, int sz)
     writeFlash(PAGE2(n), data + sz1, sz2);
 }
 
+// Write data to given flash port in ROMMAP
+// On ROM page is always written (4K 10-bit data - two flash pages)
+// Returns pointer to flash image (or NULL if failed)
+uint16_t *writeROMMAP(int p, int b, uint16_t *data)
+{
+  flash_write_t tmp = {FFS_PAGE(p,b), (uint8_t*)data};
+  if( invalidFlashPtr(tmp.addr) ) {
+      sprintf(cbuff, "writeROMMAP: Bad address: %08X\n\r", tmp.addr);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      return NULL;
+  }
+  // Check if images differs ...
+  if( diffPage((void*)tmp.addr, tmp.buf) ) {
+    // Yes, so lets update the image to flash
+    int r = flash_safe_execute(ffs_write_flash, &tmp, FLASH_LOCK_TIMEOUT_MS);
+    if (r != PICO_OK) {
+      sprintf(cbuff, "error calling ffs_write_flash: %d", r);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      tmp.addr = 0;
+#ifdef DBG_PRINT
+    } else {
+      sprintf(cbuff, "Wrote image %08X to ROMMAP[%d:%d] @ 0x%08X:%X\n\r", tmp.buf, p, b, tmp.addr, 2*PG_SIZE);
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+    }
+  }
+  // Return address to the flash image
+  return (uint16_t*)tmp.addr;
+}
+
+uint16_t *writePage(int addr, uint8_t *data)
+{
+  flash_write_t tmp = {addr, data};
+  int r = flash_safe_execute(write_flash_page, &tmp, FLASH_LOCK_TIMEOUT_MS);
+  if (r != PICO_OK) {
+    sprintf(cbuff, "error calling write_flash_page: %d", r);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#ifdef DBG_PRINT
+  } else {
+    sprintf(cbuff, "Wrote flash 0x%08X @ 0x%08X:%X\n\r", tmp.buf, tmp.addr, PG_SIZE);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  }
+  return (uint16_t*)tmp.addr;
+}
+
+// Function to calculate a simple checksum
+static uint32_t calcChecksum(const uint8_t *data, size_t len) {
+    uint32_t checksum = 0xBADC0DE; // Start with a non-zero value
+    for (size_t i = 0; i < len-sizeof(uint32_t); i++) {
+        checksum += data[i];
+    }
+    return ~checksum;
+}
+
+// Function to verify the checksum
+static bool verifyChecksum(const uint8_t *data, size_t len, uint8_t expected_checksum) {
+    uint32_t chk = calcChecksum(data, len);
+    return chk == expected_checksum;
+}
+
+bool readConfig(Config_t *data, int set)
+{
+  uint32_t cp = CONF_PAGE + CONF_OFFS(set);
+  memcpy(data, (uint8_t*)cp, CONF_SIZE);
+  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Read config(%d) @ 0x%08X:%X\n\r", set, cp, CONF_SIZE);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  return chk == data->chkSum;
+}
+uint16_t *writeConfig(Config_t *data, int set)
+{
+  uint8_t *pg = new uint8_t[FLASH_SECTOR_SIZE];
+  // Read whole config page
+  memcpy(pg, (uint8_t*)CONF_PAGE, FLASH_SECTOR_SIZE);
+  // Update current config
+  uint32_t *cp = (uint32_t*)data;
+  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
+  data->chkSum = chk;
+  memcpy(pg+CONF_OFFS(set), data, CONF_SIZE);
+  // Write back updated configuration
+  flash_write_t tmp = {CONF_PAGE, pg};
+  int r = flash_safe_execute(write_flash_page, &tmp, FLASH_LOCK_TIMEOUT_MS);
+  if (r != PICO_OK) {
+    sprintf(cbuff, "error calling write_flash_page: %d", r);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#ifdef DBG_PRINT
+  } else {
+    sprintf(cbuff, "Wrote config(%d) @ 0x%08X:%d\n\r", set, CONF_PAGE+CONF_OFFS(set), CONF_SIZE);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  }
+  return (uint16_t*)tmp.addr;
+}
 
 void writePort(int n, uint16_t *data)
 {
@@ -248,7 +387,7 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
 {
   // Point at the wanted flash image ...
   const uint8_t *fp = flashPointer(offs);
-  if( ((int)fp) < 0x10000000 || ((int)fp) > 0x10FFFFFF ) {
+  if( invalidFlashPtr((int)fp) ) {
     sprintf(cbuff, "BAD FLASH POINTER: %p!\n\r", fp);
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
     return;
@@ -256,46 +395,19 @@ void readFlash(int offs, uint8_t *data, uint16_t size)
   memcpy(data, fp, size);
 }
 
-#if 0
-// Read flash #n into ram with right endian
-// fat should point to the wanted fat-entry
-int readPort(int n, int page, uint16_t *data)
-{
-  // Read from config to get offset to image
-  const char *fp8 = fat.offset();
-
-  if( get_file_format(fp8) ) {
-    // Read MOD format
-    delete[] data; // Not used ...
-    extract_mod(&fat, page);
-    return 1; // MOD file - handled!
-  }
-#ifdef DBG_PRINT
-  sprintf(cbuff, "Load ROM and swap\n\r");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  const uint16_t *fp16 = (uint16_t*)fp8;
-  for (int i = 0; i < FLASH_SECTOR_SIZE; ++i) {
-    // Swap order to get right endian of 16-bit word ...
-    data[i] = swap16(*fp16++);
-  }
-  return 0; // ROM file - just read ...
-}
-#endif
-// Save a ram image to flash (emulate Q-RAM)
-// This must be updated!
+// Save a given ram image to flash (emulate Q-RAM)
+// TBD - This must be updated to update file in FFS!
+// TBD - Should check all banks as well
 // If loaded from ROM, then that page should be updated
-// If loaded from MOD, the we must check which page etc that
+// If loaded from MOD, then we must check which page etc that
 // needs to be updated.
 void saveRam(int port, int ovr = 0)
 {
-#if 0
   int n = 0;
   if( port >= FIRST_PAGE && port < NR_PAGES ) {
     if (ovr || modules.isDirty(port)) {
       modules.clear(port);
-      erasePort(port, false);
-      writePort(port, modules.image(port));
+      writeROMMAP(port, 0, modules.getImage(port));
       n = sprintf(cbuff, "Wrote RAM[%X] to flash\n\r", port);
     }
   } else {
@@ -303,7 +415,6 @@ void saveRam(int port, int ovr = 0)
   }
   if( n )
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
   sprintf(cbuff, "Save RAM @ page %d implemented yet! [%X]\n\r", port);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
@@ -312,17 +423,8 @@ void saveRam(int port, int ovr = 0)
 // Swap 16-bit word (n - number of 16-bit words)
 void swapPage(uint16_t *dta, int n)
 {
-  for (int i = 0; i < n; i++) {
-    dta[i] = swap16(dta[i]);
-  }
-}
-
-void qRam(int page)
-{
-  CModule *m = modules[page];
-  if (m->isInserted()) {
-    m->setRam();
-  }
+  for (int i = 0; i < n; dta++, i++)
+    *dta = __builtin_bswap16(*dta);
 }
 
 bool loadModule(const char *mod, int page)
@@ -338,22 +440,8 @@ bool loadModule(const char *mod, int page)
 
 void initRoms(int set)
 {
-  // Remove all modules ...
-  modules.clearAll();
-
-  if( set ) {
-    // This list should be read from saved config data
-    loadModule("PPC", 8);
-    loadModule("IR-PRINT", 0);
-    loadModule("ZENROM", 12);
-    loadModule("RAM8K", 10);
-    loadModule("TF-ROM", 13);
-  }
-  // Unplug Service ROM if inserted (has to be done manually)
-  if( modules.isInserted(4) ) {
-    if( strncmp(modules[4]->getName(), "SERVICE", 7) )
-      modules.unplug(4);
-  }
+  // Read configuration
+  modules.readConfig(set);
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
@@ -478,7 +566,12 @@ void core1_main_3(void)
 
   pBus = &bus[data_wr];
 
-  irq_set_mask_enabled(0xffffffff, false);
+  if( !flash_safe_execute_core_init() ) {
+    sprintf(cbuff, "*** Flash initfailed! ***\n\r");
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  }
+
+//  irq_set_mask_enabled(0xffffffff, true);
 
   last_sync = GPIO_PIN(P_SYNC);
 
@@ -1389,7 +1482,7 @@ void handle_bus(volatile Bus_t *pBus)
       // TBD - Should we allow writes to images not inserted?
       if (ram->isLoaded() && ram->isRam()) {
         // Page active and defined as ram - update!
-        ram->write(wAddr, wDat);
+        ram->writeQROM(wAddr, wDat);
         nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X !!\n\r", wDat, wAddr);
       } else {
         nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X (Not RAM!)\n\r", wDat, wAddr);
@@ -1482,13 +1575,14 @@ void handle_bus(volatile Bus_t *pBus)
       break;
     case INST_POWOFF:
       dump_dregs();
-      // Any QRAM that needs to be saved ... ?
+      // Any QROM that needs to be saved ... ?
+      // TBD - Should this be done here? Or manually?
       for(int p=FIRST_PAGE; p<=LAST_PAGE; p++) {
         CModule *m = modules[p];
         if( m->isLoaded() && m->isRam() && m->isDirty() ) {
-          saveRam(p);
-          sprintf(cbuff, "Updated QRAM in page #X\n\r", p);
-          cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+          //saveRam(p);
+          //sprintf(cbuff, "Updated QROM in page #X\n\r", p);
+          //cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
         }
       }
 #ifdef USE_XF_MODULE

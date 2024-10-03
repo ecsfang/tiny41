@@ -10,6 +10,7 @@
 #include "hardware/gpio.h"
 #include "pico/multicore.h"
 #include "pico/bootrom.h"
+#include "pico/flash.h"
 #include "tiny41.h"
 #include "serial.h"
 #include "core_bus.h"
@@ -72,8 +73,8 @@ void service(void)
 #define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+------------------+\n\r")
 #define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+------------------/\n\r")
 
-extern void readFlash(int offs, uint8_t *data, uint16_t size);
-extern int mod_info(const char *flashPtr, char *buf);
+//extern void readFlash(int offs, uint8_t *data, uint16_t size);
+extern int mod_info(CFat_t *pFat, char *buf);
 
 extern CFat_t fat;
 
@@ -97,7 +98,7 @@ void all_modules(void)
       }
       i = sprintf(cbuff,"| %3d | %-16.16s |%4.4s | %08X | ",
         n, fat.name(), typ, fat.offset() );
-      i += mod_info(fat.offset(), cbuff+i);
+      i += mod_info(&fat, cbuff+i);
       i += sprintf(cbuff+i,"\n\r");
       cdc_send_console(cbuff);
       fat.next();
@@ -115,8 +116,10 @@ void list_modules(void)
   extern CModules modules;
   int n;
 
+#ifdef DBG_PRINT
   cdc_send_string_and_flush(ITF_TRACE,(char*)"\n\rDump modules\n\r");
   modules.dump();
+#endif
   cdc_send_console((char*)"\n\rLoaded modules\n\r");
   BAR_T();
   cdc_send_console((char*)"| Page | Port | XROM | RAM | Name             | Banks\n\r");
@@ -137,7 +140,7 @@ void list_modules(void)
         n += sprintf(cbuff+n," --  | ");  // No XROM values in page 4
       else
         n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
-      n += sprintf(cbuff+n,"%3.3s |", modules.isRam(i) ? "Yes" : "" );
+      n += sprintf(cbuff+n,"%3.3s%c|", modules.isRam(i) ? "Yes" : "", modules.isDirty(i)?'*':' ' );
       n += sprintf(cbuff+n," %-16.16s |", modules[i]->getName() );
       if( modules[i]->haveBank(1))
         n += sprintf(cbuff+n," %s", modules[i]->getName(1) );
@@ -176,12 +179,14 @@ BrkMode_e brk_mode = BRK_NONE;
 
 typedef enum {
   ST_NONE,
-  ST_QRAM,
+  ST_QROM,
   ST_PLUG,
   ST_BRK,
   ST_MEM,
   ST_INST,
   ST_MPLUG,
+  ST_RCONF,
+  ST_WCONF,
 } State_e;
 
 State_e state = ST_NONE;
@@ -215,9 +220,9 @@ void clr_brk(void)
 
 void sel_qram(void)
 {
-  cdc_send_console((char*)"\n\rSelect QRAM page: -\b");
+  cdc_send_console((char*)"\n\rSelect QROM page: -\b");
   cdc_flush_console();
-  state = ST_QRAM;  // Expect port address
+  state = ST_QROM;  // Expect port address
 }
 
 void plug_unplug(void)
@@ -241,7 +246,7 @@ void inst_module(void)
 }
 void plug_module(void)
 {
-  cdc_send_console((char*)"\n\rSelect page for module: -\b");
+  cdc_send_console((char*)"Select page for module: -\b");
   cdc_flush_console();
   state = ST_MPLUG;  // Expect port address
 }
@@ -429,6 +434,11 @@ void addString(const char *fmt, int val)
   sprintf(cbuff, fmt, val);
   cdc_send_string(ITF_CONSOLE, cbuff);
 }
+void addString(const char *fmt, const char *str)
+{
+  sprintf(cbuff, fmt, str);
+  cdc_send_string(ITF_CONSOLE, cbuff);
+}
 void addString(const char *fmt, int val, int val2)
 {
   sprintf(cbuff, fmt, val, val2);
@@ -437,8 +447,8 @@ void addString(const char *fmt, int val, int val2)
 
 void info(void)
 {
-  addString("\r\nSystem information\r\n=========================\r\n");
-  addString("Flash offset:  0x%X\r\n", FLASH_TARGET_OFFSET);
+  addString("\r\nSystem information (core %d)\r\n=========================\r\n", get_core_num());
+  addString("Flash offset:  0x%X\r\n", FLASH_START);
   addString("XIP_BASE:      0x%X\r\n", XIP_BASE);
   addString("Sector size:   %6d (0x%X)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
   addString("Page size:     %6d (0x%X)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
@@ -446,6 +456,21 @@ void info(void)
   addString("Free heap:     %6d bytes\r\n", getFreeHeap());
   addString("Trace element: %6d bytes\r\n", sizeof(Bus_t));
   addString("Trace buffer:  %6d bytes (%d entries)\r\n", sizeof(Bus_t)*NUM_BUS_T, NUM_BUS_T);
+  addString("Victim(0):     %s\r\n", multicore_lockout_victim_is_initialized(0) ? "true":"false");
+  addString("Victim(1):     %s\r\n", multicore_lockout_victim_is_initialized(1) ? "true":"false");
+#if PICO_FLASH_SAFE_EXECUTE_USE_FREERTOS_SMP
+  addString("#define:       %s\r\n", "PICO_FLASH_SAFE_EXECUTE_USE_FREERTOS_SMP");
+#endif
+#if PICO_FLASH_SAFE_EXECUTE_PICO_SUPPORT_MULTICORE_LOCKOUT
+  addString("#define:       %s\r\n", "PICO_FLASH_SAFE_EXECUTE_PICO_SUPPORT_MULTICORE_LOCKOUT");
+#endif
+#if LIB_FREERTOS_KERNEL
+  addString("#define:       %s\r\n", "LIB_FREERTOS_KERNEL");
+#endif
+#if PICO_FLASH_ASSERT_ON_UNSAFE
+  addString("#define:       %s\r\n", "PICO_FLASH_ASSERT_ON_UNSAFE");
+#endif
+
   addString("\r\nHP41 information\r\n-------------------------\r\n");
 #ifdef USE_XF_MODULE
   addString("XMemory:       %6d bytes (%d registers)\r\n",
@@ -477,9 +502,22 @@ extern void initRoms(int set);
 
 void initRom(void)
 {
-  sprintf(cbuff, "Restore all modules to default\n\r");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-  initRoms(1);
+//  sprintf(cbuff, "Restore configurationall modules to default\n\r");
+//  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+//  initRoms(0);
+  cdc_send_console((char*)"\n\rSelect configuration to read [0-9]: -\b");
+  cdc_flush_console();
+  state = ST_RCONF;  // Expect port address
+}
+
+void save_config(void)
+{
+  cdc_send_console((char*)"\n\rSelect configuration to save [0-9]: -\b");
+  cdc_flush_console();
+  state = ST_WCONF;  // Expect port address
+//  modules.save(0);
+//  sprintf(cbuff, "Saved configuration\n\r");
+//  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -500,7 +538,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
   { 'w', wand_test,         "Example bar code"  },
-  { 'q', sel_qram,          "Select QRAM page"  },
+  { 'q', sel_qram,          "Select QROM page"  },
   { 'Q', quit_log,          "Stop logging"  },
   { 'l', list_modules,      "List modules"  },
   { 'L', all_modules,       "All modules"  },
@@ -518,6 +556,7 @@ SERIAL_COMMAND serial_cmds[] = {
 #ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
 #endif//USE_TIME_MODULE
+  { 'W', save_config,       "Save current configuration" },
 };
 
 const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
@@ -626,10 +665,10 @@ void serial_loop(void)
         if( x >= 0 ) {
           CModule *m = modules[x];
           switch( state ) {
-          case ST_QRAM:
+          case ST_QROM:
             if( m->isLoaded() ) {
               m->toggleRam();
-              sprintf(cbuff,"\rModule in page #%X marked as %s", x, m->isRam() ? "QRAM" : "ROM");
+              sprintf(cbuff,"\rModule in page #%X marked as %sROM", x, m->isRam() ? "Q" : "");
             } else {
               sprintf(cbuff,"\rNo image at page #%X!!", x);
             }
@@ -693,6 +732,27 @@ void serial_loop(void)
               }
               conChars += send2console(cbuff);
               conChars += send2console("\n\r");
+            }
+            state = ST_NONE;
+            break;
+          case ST_RCONF:
+          case ST_WCONF:
+            if( x >= 0 && x <= 9 ) {
+              int n = sprintf(cbuff,"%d\r\n", x);
+              if( state == ST_RCONF ) {
+                // Read configuration
+                sprintf(cbuff+n,"Read configuration\r\n");
+                conChars += send2console(cbuff);
+                modules.readConfig(x);
+              } else {
+                // Save configuration
+                sprintf(cbuff+n,"Save configuration\r\n");
+                conChars += send2console(cbuff);
+                modules.saveConfig(x);
+              }
+            } else {
+              sprintf(cbuff,"\rInvalid configuration - %d!!\r\n", x);
+              conChars += send2console(cbuff);
             }
             state = ST_NONE;
             break;

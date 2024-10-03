@@ -20,6 +20,7 @@ add_executable(tiny41
   serial.cpp
   ir_led.cpp
   modfile.cpp
+  module.cpp
   xfmem.cpp
   usb/cdc_helper.cpp            # helper functions for the multi-CDC USB interface
   usb/usb-descriptors.cpp       # descriptors for the multi-CDC USB interface
@@ -40,10 +41,11 @@ pico_add_extra_outputs(tiny41)
 target_link_libraries(
   tiny41
   pico_stdlib
+  pico_multicore
+  pico_flash
   hardware_i2c
   hardware_clocks
 	hardware_adc
-  pico_multicore
   hardware_pio
   tinyusb_device
   hardware_flash

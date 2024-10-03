@@ -9,6 +9,7 @@
 #include "instr.h"
 #include "ramdev.h"
 #include "fltools/fltools.h"
+#include "fltools/flconfig.h"
 #include "usb/cdc_helper.h"
 #include "hardware/flash.h"
 
@@ -41,7 +42,7 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
-#define PAGEn(n,i) (FLASH_TARGET_OFFSET + (2 * (n) + i) * FLASH_SECTOR_SIZE)
+#define PAGEn(n,i) (FLASH_START + (2 * (n) + i) * FLASH_SECTOR_SIZE)
 #define PAGE1(n) PAGEn(n,0)
 #define PAGE2(n) PAGEn(n,1)
 
@@ -61,17 +62,17 @@
 #define XF_PAGE         (0)
 #define XF_PAGES        (8)
 // Start of module FAT
-#define FAT_PAGE        (XF_PAGE+XF_PAGES)
-#define FAT_PAGES       (4)
+//#define FAT_PAGE        (XF_PAGE+XF_PAGES)
+//#define FAT_PAGES       (4)
 // Start of module pages
-#define MOD_PAGE        (FAT_PAGE+FAT_PAGES)
+//#define MOD_PAGE        (FAT_PAGE+FAT_PAGES)
 
 // One bus cycle is about 1/6300 = 160us
 #define ONE_BUS_CYCLE 160 //us
 
 // We're going to erase and reprogram a region 256k from the start of flash.
 // Once done, we can access this at XIP_BASE + 256k.
-#define FLASH_TARGET_OFFSET (512 * 1024)
+///#define FLASH_TARGET_OFFSET (512 * 1024)
 
 uint32_t getTotalHeap(void);
 uint32_t getFreeHeap(void);
@@ -313,13 +314,7 @@ inline void clrFI(int flag = FI_MASK) {
   carry_fi &= ~flag;
 }
 
-#define PRT_BUF_LEN 256
-extern volatile uint8_t prtBuf[PRT_BUF_LEN];
-extern volatile uint8_t wprt;
-
-extern void readFlash(int offs, uint8_t *data, uint16_t size);
-
-#define FLASH_PAGE(n) (FLASH_TARGET_OFFSET + (n) * FLASH_SECTOR_SIZE)
+#define FLASH_PAGE(n) (FLASH_START + (n) * FLASH_SECTOR_SIZE)
 
 /*
 There is a very simple FAT table, consiting of:
@@ -345,6 +340,10 @@ class CFat_t {
   FL_Head_t *p_fatEntry;
   int m_pos;
 public:
+  CFat_t(FL_Head_t *p=NULL) {
+    p_fatEntry = p;
+    m_pos = 0; // Wrong ...
+  }
   // Read next entry in the FAT (and increment pointer)
   void next() {
     // Reads FAT entry
@@ -385,7 +384,7 @@ public:
     return p_fatEntry;
   }
   FL_Head_t *fatEntry(int n) {
-    return (FL_Head_t*)(XIP_BASE + FLASH_PAGE(FAT_PAGE) + n*sizeof(FL_Head_t));
+    return (FL_Head_t*)(FAT_START + n*sizeof(FL_Head_t));
   }
   // Return the module name from the FAT
   char *name(void) {
@@ -397,7 +396,31 @@ public:
   }
 };
 
+// With current size (16*(4*4+4) = 320 bytes), there is room
+// for at least 12 configurations in one flash page
+typedef struct {
+  FL_Head_t *fat[NR_BANKS];        // Pointer to FAT entry
+  uint8_t    filePage[NR_BANKS];   // Page in the file image
+} ModuleConfig_t;
+typedef struct {
+  // Here we could add a title for the configuration (32 chars?)
+  ModuleConfig_t  mod[NR_PAGES];
+  uint32_t        chkSum;
+} Config_t;
+#define CONF_SIZE     sizeof(Config_t)
+#define CONF_OFFS(n)  (n*CONF_SIZE)
+
 void initRoms(int set = 0);
+
+#define PRT_BUF_LEN 256
+extern volatile uint8_t prtBuf[PRT_BUF_LEN];
+extern volatile uint8_t wprt;
+
+extern void readFlash(int offs, uint8_t *data, uint16_t size);
+extern uint16_t *writeROMMAP(int p, int b, uint16_t *data);
+extern uint16_t *writePage(int addr, uint8_t *data);
+extern uint16_t *writeConfig(Config_t *data, int set=0);
+extern bool readConfig(Config_t *data, int set);
 
 #ifdef USE_XF_MODULE
 #include "xfmem.h"

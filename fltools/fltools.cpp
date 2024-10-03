@@ -4,10 +4,11 @@
 #include <stdint.h>
 #include "fltools.h"
 #include <sys/stat.h>
+#include "flconfig.h"
 #define NO_EXTERNAL
 #include "../modfile.h"
 
-#define PICO_FLASH_START 0x10000000
+
 
 void initBin(FILE *bin, int offs)
 {
@@ -49,17 +50,12 @@ int isRam(char *m)
   return MFP.header.RAM;
 }
 
-#define PAGE_SIZE   (4*1024)
-#define FLASH_START (128*PAGE_SIZE)  // Offset to flash area (512kB)
-#define FAT_START   (8*PAGE_SIZE)    // Offset to FAT
-#define FAT_SIZE    (4)           // Size of FAT (pages)
-
 int main(int argc, char *argv[])
 {
   char buf[1024];
   FL_Head_t fl;
-  int x = 8;  // Start of FAT
-  int startOffs = PICO_FLASH_START + FLASH_START + FAT_START;
+  int x = 8;
+  int startOffs = FAT_START;
   char *p;
   char *np;
   char *name;
@@ -71,7 +67,8 @@ int main(int argc, char *argv[])
   FILE *ini = fopen("iflash.ini", "w");
  
   initBin(bin, startOffs);
-  x += FAT_SIZE;
+  // Point to start of FS (after FAT and FFS)
+  x += FAT_SIZE + FFS_SIZE;
   // Read file info from config file
 	while(fgets(buf, 1024, cfg)) {
     if( buf[0] == '#' )
@@ -101,7 +98,7 @@ int main(int argc, char *argv[])
       continue;
     }
     // Get offset to next free flash page
-    fl.offs = startOffs + x * PAGE_SIZE;
+    fl.offs = startOffs + x * PG_SIZE;
     mod++;
     saveBin(bin, mod, fl.offs, buf, fz);
     while(*p != '.')
@@ -126,7 +123,7 @@ int main(int argc, char *argv[])
     // Count and skip number of 4k pages
     while(fz>0) {
       x++;
-      fz -= PAGE_SIZE;
+      fz -= PG_SIZE;
     }
   }
   // Write the last (empty) FAT entry

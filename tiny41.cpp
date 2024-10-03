@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "pico/multicore.h"
+#include "pico/flash.h"
 #include "tiny41.h"
 #include "core_bus.h"
 #include "serial.h"
