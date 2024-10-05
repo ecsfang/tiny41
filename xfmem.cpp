@@ -33,7 +33,7 @@ void saveXMem(int xpg)
 {
   xpg += XF_PAGE;
   // Save copy - clear dirty ...
-  uint8_t pg[FLASH_PAGE_SIZE];
+  uint8_t pg[FLASH_SECTOR_SIZE];
   xmem.saveMem();
   erasePort(xpg);
   // Save all XMemory ...
@@ -41,7 +41,7 @@ void saveXMem(int xpg)
   // Save checksum too ...
   int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
   pg[0] = xmem.chkSum();
-  writeFlash(chkAddr, pg, FLASH_PAGE_SIZE);
+  writeFlash(chkAddr, pg, FLASH_SECTOR_SIZE);
   sprintf(cbuff, " -- Saved XMemory (%d bytes [%02X]) to flash!\n\r", xmem.size(), xmem.chkSum());
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
