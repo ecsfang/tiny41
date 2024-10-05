@@ -155,7 +155,7 @@ typedef struct {
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T (0x1000/2)
+#define NUM_BUS_T (0x1000)
 #endif
 
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
@@ -341,6 +341,9 @@ class CFat_t {
   int m_pos;
 public:
   CFat_t(FL_Head_t *p=NULL) {
+    init(p);
+  }
+  void init(FL_Head_t *p=NULL) {
     p_fatEntry = p;
     m_pos = 0; // Wrong ...
   }
@@ -376,10 +379,6 @@ public:
   const char *offset(void) {
     return (char*)offs();
   }
-  // Return actual flash offset for the current FAT entry
-  //const char *flOffset(void) {
-  //  return (char*)(offs() | XIP_BASE);
-  //}
   FL_Head_t *fatEntry() {
     return p_fatEntry;
   }

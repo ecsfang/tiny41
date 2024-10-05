@@ -11,71 +11,132 @@ enum {
     IMG_DIRTY = 0x04      // Module is dirty, changes should be saved
 };
 
-// Helper to decode the bank instruction
-//static uint8_t nBank[NR_BANKS] = {0,2,1,3};
+#define NAME_W 10 // Width when dumping name
+
+// Class to hold information about image in a bank
+class CBank {
+  uint16_t  *m_img;         // Pointer to image in flash or RAM
+  char       m_name[16+1];  // Name of the module
+  FL_Head_t *m_fat;         // Pointer to FAT entry
+  uint8_t    m_filePage;    // Page in the file image (MOD file)
+public:
+  void set(uint16_t *i, char *n, FL_Head_t *f, uint8_t p) {
+    m_img = i;
+    m_fat = f;              // Point to original file in FFS
+    m_filePage = p;         // Which page in the original file
+    strncpy(m_name, n, 16); // Name of module/bank
+  }
+  void clear(void) {
+    m_img = NULL;
+  }
+  void erase(void) {
+    m_img = NULL;
+    memset(m_name, 0, (16+1)*sizeof(char));
+    m_fat =  NULL;
+  }
+  void free(void) {
+    if( m_img )
+      delete[] m_img;
+    clear();
+  }
+  FL_Head_t *fat(void) {
+    return m_fat;
+  }
+  void fat(FL_Head_t *ft) {
+    m_fat = ft;
+  }
+  int type(void) {
+    return m_fat->type;
+  }
+  void page(uint8_t pg) {
+    m_filePage = pg;
+  }
+  uint8_t   page(void) {
+    return m_filePage;
+  }
+  uint16_t *image(void) {
+    return m_img;
+  }
+  char *name(void) {
+    return m_name;
+  }
+  int dump(char *buf) {
+    int n = 0;
+    if( fat() ) {
+      switch( type() ) {
+      case FL_ROM: n += sprintf(buf+n, "R"); break;
+      case FL_MOD: n += sprintf(buf+n, "M"); break;
+      case FL_RAM: n += sprintf(buf+n, "Q"); break;
+      default:     n += sprintf(buf+n, "?");
+      }
+      n += sprintf(buf+n, ":%*s %X:%2d{%03X}", NAME_W, name(), image(), page(), image()[0]);
+    } else {
+      n += sprintf(buf+n, " ");
+    }
+    return n;
+  }
+};
 
 // This class handles a single module (with up to 4 banks)
 class CModule {
-  uint16_t  *m_banks[NR_BANKS];      // Pointer to each bank (up to 4 images)
-  uint16_t  *m_img;                  // Pointer to current image
-  char       m_name[NR_BANKS][16+1]; // Name of the module
-  uint8_t    m_flgs;                 // Status of the module
-  uint8_t    m_cBank;                // Currently selected bank
-  FL_Head_t *m_fat[NR_BANKS];        // Pointer to FAT entry
-  uint8_t    m_filePage[NR_BANKS];   // Page in the file image
+  CBank     m_banks[NR_BANKS];
+  uint16_t *m_img;                  // Pointer to current image
+  uint8_t   m_flgs;                 // Status of the module
+  uint8_t   m_cBank;                // Currently selected bank
 public:
   void dump(int p);
   CModule() {eraseData(); }
-  void removeBank(int bank);
-  void removeBanks();
+  void freeBank(int bank);
   void remove();
   void eraseData();
-  void clearBank(int b) {
-    m_banks[b] = NULL;
-  }
   void clearBanks(void) {
-    memset(m_banks, 0, NR_BANKS*sizeof(uint16_t*));
+    for(int b=0; b<NR_BANKS; b++)
+      m_banks[b].clear();
   }
+  // Get data to save to flash
   void getConfig(ModuleConfig_t *mc) {
-    memcpy(mc->fat, m_fat, sizeof(FL_Head_t*)*NR_BANKS);
-    memcpy(mc->filePage, m_filePage, sizeof(uint8_t)*NR_BANKS);
+    for(int b=0; b<NR_BANKS; b++) {
+      mc->fat[b] = m_banks[b].fat();
+      mc->filePage[b] = m_banks[b].page();
+    }
   }
   void setConfig(ModuleConfig_t *mc) {
-    memcpy(m_fat, mc->fat, sizeof(FL_Head_t*)*NR_BANKS);
-    memcpy(m_filePage, mc->filePage, sizeof(uint8_t)*NR_BANKS);
+    for(int b=0; b<NR_BANKS; b++) {
+      m_banks[b].fat(mc->fat[b]);
+      m_banks[b].page(mc->filePage[b]);
+    }
   }
   // Connect an image to the correct bank of the module
   void setImage(uint16_t *img, int bank, FL_Head_t *fat, char *name, int page);
-  void setImage(uint16_t *img, int bank);
   // Select current bank given bank-instruction
   void selectBank(int bank);
   // Return pointer to bank image
   uint16_t *getImage(int bank) {
-    return m_banks[bank];
+    return m_banks[bank].image();
   }
-  //
+  // Get name of module in given bank
   char *getName(int bank = 0) {
-    return m_name[bank];
+    return m_banks[bank].name();
   }
   // True if more than the default bank
   bool haveBank(int bank = 0) {
     if( bank )
-      return m_banks[bank] ? true : false;
-    return (m_banks[1]||m_banks[2]||m_banks[3]) ? true : false;
+      return m_banks[bank].image() ? true : false;
+    return (m_banks[1].image()||m_banks[2].image()||m_banks[3].image()) ? true : false;
   }
   // Module is updated and not saved
   bool isDirty(void) {
     return m_flgs & IMG_DIRTY;
   }
   int type(int b) {
-    return m_fat[b]->type;
+    return m_banks[b].type();
   }
   FL_Head_t *fat(int b) {
-    return m_fat[b];
+    return m_banks[b].fat();
   }
   //Return the page number in the (MOD) file
   int filePage(int b) {
-    return m_filePage[b];
+    return m_banks[b].page();
   }
   void clear(void) {
     m_flgs &= ~IMG_DIRTY;
@@ -89,7 +150,7 @@ public:
   bool isLoaded(void) {
     return m_img != NULL;
   }
-  bool isRam(void) {
+  bool isQROM(void) {
     return m_flgs & IMG_RAM;
   }
   void togglePlug(void) {
@@ -112,11 +173,11 @@ public:
   void setRom(void) {
     m_flgs &= ~IMG_RAM;
   }
-  // Read 10-bit instruction from image given address
+  // Read 10-bit instruction from current image given address
   uint16_t read(uint16_t addr) {
     return m_img[addr & PAGE_MASK] & INST_MASK;
   }
-  // Read 10-bit instruction from image given address
+  // Read 10-bit instruction from current image given address
   uint16_t operator [](uint16_t addr) {
     return m_img[addr & PAGE_MASK] & INST_MASK;
   }
@@ -159,7 +220,7 @@ public:
   // Save class to flash at page n
   void saveConfig(int n);
   // Read class from flash at page n
-  void readConfig(int n);
+  bool readConfig(int n);
 
 //  void remove(int port) {
 //    m_modules[port].clr();
@@ -176,8 +237,8 @@ public:
   bool isLoaded(int port) {
     return m_modules[port].isLoaded();
   }
-  bool isRam(int port) {
-    return m_modules[port].isRam();
+  bool isQROM(int port) {
+    return m_modules[port].isQROM();
   }
   void togglePlug(int port) {
     m_modules[port].togglePlug();

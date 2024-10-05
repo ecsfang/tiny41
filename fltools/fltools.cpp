@@ -38,7 +38,7 @@ long GetFileSize(const char *filename)
     return rc == 0 ? stat_buf.st_size : -1;
 }
 
-int isRam(char *m)
+int isRamModule(char *m)
 {
   FILE *fp = fopen(m,"r");
   ModuleFileHeader MFH;
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
     while(*p != '.')
       p--;
     if( !strcasecmp(p+1, "MOD") ) {
-      if( isRam(buf) )
+      if( isRamModule(buf) )
         fl.type = FL_RAM;
       else
         fl.type = FL_MOD;

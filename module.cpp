@@ -15,24 +15,13 @@ static uint8_t nBank[NR_BANKS] = {0,2,1,3};
 // class CModule
 //*********************************
 
-#define NAME_W 10
 // Dump the content of the class
 void CModule::dump(int p)
 {
   int n = sprintf(cbuff, "%X: [ ", p);
   for(int b=0; b<NR_BANKS; b++) {
     n += sprintf(cbuff+n, "[");
-    if( m_fat[b] ) {
-      switch( m_fat[b]->type ) {
-      case FL_ROM: n += sprintf(cbuff+n, "R"); break;
-      case FL_MOD: n += sprintf(cbuff+n, "M"); break;
-      case FL_RAM: n += sprintf(cbuff+n, "Q"); break;
-      default:     n += sprintf(cbuff+n, "?");
-      }
-      n += sprintf(cbuff+n, ":%*s %X:%2d{%03X}", NAME_W, m_name[b], m_banks[b], m_filePage[b], m_banks[b][0]);
-    } else {
-      n += sprintf(cbuff+n, " ");
-    }
+    n += m_banks[b].dump(cbuff+n);
     n += sprintf(cbuff+n, "] ");
   }
   sprintf(cbuff+n, "]\n\r");
@@ -44,35 +33,24 @@ void CModule::dump(int p)
 void CModule::eraseData()
 {
   m_img = NULL;
-  memset(m_banks, 0, NR_BANKS*sizeof(uint16_t*));
-  memset(m_name,  0, NR_BANKS*(16+1)*sizeof(char));
-  memset(m_fat,  0, NR_BANKS*(sizeof(FL_Head_t*)));
+  for(int b=0; b<NR_BANKS; b++)
+    m_banks[b].erase();
   m_flgs = m_cBank = 0;
 }
 // Free any QROM pointers to the given bank
-void CModule::removeBank(int bank) {
-  if( haveBank(bank) && isRam() ) {
-    delete[] m_banks[bank];
-    m_banks[bank] = NULL;
+void CModule::freeBank(int bank) {
+  if( haveBank(bank) && isQROM() ) {
+    m_banks[bank].free();
   }
-}
-// Free all QROM banks for the current page
-void CModule::removeBanks() {
-  for(int b=0; b<NR_BANKS; b++)
-    removeBank(b);
 }
 // Remove any plugged in modules
 void CModule::remove() {
-  removeBanks();  // Free any RAM pointers
+  // Free all QROM banks for the current page
+  for(int b=0; b<NR_BANKS; b++)
+    freeBank(b);
   eraseData();    // Clear the whole class
 }
-// Save the given ROM image to the specified bank
-// Free any previous QROM pointer
-void CModule::setImage(uint16_t *img, int bank) {
-  removeBank(bank);     // Remove any previous image and name
-  m_banks[bank] = img;
-  m_img = m_banks[0];
-}
+
 // Connect an image to the correct bank of the module
 // img  - Pointer to image in flash or RAM
 // bank - the target bank for the image
@@ -80,10 +58,10 @@ void CModule::setImage(uint16_t *img, int bank) {
 // name - The name of the image
 // page - The page number on the original file (MOD)
 void CModule::setImage(uint16_t *img, int bank, FL_Head_t *fat, char *name, int page) {
-  setImage(img, bank);      // Update image pointer for this bank
-  m_fat[bank] = fat;        // Point to original file in FFS
-  m_filePage[bank] = page;  // Which page in the original file
-  strncpy(m_name[bank], name, 16);  // Remember the name
+  // Update image pointer for this bank
+  freeBank(bank);
+  m_banks[bank].set(img, name, fat, page);
+  m_img = m_banks[0].image();
 #ifdef DBG_PRINT
   sprintf(cbuff,"Set image %X @ %X [%d] -> Bank %d <%s>\n\r", img, fat->offs, fat->type, bank, m_name[bank]);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
@@ -91,7 +69,8 @@ void CModule::setImage(uint16_t *img, int bank, FL_Head_t *fat, char *name, int 
   if( bank == 0 )
     m_flgs = IMG_INSERTED;
 }
-// Select current bank given bank-instruction
+
+// Select current bank given NUT bank-instruction
 void CModule::selectBank(int bank) {
   // Convert from instruction to bank #
   bank = nBank[(bank>>6)&0b11];
@@ -101,6 +80,7 @@ void CModule::selectBank(int bank) {
     m_img = getImage(m_cBank);
   }
 }
+
 // Write 10-bit instruction to current image given address
 void CModule::writeQROM(uint16_t addr, uint16_t dta) {
   if( m_img[addr & PAGE_MASK] != dta ) {
@@ -109,73 +89,75 @@ void CModule::writeQROM(uint16_t addr, uint16_t dta) {
   }
 }
 
-// Save configuration in flash at page n
-// TBD - page n is not used - only one configuration saved
+// Save configuration #set in flash
 void CModules::saveConfig(int set)
 {
   // Check for any dirty QROM pages to update 
   for(int p=FIRST_PAGE; p<NR_PAGES; p++) {
     CModule *cm = &m_modules[p];
     // Check if page is QROM and if changed
-    if( cm->isRam() && cm->isDirty() ) {
+    if( cm->isQROM() && cm->isDirty() ) {
       // If so, save all used banks
       for(int b=0; b<NR_BANKS; b++) {
-        uint16_t *img = cm->getImage(b);
-        if( img ) {
-          writeROMMAP(p,b,img);
-        }
+        if( cm->haveBank(b) )
+          writeROMMAP(p,b,cm->getImage(b));
       }
-      // Clear dirty flag
+      // Saved - clear dirty flag
       cm->clear();
     }
   }
   // Get the configuration to save
-  Config_t conf;
+  Config_t *conf = new Config_t;
   for(int p=0; p<NR_PAGES; p++)
-    m_modules[p].getConfig(&conf.mod[p]);
+    m_modules[p].getConfig(&conf->mod[p]);
   // Save the whole object to flash
-  //writePage(CONF_PAGE, (uint8_t*)&m_conf); //this);
-  writeConfig(&conf, set);
+  writeConfig(conf, set);
+  delete conf;
 #ifdef DBG_PRINT
-//  sprintf(cbuff, "Saved config (%d bytes) @ %X\n\r", sizeof(*this), CONF_PAGE);
-  sprintf(cbuff, "Saved config (%d bytes) @ %X\n\r", sizeof(conf), CONF_PAGE);
+  sprintf(cbuff, "Saved config i#%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
 }
 
-// Read configuration from flash at page n
-// TBD - Only one configuration saved now (n not used)
-void CModules::readConfig(int set)
+// Read configuration #set from flash
+// TBD - should we save current if dirty?
+bool CModules::readConfig(int set)
 {
+  bool ret = true;
   // Read the saved configuration ...
-  Config_t conf;
-  if( !::readConfig(&conf, set) ) {
+  Config_t *conf = new Config_t;
+  CFat_t *pFat = new CFat_t();
+  if( !::readConfig(conf, set) ) {
     sprintf(cbuff, "Bad configuration for set %d\n\r", set);
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-    return;
+    ret = false;
   }
-  // Remove everything from the class ...
-  clearAll();
-
-  for(int p=0; p<NR_PAGES; p++)
-    m_modules[p].setConfig(&conf.mod[p]);
-
-#ifdef DBG_PRINT
-  sprintf(cbuff, "Read config (%d bytes) @ %X\n\r", sizeof(conf), CONF_PAGE);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  // Verify and restore flash pages in ROMMAP from FAT
-  // Check that FAT entries really points to correct images
-  for(int p=FIRST_PAGE; p<NR_PAGES; p++) {
-    CModule *cm = &m_modules[p];
-    for(int b=0; b<NR_BANKS; b++) {
-      CFat_t pFat(cm->fat(b));
-      if( pFat.fatEntry() ) {
-        // This page has a FAT, verify and load image into ROMMAP
-        // given FAT entry and page in file to load
-        // If QROM, RAM pointer is added to class 
-        extract_mod(&pFat, p, cm->filePage(b));
+  if( ret ) {
+    // Remove everything from the class ...
+    clearAll();
+    // Restore all modules configuration
+    for(int p=0; ret && p<NR_PAGES; p++) {
+      CModule *cm = &m_modules[p];
+      // Restore configuration
+      cm->setConfig(&conf->mod[p]);
+      // Verify and restore flash pages in ROMMAP from FAT for each bank
+      // Check that FAT entries really points to correct images
+      for(int b=0; ret &&b<NR_BANKS; b++) {
+        pFat->init(cm->fat(b));
+        if( pFat->fatEntry() ) {
+          // This page has a FAT, verify and load image into ROMMAP
+          // given FAT entry and page in file to load
+          if( extract_mod(pFat, p, cm->filePage(b)) )
+            ret = false;
+        }
       }
     }
   }
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Read config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  delete pFat;
+  delete conf;
+  return ret;
 }

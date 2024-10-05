@@ -140,7 +140,7 @@ void list_modules(void)
         n += sprintf(cbuff+n," --  | ");  // No XROM values in page 4
       else
         n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
-      n += sprintf(cbuff+n,"%3.3s%c|", modules.isRam(i) ? "Yes" : "", modules.isDirty(i)?'*':' ' );
+      n += sprintf(cbuff+n,"%3.3s%c|", modules.isQROM(i) ? "Yes" : "", modules.isDirty(i)?'*':' ' );
       n += sprintf(cbuff+n," %-16.16s |", modules[i]->getName() );
       if( modules[i]->haveBank(1))
         n += sprintf(cbuff+n," %s", modules[i]->getName(1) );
@@ -668,7 +668,7 @@ void serial_loop(void)
           case ST_QROM:
             if( m->isLoaded() ) {
               m->toggleRam();
-              sprintf(cbuff,"\rModule in page #%X marked as %sROM", x, m->isRam() ? "Q" : "");
+              sprintf(cbuff,"\rModule in page #%X marked as %sROM", x, m->isQROM() ? "Q" : "");
             } else {
               sprintf(cbuff,"\rNo image at page #%X!!", x);
             }

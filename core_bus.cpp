@@ -1480,7 +1480,7 @@ void handle_bus(volatile Bus_t *pBus)
       int wDat = data56 & INST_MASK;
       CModule *ram = modules.at(wAddr);
       // TBD - Should we allow writes to images not inserted?
-      if (ram->isLoaded() && ram->isRam()) {
+      if (ram->isLoaded() && ram->isQROM()) {
         // Page active and defined as ram - update!
         ram->writeQROM(wAddr, wDat);
         nCpu2 = sprintf(cpu2buf, "   W> %03X -> @%04X !!\n\r", wDat, wAddr);
@@ -1579,7 +1579,7 @@ void handle_bus(volatile Bus_t *pBus)
       // TBD - Should this be done here? Or manually?
       for(int p=FIRST_PAGE; p<=LAST_PAGE; p++) {
         CModule *m = modules[p];
-        if( m->isLoaded() && m->isRam() && m->isDirty() ) {
+        if( m->isLoaded() && m->isQROM() && m->isDirty() ) {
           //saveRam(p);
           //sprintf(cbuff, "Updated QROM in page #X\n\r", p);
           //cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
