@@ -226,7 +226,7 @@ static void write_flash_page(void *param) {
   restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
 }
 
-
+// Earse a port - two pages (8KB) of flash
 void erasePort(int n, bool bPrt=true)
 {
   if( bPrt ) {
@@ -337,15 +337,18 @@ bool readConfig(Config_t *data, int set)
 #endif
   return chk == data->chkSum;
 }
-uint16_t *writeConfig(Config_t *data, int set)
+
+uint16_t *writeConfig(Config_t *data, int set, bool clear)
 {
   uint8_t *pg = new uint8_t[FLASH_SECTOR_SIZE];
   // Read whole config page
   memcpy(pg, (uint8_t*)CONF_PAGE, FLASH_SECTOR_SIZE);
   // Update current config
   uint32_t *cp = (uint32_t*)data;
-  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
-  data->chkSum = chk;
+  if( !clear ) {
+    uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
+    data->chkSum = chk;
+  }
   memcpy(pg+CONF_OFFS(set), data, CONF_SIZE);
   // Write back updated configuration
   flash_write_t tmp = {CONF_PAGE, pg};
@@ -360,6 +363,43 @@ uint16_t *writeConfig(Config_t *data, int set)
 #endif
   }
   return (uint16_t*)tmp.addr;
+}
+
+uint16_t *writeSetup(Setup_t *data)
+{
+  uint8_t *pg = new uint8_t[FLASH_SECTOR_SIZE];
+  // Read whole config page
+  memcpy(pg, (uint8_t*)CONF_PAGE, FLASH_SECTOR_SIZE);
+  // Update current config
+  uint32_t *cp = (uint32_t*)data;
+  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Setup_t));
+  data->chkSum = chk;
+  memcpy(pg+SETUP_OFFS, data, SETUP_SIZE);
+  // Write back updated configuration
+  flash_write_t tmp = {CONF_PAGE, pg};
+  int r = flash_safe_execute(write_flash_page, &tmp, FLASH_LOCK_TIMEOUT_MS);
+  if (r != PICO_OK) {
+    sprintf(cbuff, "error calling writeSetup: %d", r);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#ifdef DBG_PRINT
+  } else {
+    sprintf(cbuff, "Wrote setup @ 0x%08X:%d\n\r", CONF_PAGE+SETUP_OFFS, SETUP_SIZE);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  }
+  return (uint16_t*)tmp.addr;
+}
+
+bool readSetup(Setup_t *data)
+{
+  uint32_t cp = CONF_PAGE + SETUP_OFFS;
+  memcpy(data, (uint8_t*)cp, SETUP_SIZE);
+  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Setup_t));
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Read setup @ 0x%08X:%X\n\r", cp, SETUP_SIZE);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  return chk == data->chkSum;
 }
 
 void writePort(int n, uint16_t *data)
@@ -433,15 +473,15 @@ bool loadModule(const char *mod, int page)
   // FAT is updated to point to this entry
   if( !fat.find(mod) )
     return false;
-
   return extract_mod(&fat, page) ? false : true;
-
 }
 
-void initRoms(int set)
+void initRoms(void)
 {
-  // Read configuration
-  modules.readConfig(set);
+  // TBD - Should read a saved setup and load
+  // previous configuration from previous session
+  if( modules.readSetup() )
+    modules.readConfig();
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);

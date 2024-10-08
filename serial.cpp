@@ -183,10 +183,12 @@ typedef enum {
   ST_PLUG,
   ST_BRK,
   ST_MEM,
-  ST_INST,
+  ST_INST,  // Get module to install
+  ST_DESC,  // Get description of config
   ST_MPLUG,
   ST_RCONF,
   ST_WCONF,
+  ST_DELC   // Delete configuration
 } State_e;
 
 State_e state = ST_NONE;
@@ -232,8 +234,47 @@ void plug_unplug(void)
   state = ST_PLUG;  // Expect port address
 }
 
-static char m_mod[32];
-static int  m_pMod = 0;
+// Local buffer to hold a entered text string
+#define TEXT_BUFFER_LEN   64
+class CText {
+  char m_text[TEXT_BUFFER_LEN];
+  int  m_pText = 0;  // Pointer to next character
+  int  m_pMax = 0;   // Max length of current string
+public:
+  CText() {
+    init(TEXT_BUFFER_LEN);
+  }
+// Init buffer stating max length of wanted string
+  void init(int len) {
+    memset(m_text, 0, TEXT_BUFFER_LEN);
+    m_pText = 0;
+    m_pMax = len-1;
+  }
+  // Add character to buffer
+  void add(char ch) {
+    if( m_pText >= m_pMax ) {
+      // Overflow - remove last character
+      m_pText = m_pMax-1;
+      send2console("\b", false);
+    }
+    m_text[m_pText++] = ch;
+  }
+  // Back space - remove last character
+  void del(void) {
+    m_text[--m_pText] = 0;
+    send2console("\b \b", false);  // Clean previous content on page ...
+    cdc_flush_console();
+  }
+  char *buf(void) {
+    return m_text;
+  }
+  int len(void) {
+    return m_pText;
+  }
+};
+
+static CText m_text;
+
 extern bool loadModule(const char *mod, int page);
 
 void inst_module(void)
@@ -241,14 +282,28 @@ void inst_module(void)
   cdc_send_console((char*)"\n\rWhich module to install: -\b");
   cdc_flush_console();
   state = ST_INST;  // Expect port address
-  memset(m_mod, 0, 32);
-  m_pMod = 0;
+  m_text.init(MOD_NAME_LEN);
 }
 void plug_module(void)
 {
   cdc_send_console((char*)"Select page for module: -\b");
   cdc_flush_console();
   state = ST_MPLUG;  // Expect port address
+}
+int find_module(void)
+{
+  // Search for the module and install!
+  int n = 0;
+  if( fat.find(m_text.buf()) ) {
+    sprintf(cbuff,"\rFind module: %s ", m_text.buf());
+    n = send2console(cbuff, true);  // Clean previous content on page ...
+    plug_module();
+  } else {
+    sprintf(cbuff,"\rModule [%s] not found!", m_text.buf());
+    n = send2console(cbuff, true);  // Clean previous content on page ...
+    state = ST_NONE;
+  }
+  return n;
 }
 
 void mem_emulate(void)
@@ -342,10 +397,10 @@ void dump_xmem(void)
   cdc_send_console((char*)"XMemory Module 2\n\r=====================================\n\r");
   for(int i=XMEM_XM2_SIZE-1; i>=0; i--) {
     n = 0;
-    if( xmem.mem[i+XMEM_XM2_OFFS] || xmem.m_mem[i+XMEM_XM2_OFFS] ) {
+    if( xmem.m_ram->mem[i+XMEM_XM2_OFFS] || xmem.m_mem.mem[i+XMEM_XM2_OFFS] ) {
       n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XM2_START,
-          xmem.mem[i+XMEM_XM2_OFFS], xmem.m_mem[i+XMEM_XM2_OFFS]);
-      if( xmem.mem[i+XMEM_XM2_OFFS] != xmem.m_mem[i+XMEM_XM2_OFFS] )
+          xmem.m_ram->mem[i+XMEM_XM2_OFFS], xmem.m_mem.mem[i+XMEM_XM2_OFFS]);
+      if( xmem.m_ram->mem[i+XMEM_XM2_OFFS] != xmem.m_mem.mem[i+XMEM_XM2_OFFS] )
         n += sprintf(cbuff+n," ***");
       sprintf(cbuff+n,"\n\r");
       cdc_send_console(cbuff);
@@ -357,10 +412,10 @@ void dump_xmem(void)
   sprintf(cbuff,"XMemory Module 1\n\r=====================================\n\r");
   for(int i=XMEM_XM1_SIZE-1; i>=0; i--) {
     n = 0;
-    if( xmem.mem[i+XMEM_XM1_OFFS] || xmem.m_mem[i+XMEM_XM1_OFFS] ) {
+    if( xmem.m_ram->mem[i+XMEM_XM1_OFFS] || xmem.m_mem.mem[i+XMEM_XM1_OFFS] ) {
       n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XM1_START,
-          xmem.mem[i+XMEM_XM1_OFFS], xmem.m_mem[i+XMEM_XM1_OFFS]);
-      if( xmem.mem[i+XMEM_XM1_OFFS] != xmem.m_mem[i+XMEM_XM1_OFFS] )
+          xmem.m_ram->mem[i+XMEM_XM1_OFFS], xmem.m_mem.mem[i+XMEM_XM1_OFFS]);
+      if( xmem.m_ram->mem[i+XMEM_XM1_OFFS] != xmem.m_mem.mem[i+XMEM_XM1_OFFS] )
         n += sprintf(cbuff+n," ***");
       n += sprintf(cbuff+n,"\n\r");
       cdc_send_console(cbuff);
@@ -372,10 +427,10 @@ void dump_xmem(void)
   sprintf(cbuff,"XFunction Memory\n\r=====================================\n\r");
   for(int i=XMEM_XF_SIZE-1; i>=0; i--) {
     n = 0;
-    if( xmem.mem[i] || xmem.m_mem[i] ) {
+    if( xmem.m_ram->mem[i] || xmem.m_mem.mem[i] ) {
       n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XF_START,
-          xmem.mem[i], xmem.m_mem[i]);
-      if( xmem.mem[i] != xmem.m_mem[i] )
+          xmem.m_ram->mem[i], xmem.m_mem.mem[i]);
+      if( xmem.m_ram->mem[i] != xmem.m_mem.mem[i] )
         n += sprintf(cbuff+n," ***");
       n += sprintf(cbuff+n,"\n\r");
       cdc_send_console(cbuff);
@@ -389,8 +444,16 @@ void clr_xmem(void)
 {
   cdc_send_console((char*)"Clear XMemory\n\r");
   cdc_flush_console();
-  memset((void*)xmem.mem,0,xmem.size());
+  memset((void*)xmem.m_ram->mem,0,xmem.size());
   xmem.saveMem();
+}
+void init_xmem(void)
+{
+  cdc_send_console((char*)"Init XMemory\n\r");
+  cdc_flush_console();
+  initXMem(0);
+  cdc_send_console((char*)"Done with Init XMemory\n\r");
+  cdc_flush_console();
 }
 #endif//USE_XF_MODULE
 
@@ -456,20 +519,6 @@ void info(void)
   addString("Free heap:     %6d bytes\r\n", getFreeHeap());
   addString("Trace element: %6d bytes\r\n", sizeof(Bus_t));
   addString("Trace buffer:  %6d bytes (%d entries)\r\n", sizeof(Bus_t)*NUM_BUS_T, NUM_BUS_T);
-  addString("Victim(0):     %s\r\n", multicore_lockout_victim_is_initialized(0) ? "true":"false");
-  addString("Victim(1):     %s\r\n", multicore_lockout_victim_is_initialized(1) ? "true":"false");
-#if PICO_FLASH_SAFE_EXECUTE_USE_FREERTOS_SMP
-  addString("#define:       %s\r\n", "PICO_FLASH_SAFE_EXECUTE_USE_FREERTOS_SMP");
-#endif
-#if PICO_FLASH_SAFE_EXECUTE_PICO_SUPPORT_MULTICORE_LOCKOUT
-  addString("#define:       %s\r\n", "PICO_FLASH_SAFE_EXECUTE_PICO_SUPPORT_MULTICORE_LOCKOUT");
-#endif
-#if LIB_FREERTOS_KERNEL
-  addString("#define:       %s\r\n", "LIB_FREERTOS_KERNEL");
-#endif
-#if PICO_FLASH_ASSERT_ON_UNSAFE
-  addString("#define:       %s\r\n", "PICO_FLASH_ASSERT_ON_UNSAFE");
-#endif
 
   addString("\r\nHP41 information\r\n-------------------------\r\n");
 #ifdef USE_XF_MODULE
@@ -498,26 +547,62 @@ void tag(void) {
 }
 
 extern void reset_bus_buffer(void);
-extern void initRoms(int set);
+extern void initRoms(void);
 
-void initRom(void)
+void read_config(void)
 {
-//  sprintf(cbuff, "Restore configurationall modules to default\n\r");
-//  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-//  initRoms(0);
-  cdc_send_console((char*)"\n\rSelect configuration to read [0-9]: -\b");
+  cdc_send_console((char*)"\n\rSelect config to read [0-9|Clr|List]: -\b");
   cdc_flush_console();
   state = ST_RCONF;  // Expect port address
 }
 
+void desc_config(void)
+{
+  cdc_send_console((char*)"\n\rModule config description: -\b");
+  cdc_flush_console();
+  state = ST_DESC;  // Get configuration description
+  m_text.init(CONF_DESC_LEN);
+}
+
 void save_config(void)
 {
-  cdc_send_console((char*)"\n\rSelect configuration to save [0-9]: -\b");
+  cdc_send_console((char*)"\n\rSelect config to save [0-9|Del|List]: -\b");
   cdc_flush_console();
   state = ST_WCONF;  // Expect port address
-//  modules.save(0);
-//  sprintf(cbuff, "Saved configuration\n\r");
-//  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+}
+
+void clr_config(void)
+{
+  send2console((char*)"\rClear configuration!", true);  // Clean previous content on page ...
+  cdc_send_string_and_flush(ITF_CONSOLE, (char*)"\r\n");
+  modules.clearAll();
+}
+
+void del_config(void)
+{
+  cdc_send_console((char*)"\n\rSelect config to delete [0-9|List]: -\b");
+  cdc_flush_console();
+  state = ST_DELC;  // Expect port address
+}
+
+void list_config(void)
+{
+  Config_t *conf = new Config_t;
+  CFat_t *pFat = new CFat_t();
+  int n;
+  send2console((char*)"\rList all configurations", true);  // Clean previous content on page ...
+  cdc_send_string_and_flush(ITF_CONSOLE, (char*)"---+--------------------------\r\n");
+  // TBD - List all available saved module configuration
+  for(int i=0; i<10; i++) {
+    n = sprintf(cbuff," %d | ", i);
+    if( readConfig(conf, i) ) {
+      n += sprintf(cbuff+n,"%s ", conf->desc);
+    } else {
+      n += sprintf(cbuff+n,"-");
+    }
+    n += sprintf(cbuff+n,"\r\n");
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  }
 }
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -544,19 +629,21 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'L', all_modules,       "All modules"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },
   { 'P', inst_module,       "Install a module"  },
-  { 'O', initRom,           "Load default modules" },
   { 'M', mem_emulate,       "Enable Memory modules"  },
   { 'm', mem_modules,       "Number of Memory modules"  },
 #ifdef USE_XF_MODULE
   { 'f', dump_xmem,         "Dump XMemory"  },
   { 'X', clr_xmem,          "Clear XMemory"  },
+  { 'Z', init_xmem,         "Init XMemory"  },
 #endif//USE_XF_MODULE
   { 'k', dump_blinky,       "Dump Blinky registers and memory"  },
   { 'S', service,           "Service ROM (11967) FI+DATA" },
 #ifdef USE_TIME_MODULE
   { 'T', dump_time,         "Dump Time registers"  },
 #endif//USE_TIME_MODULE
-  { 'W', save_config,       "Save current configuration" },
+  { 'I', list_config,       "List all saved configurations" },
+  { 'O', read_config,       "Load module configuration" },
+  { 'W', desc_config,       "Save current configuration" },
 };
 
 const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
@@ -589,7 +676,7 @@ int send2console(const char* dispBuf, bool bClear = false)
 {
   int n = cdc_send_console((char*)dispBuf);
   if( bClear )
-    n += cdc_send_console((char*)"              \n\r");
+    n += cdc_send_console((char*)"                   \n\r");
   return n;
 }
 
@@ -623,141 +710,173 @@ void serial_loop(void)
         if( state == ST_MPLUG) {
           int x = getHexKey(key);
           if( x >= 0 ) {
-            sprintf(cbuff,"\rPlug %s into port %d", m_mod, x);
+            sprintf(cbuff,"\rPlug %s into port %d", m_text.buf(), x);
             conChars += send2console(cbuff, true);  // Clean previous content on page ...
             // Load the module!
-            if( loadModule(m_mod, x) )
+            if( loadModule(m_text.buf(), x) )
               sprintf(cbuff,"Success!");
             else
               sprintf(cbuff,"Failed!");
             conChars += send2console(cbuff, true);  // Clean previous content on page ...
             state = ST_NONE;
           }
-        } else if( state == ST_INST) {
-          //sprintf(cbuff,"\n\rKEY: %02X\n\r", key);
-          //conChars += send2console(cbuff, true);  // Clean previous content on page ...
+        } else if( state == ST_INST || state == ST_DESC ) {
           switch(key) {
-          case 0x0D:
-            // Search for the module and install!
-            state = ST_NONE;
-            if( fat.find(m_mod) ) {
-              sprintf(cbuff,"\rFind module: %s ", m_mod);
-              conChars += send2console(cbuff, true);  // Clean previous content on page ...
-              plug_module();
+          case 0x0D: // Return
+            if( state == ST_DESC ) {
+              // Save the config with description!
+              save_config();
             } else {
-              sprintf(cbuff,"\rModule [%s] not found!", m_mod);
-              conChars += send2console(cbuff, true);  // Clean previous content on page ...
+              conChars += find_module();
             }
             break;
-          case 0x08:
-            m_mod[--m_pMod] = 0;
-            send2console("\b \b", false);  // Clean previous content on page ...
-            cdc_flush_console();
+          case 0x08: // Back space
+            m_text.del();
             break;
-          default:
-            m_mod[m_pMod++] = key;
+          default:  // Text entered ...
+            m_text.add(key);
             sprintf(cbuff,"%c", key);
             conChars += send2console(cbuff, false);  // Clean previous content on page ...
             cdc_flush_console();
           }
         } else {
-        int x = getHexKey(key);
-        if( x >= 0 ) {
-          CModule *m = modules[x];
-          switch( state ) {
-          case ST_QROM:
-            if( m->isLoaded() ) {
-              m->toggleRam();
-              sprintf(cbuff,"\rModule in page #%X marked as %sROM", x, m->isQROM() ? "Q" : "");
-            } else {
-              sprintf(cbuff,"\rNo image at page #%X!!", x);
-            }
-            conChars += send2console(cbuff, true);  // Clean previous content on page ...
-            state = ST_NONE;
-            break;
-          case ST_PLUG:
-            if( m->isLoaded() ) {
-              m->togglePlug();
-              sprintf(cbuff,"\rModule in page #%X %s", x, m->isInserted() ? "inserted":"removed");
-            } else {
-              sprintf(cbuff,"\rNo image at page #%X!!", x);
-            }
-            conChars += send2console(cbuff, true);  // Clean previous content on page ...
-            state = ST_NONE;
-            break;
-          case ST_BRK:
-            sBrk <<= 4;
-            sBrk |= x;
-            nBrk++;
-            sprintf(cbuff,"%X", x);
-            conChars += send2console(cbuff);
-            if( nBrk > 4 ) {
-              switch(brk_mode) {
-              case BRK_START:
-                sprintf(cbuff,"\rStart breakpoint @ %04X\n\r", sBrk);
-                brk.setBrk(sBrk);
-                break;
-              case BRK_END:
-                sprintf(cbuff,"\rEnd breakpoint @ %04X\n\r", sBrk);
-                brk.stopBrk(sBrk);
-                break;
-              case BRK_NONE:
-                sprintf(cbuff,"\rClear breakpoint @ %04X\n\r", sBrk);
-                brk.clrBrk(sBrk);
-                break;
+          int x = getHexKey(key);
+          if( x >= 0 ) {
+            CModule *m = modules[x];
+            switch( state ) {
+            case ST_QROM:
+              if( m->isLoaded() ) {
+                m->toggleRam();
+                sprintf(cbuff,"\rModule in page #%X marked as %sROM", x, m->isQROM() ? "Q" : "");
+              } else {
+                sprintf(cbuff,"\rNo image at page #%X!!", x);
               }
+              conChars += send2console(cbuff, true);  // Clean previous content on page ...
+              state = ST_NONE;
+              break;
+            case ST_PLUG:
+              if( m->isLoaded() ) {
+                m->togglePlug();
+                sprintf(cbuff,"\rModule in page #%X %s", x, m->isInserted() ? "inserted":"removed");
+              } else {
+                sprintf(cbuff,"\rNo image at page #%X!!", x);
+              }
+              conChars += send2console(cbuff, true);  // Clean previous content on page ...
+              state = ST_NONE;
+              break;
+            case ST_BRK:
+              sBrk <<= 4;
+              sBrk |= x;
+              nBrk++;
+              sprintf(cbuff,"%X", x);
               conChars += send2console(cbuff);
-              brk_mode = BRK_NONE;
-              sBrk = nBrk = 0;
+              if( nBrk > 4 ) {
+                switch(brk_mode) {
+                case BRK_START:
+                  sprintf(cbuff,"\rStart breakpoint @ %04X\n\r", sBrk);
+                  brk.setBrk(sBrk);
+                  break;
+                case BRK_END:
+                  sprintf(cbuff,"\rEnd breakpoint @ %04X\n\r", sBrk);
+                  brk.stopBrk(sBrk);
+                  break;
+                case BRK_NONE:
+                  sprintf(cbuff,"\rClear breakpoint @ %04X\n\r", sBrk);
+                  brk.clrBrk(sBrk);
+                  break;
+                }
+                conChars += send2console(cbuff);
+                brk_mode = BRK_NONE;
+                sBrk = nBrk = 0;
+                state = ST_NONE;
+              }
+              break;
+            case ST_MEM:
+              if( ram.isEnabled() ) {
+                if( x >= 0 && x <= 4 ) {
+                  ram.modules(x);
+                  switch( x ) {
+                  case 0:
+                    sprintf(cbuff,"\rNo memory modules emulated  ");
+                    break;
+                  case 1:
+                    sprintf(cbuff,"\r1 Memory module emulated   ");
+                    break;
+                  default:
+                    sprintf(cbuff,"\r%d Memory modules emulated  ", x);
+                  }
+                  ram.modules(x);
+                } else {
+                  sprintf(cbuff,"\rInvalid number of memory modules - %d!!", x);
+                }
+                conChars += send2console(cbuff);
+                conChars += send2console("\n\r");
+              }
+              state = ST_NONE;
+              break;
+            case ST_RCONF:
+            case ST_WCONF:
+            case ST_DELC:
+              if( x >= 0 && x <= 9 ) {
+                int n = sprintf(cbuff,"%d\r\n", x);
+                switch( state ) {
+                case ST_RCONF:
+                    // Read configuration
+                    sprintf(cbuff+n,"Read configuration\r\n");
+                    conChars += send2console(cbuff);
+                    modules.readConfig(x);
+                    break;
+                case ST_WCONF:
+                    // Save configuration
+                    sprintf(cbuff+n,"Save configuration\r\n");
+                    conChars += send2console(cbuff);
+                    modules.saveConfig(x, m_text.len()>0?m_text.buf():NULL);
+                    break;
+                case ST_DELC:
+                    // Delete configuration
+                    sprintf(cbuff+n,"Delete configuration\r\n");
+                    conChars += send2console(cbuff);
+                    modules.deleteConfig(x);
+                }
+                state = ST_NONE;
+              } else {
+                if( state == ST_RCONF && (key == 'c' || key == 'C') ) {
+                  clr_config();
+                  state = ST_NONE;
+                } else if( state == ST_WCONF && (key == 'd' || key == 'D') ) {
+                  del_config();
+                } else {
+                  sprintf(cbuff,"\rInvalid configuration - %d!!", x);
+                  conChars += send2console(cbuff, true);
+                  state = ST_NONE;
+                }
+              }
+            }
+          } else {
+            if( state == ST_RCONF ) {
+              if( key == 'c' || key == 'C' ) {
+                // Clear config (remove all modules)
+                clr_config();
+              }
+              if( key == 'l' || key == 'L' || key == '?') {
+                // List all available configurations
+                list_config();
+              }
               state = ST_NONE;
             }
-            break;
-          case ST_MEM:
-            if( ram.isEnabled() ) {
-              if( x >= 0 && x <= 4 ) {
-                ram.modules(x);
-                switch( x ) {
-                case 0:
-                  sprintf(cbuff,"\rNo memory modules emulated  ");
-                  break;
-                case 1:
-                  sprintf(cbuff,"\r1 Memory module emulated   ");
-                  break;
-                default:
-                  sprintf(cbuff,"\r%d Memory modules emulated  ", x);
-                }
-                ram.modules(x);
-              } else {
-                sprintf(cbuff,"\rInvalid number of memory modules - %d!!", x);
+            if( state == ST_WCONF ) {
+              if( key == 'd' || key == 'D' ) {
+                // Delete configuration
+                del_config();
               }
-              conChars += send2console(cbuff);
-              conChars += send2console("\n\r");
+              if( key == 'l' || key == 'L' || key == '?') {
+                // List all available configurations
+                list_config();
+                state = ST_NONE;
+              } else
+                state = ST_NONE;
             }
-            state = ST_NONE;
-            break;
-          case ST_RCONF:
-          case ST_WCONF:
-            if( x >= 0 && x <= 9 ) {
-              int n = sprintf(cbuff,"%d\r\n", x);
-              if( state == ST_RCONF ) {
-                // Read configuration
-                sprintf(cbuff+n,"Read configuration\r\n");
-                conChars += send2console(cbuff);
-                modules.readConfig(x);
-              } else {
-                // Save configuration
-                sprintf(cbuff+n,"Save configuration\r\n");
-                conChars += send2console(cbuff);
-                modules.saveConfig(x);
-              }
-            } else {
-              sprintf(cbuff,"\rInvalid configuration - %d!!\r\n", x);
-              conChars += send2console(cbuff);
-            }
-            state = ST_NONE;
-            break;
           }
-        }
         }
       }
     } else {

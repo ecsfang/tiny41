@@ -12,11 +12,11 @@ enum {
 };
 
 #define NAME_W 10 // Width when dumping name
-
+#define MOD_NAME_LEN  16
 // Class to hold information about image in a bank
 class CBank {
   uint16_t  *m_img;         // Pointer to image in flash or RAM
-  char       m_name[16+1];  // Name of the module
+  char       m_name[MOD_NAME_LEN+1];  // Name of the module
   FL_Head_t *m_fat;         // Pointer to FAT entry
   uint8_t    m_filePage;    // Page in the file image (MOD file)
 public:
@@ -24,14 +24,14 @@ public:
     m_img = i;
     m_fat = f;              // Point to original file in FFS
     m_filePage = p;         // Which page in the original file
-    strncpy(m_name, n, 16); // Name of module/bank
+    strncpy(m_name, n, MOD_NAME_LEN); // Name of module/bank
   }
   void clear(void) {
     m_img = NULL;
   }
   void erase(void) {
     m_img = NULL;
-    memset(m_name, 0, (16+1)*sizeof(char));
+    memset(m_name, 0, (MOD_NAME_LEN+1)*sizeof(char));
     m_fat =  NULL;
   }
   void free(void) {
@@ -188,6 +188,7 @@ public:
 // This class handles all ports and inserted modules
 class CModules {
   CModule m_modules[NR_PAGES];
+  Setup_t m_setup;
 public:
   CModules() {
     clearAll();
@@ -217,10 +218,20 @@ public:
       m_modules[p].clearBanks();
   }
 
-  // Save class to flash at page n
-  void saveConfig(int n);
-  // Read class from flash at page n
+  // Save config to flash at page n
+  void saveConfig(int n, char *desc=NULL);
+  // Read config from flash at page n
   bool readConfig(int n);
+  bool readConfig(void) {
+    return readConfig(m_setup.config);
+  }
+  // Delete config from flash at page n
+  void deleteConfig(int n);
+
+  // Save setup to flash
+  void saveSetup(int set);
+  // Read setup from flash
+  bool readSetup(void);
 
 //  void remove(int port) {
 //    m_modules[port].clr();

@@ -90,7 +90,7 @@ void CModule::writeQROM(uint16_t addr, uint16_t dta) {
 }
 
 // Save configuration #set in flash
-void CModules::saveConfig(int set)
+void CModules::saveConfig(int set, char *desc)
 {
   // Check for any dirty QROM pages to update 
   for(int p=FIRST_PAGE; p<NR_PAGES; p++) {
@@ -108,13 +108,35 @@ void CModules::saveConfig(int set)
   }
   // Get the configuration to save
   Config_t *conf = new Config_t;
+  // Set the description if provided ...
+  memset(conf->desc, 0, sizeof(conf->desc));
+  if( desc )
+    strncpy(conf->desc, desc, CONF_DESC_LEN);
+  else
+    sprintf(conf->desc, "Module config %d", set);
   for(int p=0; p<NR_PAGES; p++)
     m_modules[p].getConfig(&conf->mod[p]);
   // Save the whole object to flash
   writeConfig(conf, set);
   delete conf;
 #ifdef DBG_PRINT
-  sprintf(cbuff, "Saved config i#%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
+  sprintf(cbuff, "Saved config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
+  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+}
+
+// Delete configuration #set from flash
+void CModules::deleteConfig(int set)
+{
+  // Get the configuration to save
+  Config_t *conf = new Config_t;
+  // Clear description for now ...
+  memset(conf, 0xFF, sizeof(Config_t));
+  // Save the whole object to flash
+  writeConfig(conf, set, true);
+  delete conf;
+#ifdef DBG_PRINT
+  sprintf(cbuff, "Delete config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
 }
@@ -153,6 +175,10 @@ bool CModules::readConfig(int set)
       }
     }
   }
+  if( ret ) {
+    // Remember which config is loaded
+    saveSetup(set);
+  }
 #ifdef DBG_PRINT
   sprintf(cbuff, "Read config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
@@ -160,4 +186,16 @@ bool CModules::readConfig(int set)
   delete pFat;
   delete conf;
   return ret;
+}
+
+// Save setup to flash
+void CModules::saveSetup(int set)
+{
+  m_setup.config = set;
+  writeSetup(&m_setup);
+}
+// Read setup from flash
+bool CModules::readSetup(void)
+{
+  return ::readSetup(&m_setup);
 }

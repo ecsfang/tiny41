@@ -19,36 +19,49 @@ int getXmemAddr(uint16_t addr);
 #endif//USE_QUAD_MODULE
 
 #ifdef USE_XF_MODULE
+typedef struct {
+  uint64_t mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+  uint8_t  chkSum;
+} XMem_t;
+
 // Memory for Extended Memory module
 class CXFM : public CRamDev {
-  uint8_t m_chksum;
+  //uint8_t m_chksum;
 public:
-  uint64_t m_mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
-  volatile uint64_t *mem;
+  XMem_t  m_mem;
+  //volatile uint64_t *mem;
+  volatile XMem_t *m_ram;
   bool dirty() {
-    return memcmp((void*)mem, (void*)m_mem, sizeof(m_mem))?true:false;
+    return memcmp((void*)m_ram->mem, (void*)m_mem.mem, sizeof(m_mem.mem))?true:false;
   }
   void saveMem(void) {
-    memcpy((void*)m_mem, (void*)mem, sizeof(m_mem));
+    // Copy to flash image
+    memcpy((void*)m_mem.mem, (void*)m_ram->mem, sizeof(m_mem.mem));
+    // Update the checksum of the image
     doChksum();
   }
+  // Return total size to save in flash (data+chksum)
   int size(void) {
     return (int)sizeof(m_mem);
   }
+  // Return total size of memory
+  int memSize(void) {
+    return (int)sizeof(m_mem.mem);
+  }
   void doChksum(void) {
-    uint8_t *p = (uint8_t*)m_mem;
-    m_chksum = 0;
-    for(int i=0; i<size()/sizeof(uint8_t); i++)
-      m_chksum += *p++;
+    uint8_t *p = (uint8_t*)m_mem.mem;
+    m_mem.chkSum = 0;
+    for(int i=0; i<sizeof(m_mem.mem); i++)
+      m_mem.chkSum += *p++;
   }
   uint8_t *pChkSum(void) {
-    return (uint8_t*)&m_chksum;
+    return (uint8_t*)&m_mem.chkSum;
   }
   uint8_t chkSum(void) {
-    return m_chksum;
+    return m_mem.chkSum;
   }
   int chkSize(void) {
-    return (int)sizeof(m_chksum);
+    return (int)sizeof(m_mem.chkSum);
   }
   void write(uint64_t *dta);
   uint32_t write(uint32_t addr, int r);

@@ -15,7 +15,8 @@ class CTest : public CRamDev {
 
 #ifdef USE_XF_MODULE
 CXFM xmem;
-static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+//static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
+static volatile XMem_t __mem;
 #endif
 
 CMem ram(0);
@@ -33,35 +34,28 @@ void saveXMem(int xpg)
 {
   xpg += XF_PAGE;
   // Save copy - clear dirty ...
-  uint8_t pg[FLASH_SECTOR_SIZE];
   xmem.saveMem();
   erasePort(xpg);
-  // Save all XMemory ...
-  write8Port(xpg, (uint8_t*)xmem.mem, xmem.size());
-  // Save checksum too ...
-  int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
-  pg[0] = xmem.chkSum();
-  writeFlash(chkAddr, pg, FLASH_SECTOR_SIZE);
-  sprintf(cbuff, " -- Saved XMemory (%d bytes [%02X]) to flash!\n\r", xmem.size(), xmem.chkSum());
+  // Save all XMemory incl chkSum ...
+  write8Port(xpg, (uint8_t*)&xmem.m_mem, xmem.size());
+  sprintf(cbuff, " -- Saved XMemory (%d bytes [%02X(%02X)]) to flash!\n\r", xmem.size(), xmem.chkSum(), xmem.m_ram->chkSum);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
 
 void initXMem(int xpg)
 {
   xpg += XF_PAGE;
-  xmem.mem = __mem;
-  uint8_t chk = 0;
-  int chkAddr = pageAdjust(PAGE1(xpg) + xmem.size());
-  readFlash(PAGE1(xpg), (uint8_t*)xmem.mem, xmem.size());
-  readFlash(chkAddr, &chk, 1);
-  sprintf(cbuff, " -- Read XMemory (%d bytes [%02X]) from flash!\n\r", xmem.size(), chk);
+  xmem.m_ram = &__mem;
+  readFlash(PAGE1(xpg), (uint8_t*)xmem.m_ram, xmem.size());
   // Save copy - clear dirty - check checksum ...
   xmem.saveMem();
-  if( xmem.chkSum() != chk ) {
-    sprintf(cbuff, "XMem checksum failure: %02X != %02X!\n\r", chk, xmem.chkSum());
+  if( xmem.chkSum() == xmem.m_ram->chkSum ) {
+    sprintf(cbuff, " -- Read XMemory (%d bytes [%02X]) from flash!\n\r", xmem.size(), xmem.m_ram->chkSum);
+  } else {
+    sprintf(cbuff, "XMem checksum failure: %02X != %02X!\n\r", xmem.m_ram->chkSum, xmem.chkSum());
     cdc_send_string(ITF_CONSOLE, cbuff);
     sprintf(cbuff, "ERROR: MEMORY LOST of XMemory!\n\r");
-    memset((void*)xmem.mem, 0, xmem.size());
+    memset((void*)xmem.m_ram->mem, 0, xmem.memSize());
     xmem.saveMem();
   }
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
@@ -99,7 +93,7 @@ int getXmemAddr(uint16_t addr)
 }
 
 void CXFM::write(uint64_t *dta) {
-  __mem[bwr-1] = *dta;
+  __mem.mem[bwr-1] = *dta;
   bwr = 0;
 }
 uint32_t CXFM::write(uint32_t addr, int r) {
@@ -108,7 +102,7 @@ uint32_t CXFM::write(uint32_t addr, int r) {
   return addr;
 }
 uint64_t CXFM::read(uint32_t addr, int r) {
-  return __mem[addr-1];
+  return __mem.mem[addr-1];
 }
 #endif//USE_XFUNC
 

@@ -9,9 +9,9 @@ typedef enum {
 } FL_Type_e;
 
 typedef struct {
-  uint32_t  offs;
-  char      name[23+1];
-  FL_Type_e type;
-} FL_Head_t;
+  uint32_t  offs;       //  4 bytes
+  char      name[23+1]; // 24 bytes
+  FL_Type_e type;       //  4 bytes
+} FL_Head_t;            // 32 bytes in total
 
 #endif//__FLTOOLS_H__
