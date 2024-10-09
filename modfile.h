@@ -1,3 +1,5 @@
+#ifndef __MODFILE_H__
+#define __MODFILE_H__
 /*=======================================================================
 
 Author: Warren Furlow (email: warren@furlow.org)
@@ -26,7 +28,13 @@ File size=sizeof(ModuleFileHeader)+NumPages*sizeof(ModuleFilePage)
 
 #pragma once
 
-#ifndef NO_EXTERNAL
+#define INCLUDE_EXTERNAL
+
+#ifdef NO_EXTERNAL
+#undef INCLUDE_EXTERNAL
+#endif
+
+#ifdef INCLUDE_EXTERNAL
 char *getPageName(const char *flashPtr, int page);
 int extract_mod( CFat_t *pFat, int page, int pg=-1);
 int get_file_format(const char *lpszFormat);
@@ -137,8 +145,8 @@ typedef struct {
   };
 } ModuleFilePage;
 
-#ifndef NO_EXTERNAL
-void unpack_image( word *ROM, const byte *BIN);
+#ifdef INCLUDE_EXTERNAL
+extern void unpack_image( word *ROM, const byte *BIN);
 
 // Class to hanlde a ROM file
 class CFile {
@@ -279,3 +287,4 @@ class CModFile : public CFile {
   }
 };
 #endif
+#endif//__MODFILE_H__

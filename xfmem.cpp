@@ -9,24 +9,17 @@
 #include "xfmem.h"
 #include "hardware/flash.h"
 
-class CTest : public CRamDev {
-};
-
 
 #ifdef USE_XF_MODULE
 CXFM xmem;
-//static volatile uint64_t __mem[XMEM_XF_SIZE+XMEM_XM1_SIZE+XMEM_XM2_SIZE];
 static volatile XMem_t __mem;
 #endif
 
 CMem ram(0);
-//unsigned int nMemMods = 0;
 static volatile uint64_t __ram[QUAD_MEM_MOD_SIZE];
 
 extern void erasePort(int n, bool bPrt=true);
 extern void write8Port(int n, uint8_t *data, int sz);
-extern int pageAdjust(int addr);
-extern void writeFlash(int offs, uint8_t *data, int sz);
 extern void readFlash(int offs, uint8_t *data, uint16_t size);
 
 #ifdef USE_XFUNC

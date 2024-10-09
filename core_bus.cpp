@@ -265,8 +265,23 @@ void write8Port(int n, uint8_t *data, int sz)
     writeFlash(PAGE2(n), data + sz1, sz2);
 }
 
-// Write data to given flash port in ROMMAP
-// On ROM page is always written (4K 10-bit data - two flash pages)
+uint16_t *writePage(flash_write_t *pDta)
+{
+  int r = flash_safe_execute(write_flash_page, pDta, FLASH_LOCK_TIMEOUT_MS);
+  if (r != PICO_OK) {
+    sprintf(cbuff, "error calling write_flash_page: %d", r);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#ifdef DBG_PRINT
+  } else {
+    sprintf(cbuff, "Wrote flash 0x%08X @ 0x%08X:%X\n\r", pDta->buf, pDta->addr, PG_SIZE);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  }
+  return (uint16_t*)pDta->addr;
+}
+
+// Write data to given flash port (page and bank) in ROMMAP
+// One ROM page is always written (4K 10-bit data - two flash pages)
 // Returns pointer to flash image (or NULL if failed)
 uint16_t *writeROMMAP(int p, int b, uint16_t *data)
 {
@@ -279,17 +294,7 @@ uint16_t *writeROMMAP(int p, int b, uint16_t *data)
   // Check if images differs ...
   if( diffPage((void*)tmp.addr, tmp.buf) ) {
     // Yes, so lets update the image to flash
-    int r = flash_safe_execute(ffs_write_flash, &tmp, FLASH_LOCK_TIMEOUT_MS);
-    if (r != PICO_OK) {
-      sprintf(cbuff, "error calling ffs_write_flash: %d", r);
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      tmp.addr = 0;
-#ifdef DBG_PRINT
-    } else {
-      sprintf(cbuff, "Wrote image %08X to ROMMAP[%d:%d] @ 0x%08X:%X\n\r", tmp.buf, p, b, tmp.addr, 2*PG_SIZE);
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-    }
+    writePage(&tmp);
   }
   // Return address to the flash image
   return (uint16_t*)tmp.addr;
@@ -298,17 +303,7 @@ uint16_t *writeROMMAP(int p, int b, uint16_t *data)
 uint16_t *writePage(int addr, uint8_t *data)
 {
   flash_write_t tmp = {addr, data};
-  int r = flash_safe_execute(write_flash_page, &tmp, FLASH_LOCK_TIMEOUT_MS);
-  if (r != PICO_OK) {
-    sprintf(cbuff, "error calling write_flash_page: %d", r);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#ifdef DBG_PRINT
-  } else {
-    sprintf(cbuff, "Wrote flash 0x%08X @ 0x%08X:%X\n\r", tmp.buf, tmp.addr, PG_SIZE);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  }
-  return (uint16_t*)tmp.addr;
+  return writePage(&tmp);
 }
 
 // Function to calculate a simple checksum
@@ -338,56 +333,39 @@ bool readConfig(Config_t *data, int set)
   return chk == data->chkSum;
 }
 
-uint16_t *writeConfig(Config_t *data, int set, bool clear)
+// Read the config flashpage and updated the
+// corresponding part and write back the page
+uint16_t *writeConfigPage(int offs, void *data, int size)
 {
+  uint16_t *ret = NULL;
   uint8_t *pg = new uint8_t[FLASH_SECTOR_SIZE];
   // Read whole config page
   memcpy(pg, (uint8_t*)CONF_PAGE, FLASH_SECTOR_SIZE);
-  // Update current config
-  uint32_t *cp = (uint32_t*)data;
-  if( !clear ) {
+  // Update current part of the page
+  memcpy(pg+offs, data, size);
+  // Write back updated configuration
+  ret = writePage(CONF_PAGE, pg);
+  delete[] pg;
+  return ret;
+}
+
+// Update configuration #set in config page
+uint16_t *writeConfig(Config_t *data, int set, bool bChk)
+{
+  if( bChk ) {
+    // Yes, update checksum
     uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
     data->chkSum = chk;
   }
-  memcpy(pg+CONF_OFFS(set), data, CONF_SIZE);
-  // Write back updated configuration
-  flash_write_t tmp = {CONF_PAGE, pg};
-  int r = flash_safe_execute(write_flash_page, &tmp, FLASH_LOCK_TIMEOUT_MS);
-  if (r != PICO_OK) {
-    sprintf(cbuff, "error calling write_flash_page: %d", r);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#ifdef DBG_PRINT
-  } else {
-    sprintf(cbuff, "Wrote config(%d) @ 0x%08X:%d\n\r", set, CONF_PAGE+CONF_OFFS(set), CONF_SIZE);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  }
-  return (uint16_t*)tmp.addr;
+  return writeConfigPage(CONF_OFFS(set), data, CONF_SIZE);
 }
 
+// Update the setup information in the config page
 uint16_t *writeSetup(Setup_t *data)
 {
-  uint8_t *pg = new uint8_t[FLASH_SECTOR_SIZE];
-  // Read whole config page
-  memcpy(pg, (uint8_t*)CONF_PAGE, FLASH_SECTOR_SIZE);
-  // Update current config
-  uint32_t *cp = (uint32_t*)data;
   uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Setup_t));
   data->chkSum = chk;
-  memcpy(pg+SETUP_OFFS, data, SETUP_SIZE);
-  // Write back updated configuration
-  flash_write_t tmp = {CONF_PAGE, pg};
-  int r = flash_safe_execute(write_flash_page, &tmp, FLASH_LOCK_TIMEOUT_MS);
-  if (r != PICO_OK) {
-    sprintf(cbuff, "error calling writeSetup: %d", r);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#ifdef DBG_PRINT
-  } else {
-    sprintf(cbuff, "Wrote setup @ 0x%08X:%d\n\r", CONF_PAGE+SETUP_OFFS, SETUP_SIZE);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  }
-  return (uint16_t*)tmp.addr;
+  return writeConfigPage(SETUP_OFFS, data, SETUP_SIZE);
 }
 
 bool readSetup(Setup_t *data)
@@ -402,7 +380,7 @@ bool readSetup(Setup_t *data)
   return chk == data->chkSum;
 }
 
-void writePort(int n, uint16_t *data)
+/*void writePort(int n, uint16_t *data)
 {
   // Swap 16-bit word to get right endian for flash ...
   swapPage(data, FLASH_SECTOR_SIZE);
@@ -412,12 +390,8 @@ void writePort(int n, uint16_t *data)
   write8Port(n, (uint8_t*)data, 2*FLASH_SECTOR_SIZE);
   swapPage(data, FLASH_SECTOR_SIZE);
   printf("Done!\n");
-}
+}*/
 
-const uint8_t *flashPointer(int offs)
-{
-  return (const uint8_t*)(XIP_BASE + offs);
-}
 
 // Make space for information about all flash images
 CModules modules;
@@ -426,7 +400,7 @@ CModules modules;
 void readFlash(int offs, uint8_t *data, uint16_t size)
 {
   // Point at the wanted flash image ...
-  const uint8_t *fp = flashPointer(offs);
+  const uint8_t *fp = (const uint8_t*)(XIP_BASE + offs);
   if( invalidFlashPtr((int)fp) ) {
     sprintf(cbuff, "BAD FLASH POINTER: %p!\n\r", fp);
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
@@ -478,10 +452,9 @@ bool loadModule(const char *mod, int page)
 
 void initRoms(void)
 {
-  // TBD - Should read a saved setup and load
+  // Read the saved setup and load
   // previous configuration from previous session
-  if( modules.readSetup() )
-    modules.readConfig();
+  modules.restore();
 }
 
 char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);

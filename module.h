@@ -218,24 +218,24 @@ public:
       m_modules[p].clearBanks();
   }
 
-  // Save config to flash at page n
+  // Save the current config to flash as config #n
   void saveConfig(int n, char *desc=NULL);
-  // Read config from flash at page n
+  // Read and restore config #n from flash
   bool readConfig(int n);
+  // Read and restore config according to saved setup
   bool readConfig(void) {
     return readConfig(m_setup.config);
   }
-  // Delete config from flash at page n
+  // Delete config #n from list of configurations
   void deleteConfig(int n);
 
-  // Save setup to flash
+  // Save given configuration as current setup to flash
+  // Saved in same page after list of configuration
   void saveSetup(int set);
-  // Read setup from flash
-  bool readSetup(void);
+  // Restore setup from flash
+  // This is read during startup to restore current state
+  bool restore(void);
 
-//  void remove(int port) {
-//    m_modules[port].clr();
-//	}
   bool isDirty(int port) {
     return m_modules[port].isDirty();
   }

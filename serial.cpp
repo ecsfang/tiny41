@@ -73,7 +73,6 @@ void service(void)
 #define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+------------------+\n\r")
 #define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+------------------/\n\r")
 
-//extern void readFlash(int offs, uint8_t *data, uint16_t size);
 extern int mod_info(CFat_t *pFat, char *buf);
 
 extern CFat_t fat;
@@ -220,7 +219,17 @@ void clr_brk(void)
   sbrkpt(BRK_NONE);
 }
 
-void sel_qram(void)
+void listBreakpoints(void)
+{
+  brk.list_brks();
+}
+void clrBreakpoints(void)
+{
+  brk.clrAllBrk();
+}
+
+
+void sel_qrom(void)
 {
   cdc_send_console((char*)"\n\rSelect QROM page: -\b");
   cdc_flush_console();
@@ -331,17 +340,6 @@ void mem_modules(void)
   }
 }
 
-void listBreakpoints(void)
-{
-  brk.list_brks();
-}
-void clrBreakpoints(void)
-{
-  brk.clrAllBrk();
-}
-
-//extern volatile Blinky_t blinky;
-
 void dump_blinky(void)
 {
   extern CBlinky blinky;
@@ -389,57 +387,41 @@ void dump_time(void)
 #ifdef USE_XF_MODULE
 extern CXFM xmem;
 
-void dump_xmem(void)
+static void dumpXmem(const char *lbl, int start, int size, int offs)
 {
   int n;
-#ifdef USE_XMEM2
-
-  cdc_send_console((char*)"XMemory Module 2\n\r=====================================\n\r");
-  for(int i=XMEM_XM2_SIZE-1; i>=0; i--) {
+  sprintf(cbuff,"%s\n\r=====================================\n\r", lbl);
+  cdc_send_console(cbuff);
+  for(int i=size-1; i>=0; i--) {
     n = 0;
-    if( xmem.m_ram->mem[i+XMEM_XM2_OFFS] || xmem.m_mem.mem[i+XMEM_XM2_OFFS] ) {
-      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XM2_START,
-          xmem.m_ram->mem[i+XMEM_XM2_OFFS], xmem.m_mem.mem[i+XMEM_XM2_OFFS]);
-      if( xmem.m_ram->mem[i+XMEM_XM2_OFFS] != xmem.m_mem.mem[i+XMEM_XM2_OFFS] )
+    if( xmem.m_ram->mem[i+offs] || xmem.m_mem.mem[i+offs] ) {
+      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+start,
+          xmem.m_ram->mem[i+offs], xmem.m_mem.mem[i+offs]);
+      if( xmem.m_ram->mem[i+offs] != xmem.m_mem.mem[i+offs] )
         n += sprintf(cbuff+n," ***");
       sprintf(cbuff+n,"\n\r");
       cdc_send_console(cbuff);
     }
   }
   cdc_send_console((char*)"\n\r");
+}
+
+// Dump any non-zero registers in XMemory
+void dump_xmem(void)
+{
+#ifdef USE_XMEM2
+  dumpXmem("XMemory Module 2", XMEM_XM2_START, XMEM_XM2_SIZE, XMEM_XM2_OFFS);
 #endif
 #ifdef USE_XMEM1
-  sprintf(cbuff,"XMemory Module 1\n\r=====================================\n\r");
-  for(int i=XMEM_XM1_SIZE-1; i>=0; i--) {
-    n = 0;
-    if( xmem.m_ram->mem[i+XMEM_XM1_OFFS] || xmem.m_mem.mem[i+XMEM_XM1_OFFS] ) {
-      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XM1_START,
-          xmem.m_ram->mem[i+XMEM_XM1_OFFS], xmem.m_mem.mem[i+XMEM_XM1_OFFS]);
-      if( xmem.m_ram->mem[i+XMEM_XM1_OFFS] != xmem.m_mem.mem[i+XMEM_XM1_OFFS] )
-        n += sprintf(cbuff+n," ***");
-      n += sprintf(cbuff+n,"\n\r");
-      cdc_send_console(cbuff);
-    }
-  }
-  cdc_send_console((char*)"\n\r");
+  dumpXmem("XMemory Module 1", XMEM_XM1_START, XMEM_XM1_SIZE, XMEM_XM1_OFFS);
 #endif
 #ifdef USE_XFUNC
-  sprintf(cbuff,"XFunction Memory\n\r=====================================\n\r");
-  for(int i=XMEM_XF_SIZE-1; i>=0; i--) {
-    n = 0;
-    if( xmem.m_ram->mem[i] || xmem.m_mem.mem[i] ) {
-      n += sprintf(cbuff+n,"Reg %03X: %014llx %014llx", i+XMEM_XF_START,
-          xmem.m_ram->mem[i], xmem.m_mem.mem[i]);
-      if( xmem.m_ram->mem[i] != xmem.m_mem.mem[i] )
-        n += sprintf(cbuff+n," ***");
-      n += sprintf(cbuff+n,"\n\r");
-      cdc_send_console(cbuff);
-    }
-  }
-  cdc_send_console((char*)"\n\r");
+  dumpXmem("XFunction Memory", XMEM_XF_START,  XMEM_XF_SIZE,  XMEM_XF_OFFS);
 #endif
   cdc_flush_console();
 }
+
+// Clear the whole XMemory
 void clr_xmem(void)
 {
   cdc_send_console((char*)"Clear XMemory\n\r");
@@ -447,6 +429,7 @@ void clr_xmem(void)
   memset((void*)xmem.m_ram->mem,0,xmem.size());
   xmem.saveMem();
 }
+// Init XMemory, i.e. read latest copy from flash
 void init_xmem(void)
 {
   cdc_send_console((char*)"Init XMemory\n\r");
@@ -457,11 +440,8 @@ void init_xmem(void)
 }
 #endif//USE_XF_MODULE
 
-void core1_void(void)
-{
-}
-
-void rp2040_bootsel()
+// Put the Pico in bootsel mode
+void pico_bootsel()
 {
 /**
   cdc_send_console((char*)"\n\r************************************************");
@@ -588,7 +568,7 @@ void del_config(void)
 void list_config(void)
 {
   Config_t *conf = new Config_t;
-  CFat_t *pFat = new CFat_t();
+  //CFat_t *pFat = new CFat_t();
   int n;
   send2console((char*)"\rList all configurations", true);  // Clean previous content on page ...
   cdc_send_string_and_flush(ITF_CONSOLE, (char*)"---+--------------------------\r\n");
@@ -603,6 +583,7 @@ void list_config(void)
     n += sprintf(cbuff+n,"\r\n");
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
   }
+  delete conf;
 }
 
 SERIAL_COMMAND serial_cmds[] = {
@@ -613,6 +594,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'd', toggle_disasm,     "Toggle disassembler"  },
   { 't', toggle_trace,      "Toggle trace"  },
   { 'g', tag,               "Enter trace tag"  },
+  { 'Q', quit_log,          "Stop logging"  },
 
   { 'b', listBreakpoints,   "List breakpoints"  },
   { 'B', set_brk,           "Set breakpoint"  },
@@ -620,11 +602,10 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'C', clr_brk,           "Clear breakpoint"  },
   { 'x', clrBreakpoints,    "Clear all breakpoints"  },
   { 'r', reset_bus_buffer,  "Reset trace buffer"  },
-  { 'R', rp2040_bootsel,    "Put into bootsel mode"  },
+  { 'R', pico_bootsel,      "Put the Pico into bootsel mode"  },
   { 'o', power_on,          "Power On"  },
   { 'w', wand_test,         "Example bar code"  },
-  { 'q', sel_qram,          "Select QROM page"  },
-  { 'Q', quit_log,          "Stop logging"  },
+  { 'q', sel_qrom,          "Select QROM page"  },
   { 'l', list_modules,      "List modules"  },
   { 'L', all_modules,       "All modules"  },
   { 'p', plug_unplug,       "Plug or unplug module"  },

@@ -28,8 +28,7 @@ typedef struct {
 class CXFM : public CRamDev {
   //uint8_t m_chksum;
 public:
-  XMem_t  m_mem;
-  //volatile uint64_t *mem;
+  XMem_t  m_mem;          // Copy 
   volatile XMem_t *m_ram;
   bool dirty() {
     return memcmp((void*)m_ram->mem, (void*)m_mem.mem, sizeof(m_mem.mem))?true:false;

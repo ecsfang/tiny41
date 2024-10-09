@@ -156,19 +156,63 @@ write_rom_file(const char *FullFileName, const word *ROM)
 
 #define ROM10_LENGTH (4096+1024)  // Packed 10 bits
 /******************************/
+typedef struct {
+	unsigned int b0:10;
+	unsigned int b1:10;
+	unsigned int b2:10;
+	unsigned int b3:10;
+} __attribute__((packed)) Int10_x;
+
+void unpack_image( word *ROM, const byte *BIN)
+{
+  word *ptr = ROM;
+  Int10_x *p10;
+  if ((ROM == NULL) || (BIN == NULL))
+    return;
+  for (int i = 0; i < (ROM10_LENGTH/5); i++) {
+    p10 = (Int10_x*)BIN;
+    *ptr++ = p10->b0;
+    *ptr++ = p10->b1;
+    *ptr++ = p10->b2;
+    *ptr++ = p10->b3;
+    BIN += 5;
+  }
+}
+/*
 void unpack_image( word *ROM, const byte *BIN)
 {
   int i;
   word *ptr = ROM;
+  Int10_t *p10;
   if ((ROM == NULL) || (BIN == NULL))
     return;
   for (i = 0; i < ROM10_LENGTH; i += 5) {
-    *ptr++ = ((BIN[i + 1] & 0x03) << 8) |   BIN[i + 0];
-    *ptr++ = ((BIN[i + 2] & 0x0F) << 6) | ((BIN[i + 1] & 0xFC) >> 2);
-    *ptr++ = ((BIN[i + 3] & 0x3F) << 4) | ((BIN[i + 2] & 0xF0) >> 4);
-    *ptr++ = ( BIN[i + 4]         << 2) | ((BIN[i + 3] & 0xC0) >> 6);
+    *ptr++ =    BIN[i + 0]               | ((BIN[i + 1] & 0x03) << 8);
+    *ptr++ =  ((BIN[i + 1] & 0xFC) >> 2) | ((BIN[i + 2] & 0x0F) << 6);
+    *ptr++ =  ((BIN[i + 2] & 0xF0) >> 4) | ((BIN[i + 3] & 0x3F) << 4);
+    *ptr++ =  ((BIN[i + 3] & 0xC0) >> 6) | ( BIN[i + 4]         << 2);
   }
-}
+}*/
+/*void unpack_image( word *ROM, const byte *BIN)
+{
+  int i;
+  word *ptr = ROM;
+  Int10_t *p10;
+  if ((ROM == NULL) || (BIN == NULL))
+    return;
+  for (i = 0; i < 1024/4; i++) { //ROM10_LENGTH; i += 5) {
+    p10 = (Int10_t*)BIN;
+    *ptr++ = p10->b0l | (p10->b0h<<8);
+    *ptr++ = p10->b1l | (p10->b1h<<6);
+    *ptr++ = p10->b2l | (p10->b2h<<4);
+    *ptr++ = p10->b3l | (p10->b3h<<2);
+    BIN += 5;
+//    *ptr++ =    BIN[i + 0]               | ((BIN[i + 1] & 0x03) << 8);
+//    *ptr++ =  ((BIN[i + 1] & 0xFC) >> 2) | ((BIN[i + 2] & 0x0F) << 6);
+//    *ptr++ =  ((BIN[i + 2] & 0xF0) >> 4) | ((BIN[i + 3] & 0x3F) << 4);
+//    *ptr++ =  ((BIN[i + 3] & 0xC0) >> 6) | ( BIN[i + 4]         << 2);
+  }
+}*/
 /****************************/
 // Returns 0 for unknown format, 1 for MOD1, 2 for MOD2
 /****************************/

@@ -116,7 +116,7 @@ void CModules::saveConfig(int set, char *desc)
     sprintf(conf->desc, "Module config %d", set);
   for(int p=0; p<NR_PAGES; p++)
     m_modules[p].getConfig(&conf->mod[p]);
-  // Save the whole object to flash
+  // Save the whole object to flash with checksum
   writeConfig(conf, set);
   delete conf;
 #ifdef DBG_PRINT
@@ -132,8 +132,8 @@ void CModules::deleteConfig(int set)
   Config_t *conf = new Config_t;
   // Clear description for now ...
   memset(conf, 0xFF, sizeof(Config_t));
-  // Save the whole object to flash
-  writeConfig(conf, set, true);
+  // Save the whole object to flash (don't update checksum)
+  writeConfig(conf, set, false);
   delete conf;
 #ifdef DBG_PRINT
   sprintf(cbuff, "Delete config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
@@ -176,7 +176,7 @@ bool CModules::readConfig(int set)
     }
   }
   if( ret ) {
-    // Remember which config is loaded
+    // If ok - remember which config is loaded
     saveSetup(set);
   }
 #ifdef DBG_PRINT
@@ -195,7 +195,10 @@ void CModules::saveSetup(int set)
   writeSetup(&m_setup);
 }
 // Read setup from flash
-bool CModules::readSetup(void)
+bool CModules::restore(void)
 {
-  return ::readSetup(&m_setup);
+  if( readSetup(&m_setup) ) {
+    return readConfig(m_setup.config);
+  }
+  return false;
 }
