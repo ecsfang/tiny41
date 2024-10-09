@@ -69,7 +69,51 @@ const char *page(int p)
   }
 }
 
-#define LINE_LEN  80
+#define ROM10_LENGTH (4096+1024)  // Packed 10 bits
+
+typedef struct {
+	unsigned int b0:10;
+	unsigned int b1:10;
+	unsigned int b2:10;
+	unsigned int b3:10;
+} __attribute__((packed)) Int10_x;
+
+void unpack_image( word *ROM, const byte *BIN)
+{
+  word *ptr = ROM;
+  Int10_x *p10;
+  if ((ROM == NULL) || (BIN == NULL))
+    return;
+  for (int i = 0; i < (ROM10_LENGTH/5); i++) {
+    p10 = (Int10_x*)BIN;
+    *ptr++ = p10->b0;
+    *ptr++ = p10->b1;
+    *ptr++ = p10->b2;
+    *ptr++ = p10->b3;
+    BIN += 5;
+  }
+}
+
+void dump1(FILE *fp)
+{
+  V1_t  v1;
+  word  *rom = new word[0x1000];
+  fread(&v1, sizeof(V1_t), 1, fp);
+  unpack_image(rom, v1.Image);  
+
+  for(int i=0; i<0x1000; i++) {
+    printf("x%03X %03X\n", i, rom[i]);
+  }
+}
+
+void dump2(FILE *fp)
+{
+  V2_t  v2;
+  fread(&v2, sizeof(V2_t), 1, fp);
+
+}
+
+#define LINE_LEN  60
 void printTab(char *txt)
 {
   int l = strlen(txt);
@@ -123,8 +167,12 @@ int dump(FILE *fp, long sz)
   printf("AppAutoUpdate: 0x%02X\n", MFH.AppAutoUpdate);
   printf("NumPages:      0x%02X\n", MFH.NumPages);
   printf("HeaderCustom:  ");
-  for(int i=0; i<32; i++)
-    printf("%02X%c", MFH.HeaderCustom[i], i<31?'.':'\n');
+  for(int i=0; i<32; i++) {
+    if( i>0 && (i & 0xF) == 0x0 )
+      printf("\n               ");
+    printf("%02X ", MFH.HeaderCustom[i]);
+  }
+  printf("\n");
 
   if( !MFH.NumPages )
     printf("No pages!\n");
@@ -144,10 +192,14 @@ int dump(FILE *fp, long sz)
     fseek(fp, sizeof(ModuleFileHeader), SEEK_SET);
     for( int n=0; n<=p; n++ ) {
       fseek(fp, sizeof(ModuleHeader_t), SEEK_CUR);
-      if( !strcmp(MFH.FileFormat, "MOD1"))
+      if( !strcmp(MFH.FileFormat, "MOD1")) {
+        dump1(fp);
         fseek(fp, sizeof(V1_t), SEEK_CUR);
-      if( !strcmp(MFH.FileFormat, "MOD2"))
+      }
+      if( !strcmp(MFH.FileFormat, "MOD2")) {
+        dump2(fp);
         fseek(fp, sizeof(V2_t), SEEK_CUR);
+      }
     }
   }
   printf("\n=============================================================\n");
