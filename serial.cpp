@@ -77,6 +77,16 @@ extern int mod_info(CFat_t *pFat, char *buf);
 
 extern CFat_t fat;
 
+const char *moduleType(int typ)
+{
+  switch( typ ) {
+  case FL_MOD: return "MOD";
+  case FL_RAM: return "RAM";
+  case FL_ROM: return "ROM";
+  default:     return "???";
+  }
+}
+
 /*
  * List all modules that are installed in flash
  */
@@ -89,12 +99,13 @@ void all_modules(void)
     cdc_send_console((char*)"\n\rInstalled modules\n\r");
     while( fat.offset() ) {
       n++;
-      switch( fat.type() ) {
+      sprintf(typ, "%c%s", fat.type() == FL_RAM ? '+':' ', moduleType(fat.type()));
+      /**switch( fat.type() ) {
       case FL_MOD: strcpy(typ, " MOD"); break;
       case FL_RAM: strcpy(typ, "+RAM"); break;
       case FL_ROM: strcpy(typ, " ROM"); break;
       default:     strcpy(typ, " ???");
-      }
+      }*/
       i = sprintf(cbuff,"| %3d | %-16.16s |%4.4s | %08X | ",
         n, fat.name(), typ, fat.offset() );
       i += mod_info(&fat, cbuff+i);

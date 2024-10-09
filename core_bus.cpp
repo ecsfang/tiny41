@@ -186,6 +186,7 @@ int pageAdjust(int addr)
 typedef struct {
   int     addr;
   uint8_t *buf;
+  uint8_t pgs;  // Number of flash pages
 } flash_write_t;
 
 bool diffPage(void *p1, void *p2)
@@ -197,7 +198,7 @@ bool invalidFlashPtr(int fptr)
 {
   return fptr < (FLASH_START+XIP_BASE) || fptr > (FLASH_SIZE+XIP_BASE);
 }
-
+/*
 static void ffs_write_flash(void *param) {
   flash_write_t *tmp = (flash_write_t *)param;
   if( invalidFlashPtr(tmp->addr) ) {
@@ -215,14 +216,19 @@ static void ffs_write_flash(void *param) {
   flash_range_program(fp2, tmp->buf+PG_SIZE, PG_SIZE);
   restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
 }
-
+*/
 static void write_flash_page(void *param) {
   flash_write_t *tmp = (flash_write_t *)param;
   // Offset the flash pointer
   int fp = tmp->addr-XIP_BASE;
+  uint8_t *data = tmp->buf;
   uint32_t ints = save_and_disable_interrupts();
-  flash_range_erase(fp, PG_SIZE);
-  flash_range_program(fp, tmp->buf, PG_SIZE);
+  for(int i=0; i<tmp->pgs; i++ ) {
+    flash_range_erase(fp, PG_SIZE);
+    flash_range_program(fp, data, PG_SIZE);
+    fp += PG_SIZE;
+    data += PG_SIZE;
+  }
   restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
 }
 
@@ -273,19 +279,34 @@ uint16_t *writePage(flash_write_t *pDta)
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #ifdef DBG_PRINT
   } else {
-    sprintf(cbuff, "Wrote flash 0x%08X @ 0x%08X:%X\n\r", pDta->buf, pDta->addr, PG_SIZE);
+    sprintf(cbuff, "Wrote 0x%08X to flash @ 0x%08X:%X\n\r", pDta->buf, pDta->addr, pDta->pgs*PG_SIZE);
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
   }
   return (uint16_t*)pDta->addr;
 }
 
+/*uint16_t *writeFFSPage(flash_write_t *pDta)
+{
+  int r = flash_safe_execute(write_flash_page, pDta, FLASH_LOCK_TIMEOUT_MS);
+  if (r != PICO_OK) {
+    sprintf(cbuff, "error calling write_flash_page: %d", r);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#ifdef DBG_PRINT
+  } else {
+    sprintf(cbuff, "Wrote flash 0x%08X @ 0x%08X:%X\n\r", pDta->buf, pDta->addr, PG_SIZE);
+    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+#endif
+  }
+  return (uint16_t*)pDta->addr;
+}**/
+
 // Write data to given flash port (page and bank) in ROMMAP
-// One ROM page is always written (4K 10-bit data - two flash pages)
+// One ROM page is always written (4K 10-bit data - two flash pages (8K))
 // Returns pointer to flash image (or NULL if failed)
 uint16_t *writeROMMAP(int p, int b, uint16_t *data)
 {
-  flash_write_t tmp = {FFS_PAGE(p,b), (uint8_t*)data};
+  flash_write_t tmp = {FFS_PAGE(p,b), (uint8_t*)data, 2};
   if( invalidFlashPtr(tmp.addr) ) {
       sprintf(cbuff, "writeROMMAP: Bad address: %08X\n\r", tmp.addr);
       cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
@@ -300,9 +321,9 @@ uint16_t *writeROMMAP(int p, int b, uint16_t *data)
   return (uint16_t*)tmp.addr;
 }
 
-uint16_t *writePage(int addr, uint8_t *data)
+uint16_t *writePage(int addr, uint8_t *data, uint8_t pgs)
 {
-  flash_write_t tmp = {addr, data};
+  flash_write_t tmp = {addr, data, pgs};
   return writePage(&tmp);
 }
 
@@ -344,7 +365,7 @@ uint16_t *writeConfigPage(int offs, void *data, int size)
   // Update current part of the page
   memcpy(pg+offs, data, size);
   // Write back updated configuration
-  ret = writePage(CONF_PAGE, pg);
+  ret = writePage(CONF_PAGE, pg, 1);
   delete[] pg;
   return ret;
 }

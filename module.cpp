@@ -51,6 +51,8 @@ void CModule::remove() {
   eraseData();    // Clear the whole class
 }
 
+extern const char *moduleType(int typ);
+
 // Connect an image to the correct bank of the module
 // img  - Pointer to image in flash or RAM
 // bank - the target bank for the image
@@ -63,7 +65,8 @@ void CModule::setImage(uint16_t *img, int bank, FL_Head_t *fat, char *name, int 
   m_banks[bank].set(img, name, fat, page);
   m_img = m_banks[0].image();
 #ifdef DBG_PRINT
-  sprintf(cbuff,"Set image %X @ %X [%d] -> Bank %d <%s>\n\r", img, fat->offs, fat->type, bank, m_name[bank]);
+  sprintf(cbuff,"Set image %X @ %X[%s] -> Page %d:%d <%s>\n\r",
+        img, fat->offs, moduleType(fat->type), page, bank, m_banks[bank].name());
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
   if( bank == 0 )

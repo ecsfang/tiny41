@@ -422,7 +422,7 @@ extern volatile uint8_t wprt;
 
 extern void readFlash(int offs, uint8_t *data, uint16_t size);
 extern uint16_t *writeROMMAP(int p, int b, uint16_t *data);
-extern uint16_t *writePage(int addr, uint8_t *data);
+extern uint16_t *writePage(int addr, uint8_t *data, uint8_t pgs);
 extern uint16_t *writeConfig(Config_t *data, int set=0, bool bChk=true);
 extern bool readConfig(Config_t *data, int set);
 extern uint16_t *writeSetup(Setup_t *data);

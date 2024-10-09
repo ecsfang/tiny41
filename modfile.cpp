@@ -356,7 +356,7 @@ int loadModFile(CFat_t *pFat, int port, int pg)
 int extract_mod(CFat_t *pFat, int port, int pg)
 {
 #ifdef DBG_PRINT
-  sprintf(cbuff,"Extract ROM (%d) @ 0x%X:%X [Page %d]\n\r", port, pFat->offs(), pFat->type(), pg);
+  sprintf(cbuff,"Extract ROM (%d) @ 0x%X:%X [Page %d]\n\r", port, pFat->offset(), pFat->type(), pg);
   cdc_send_string_and_flush(ITF_TRACE, cbuff);
 #endif
   switch( pFat->type() ) {
