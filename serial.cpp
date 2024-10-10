@@ -281,9 +281,11 @@ public:
   }
   // Back space - remove last character
   void del(void) {
-    m_text[--m_pText] = 0;
-    send2console("\b \b", false);  // Clean previous content on page ...
-    cdc_flush_console();
+    if( m_pText ) {
+      m_text[--m_pText] = 0;
+      send2console("\b \b", false);  // Clean previous content on page ...
+      cdc_flush_console();
+    }
   }
   char *buf(void) {
     return m_text;

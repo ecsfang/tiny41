@@ -1,7 +1,7 @@
 #ifndef __TINY41_H__
 #define __TINY41_H__
 
-#define DBG_PRINT
+//#define DBG_PRINT
 
 #define CF_DUMP_DBG_DREGS 0
 #define CF_DISPLAY_LCD 1
