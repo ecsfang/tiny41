@@ -12,6 +12,8 @@
 #include "tusb_config.h"
 #include <tusb.h>
 #include "usb/cdc_helper.h"
+#include "wand.h"
+#include "modfile.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -181,6 +183,8 @@ int main()
     // Init IR-led for printer
     init_ir();
 #endif
+
+    init_wand();
 
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
@@ -385,8 +389,8 @@ int main()
                 }
                 cdc_send_string_and_flush(ITF_WAND, (char*)"OK");
                 wState = W_IDLE;
-                extern void wand_data(unsigned char *dta);
-                wand_data((unsigned char*)cc);
+                //extern void wand_data(unsigned char *dta);
+                pBar->data((unsigned char*)cc);
             }
         }
 

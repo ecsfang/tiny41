@@ -14,26 +14,36 @@
 #include "tiny41.h"
 #include "serial.h"
 #include "core_bus.h"
+#include "flash.h"
 #include "blinky.h"
 #include "usb/cdc_helper.h"
 #include "hardware/flash.h"
 #include "module.h"
 #include "xfmem.h"
-#include "fltools/fltools.h"
+#include "wand.h"
+//#include "fltools/fltools.h"
 
 char cbuff[CDC_PRINT_BUFFER_SIZE];
 
 int pcount = 0;
-extern CModules modules;
 extern CBreakpoint brk;
-
-//extern CMem ram;
-//extern unsigned int nMemMods;
 
 // Memory that emulates a pak
 typedef unsigned char BYTE;
 typedef void (*FPTR)(void);
 typedef void (*CMD_FPTR)(char *cmd);
+
+uint32_t getTotalHeap(void)
+{
+  extern char __StackLimit, __bss_end__;
+  return &__StackLimit - &__bss_end__;
+}
+
+uint32_t getFreeHeap(void)
+{
+  struct mallinfo m = mallinfo();
+  return getTotalHeap() - m.uordblks;
+}
 
 // Serial loop command structure
 typedef struct
@@ -73,9 +83,7 @@ void service(void)
 #define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+------------------+\n\r")
 #define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+------------------/\n\r")
 
-extern int mod_info(CFat_t *pFat, char *buf);
-
-extern CFat_t fat;
+extern int mod_info(CFat *pFat, char *buf);
 
 const char *moduleType(int typ)
 {
@@ -94,28 +102,24 @@ void all_modules(void)
 {
   int i, n = 0;
   char typ[5];
-  fat.first();
-  if( fat.offset() ) {
+  CFat *pFat = new CFat();
+  //fat.first();
+  if( pFat->offset() ) {
     cdc_send_console((char*)"\n\rInstalled modules\n\r");
-    while( fat.offset() ) {
+    while( pFat->offset() ) {
       n++;
-      sprintf(typ, "%c%s", fat.type() == FL_RAM ? '+':' ', moduleType(fat.type()));
-      /**switch( fat.type() ) {
-      case FL_MOD: strcpy(typ, " MOD"); break;
-      case FL_RAM: strcpy(typ, "+RAM"); break;
-      case FL_ROM: strcpy(typ, " ROM"); break;
-      default:     strcpy(typ, " ???");
-      }*/
+      sprintf(typ, "%c%s", pFat->type() == FL_RAM ? '+':' ', moduleType(pFat->type()));
       i = sprintf(cbuff,"| %3d | %-16.16s |%4.4s | %08X | ",
-        n, fat.name(), typ, fat.offset() );
-      i += mod_info(&fat, cbuff+i);
+        n, pFat->name(), typ, pFat->offset() );
+      i += mod_info(pFat, cbuff+i);
       i += sprintf(cbuff+i,"\n\r");
       cdc_send_console(cbuff);
-      fat.next();
+      pFat->next();
     }
   } else {
     cdc_send_console((char*)"\n\rNo installed modules!\n\r");
   }
+  delete pFat;
 }
 
 /*
@@ -123,7 +127,6 @@ void all_modules(void)
  */
 void list_modules(void)
 {
-  extern CModules modules;
   int n;
 
 #ifdef DBG_PRINT
@@ -134,7 +137,7 @@ void list_modules(void)
   BAR_T();
   cdc_send_console((char*)"| Page | Port | XROM | RAM | Name             | Banks\n\r");
   BAR_M();
-  for(int i=FIRST_PAGE; i<=LAST_PAGE; i++) {
+  for(int i=FIRST_PAGE; i<NR_PAGES; i++) {
     n = sprintf(cbuff,"|  #%X  | ", i);
     switch( i ) {
     case 4: n += sprintf(cbuff+n,"Srv  | "); break;
@@ -167,7 +170,7 @@ void list_modules(void)
 extern void list_brks(void);
 extern void clrAllBrk(void);
 extern void power_on(void);
-extern void wand_data(uint8_t *);
+//extern void wand_data(uint8_t *);
 
 uint8_t barTest[] = {
   //Hello world!
@@ -179,7 +182,7 @@ uint8_t barTest[] = {
 void wand_test(void)
 {
   cdc_send_console((char*)"Send barcode!\n\r");
-  wand_data(barTest);
+  pBar->data(barTest);
 }
 
 static uint16_t sBrk = 0;
@@ -316,7 +319,8 @@ int find_module(void)
 {
   // Search for the module and install!
   int n = 0;
-  if( fat.find(m_text.buf()) ) {
+  CFat *pFat = new CFat();
+  if( pFat->find(m_text.buf()) ) {
     sprintf(cbuff,"\rFind module: %s ", m_text.buf());
     n = send2console(cbuff, true);  // Clean previous content on page ...
     plug_module();
@@ -325,6 +329,7 @@ int find_module(void)
     n = send2console(cbuff, true);  // Clean previous content on page ...
     state = ST_NONE;
   }
+  delete pFat;
   return n;
 }
 
@@ -581,7 +586,7 @@ void del_config(void)
 void list_config(void)
 {
   Config_t *conf = new Config_t;
-  //CFat_t *pFat = new CFat_t();
+  //CFat *pFat = new CFat();
   int n;
   send2console((char*)"\rList all configurations", true);  // Clean previous content on page ...
   cdc_send_string_and_flush(ITF_CONSOLE, (char*)"---+--------------------------\r\n");

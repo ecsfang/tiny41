@@ -19,7 +19,9 @@ public:
   virtual void write(uint64_t *dta) = 0;
   virtual uint32_t write(uint32_t addr, int r) = 0;
   virtual uint64_t read(uint32_t addr, int r=0) = 0;
-  virtual void delaydWrite(uint32_t addr) = 0;
+  void delayedWrite(uint32_t addr) {
+    bwr = addr;
+  }
   virtual uint16_t getAddress(uint16_t a) = 0;
   virtual bool isAddress(int a) = 0;
   virtual RamDevice_e devID() = 0;

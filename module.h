@@ -279,4 +279,6 @@ public:
   }
 };
 
+extern CModules modules;
+
 #endif//__MODULE_H__

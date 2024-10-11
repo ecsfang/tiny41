@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "core_bus.h"
 
+#include "flash.h"
 #include "module.h"
 #include "modfile.h"
 
@@ -10,6 +11,9 @@ extern bool diffPage(uint16_t *p1, uint16_t *p2);
 
 // Helper to decode the bank instruction
 static uint8_t nBank[NR_BANKS] = {0,2,1,3};
+
+// Make space for info about all modules
+CModules modules;
 
 //*********************************
 // class CModule
@@ -123,7 +127,7 @@ void CModules::saveConfig(int set, char *desc)
   writeConfig(conf, set);
   delete conf;
 #ifdef DBG_PRINT
-  sprintf(cbuff, "Saved config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
+  sprintf(cbuff, "Saved config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE(0));
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
 }
@@ -139,7 +143,7 @@ void CModules::deleteConfig(int set)
   writeConfig(conf, set, false);
   delete conf;
 #ifdef DBG_PRINT
-  sprintf(cbuff, "Delete config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
+  sprintf(cbuff, "Delete config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE(0));
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
 }
@@ -151,7 +155,7 @@ bool CModules::readConfig(int set)
   bool ret = true;
   // Read the saved configuration ...
   Config_t *conf = new Config_t;
-  CFat_t *pFat = new CFat_t();
+  CFat *pFat = new CFat();
   if( !::readConfig(conf, set) ) {
     sprintf(cbuff, "Bad configuration for set %d\n\r", set);
     cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
@@ -183,7 +187,7 @@ bool CModules::readConfig(int set)
     saveSetup(set);
   }
 #ifdef DBG_PRINT
-  sprintf(cbuff, "Read config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE);
+  sprintf(cbuff, "Read config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE(0));
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
   delete pFat;
@@ -205,3 +209,4 @@ bool CModules::restore(void)
   }
   return false;
 }
+

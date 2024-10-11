@@ -8,15 +8,11 @@
 // And packed file would still be larger than 4k ...
 
 #ifdef USE_XFUNC
-void saveXMem(int xpg);
-void initXMem(int xpg);
-bool isXmemAddr(uint16_t addr);
-int getXmemAddr(uint16_t addr);
+extern void saveXMem(int xpg);
+extern void initXMem(int xpg);
+extern bool isXmemAddr(uint16_t addr);
+extern int getXmemAddr(uint16_t addr);
 #endif//USE_XFUNC
-
-#ifdef USE_QUAD_MODULE
-//extern unsigned int nMemMods;
-#endif//USE_QUAD_MODULE
 
 #ifdef USE_XF_MODULE
 typedef struct {
@@ -26,16 +22,15 @@ typedef struct {
 
 // Memory for Extended Memory module
 class CXFM : public CRamDev {
-  //uint8_t m_chksum;
 public:
   XMem_t  m_mem;          // Copy 
   volatile XMem_t *m_ram;
   bool dirty() {
-    return memcmp((void*)m_ram->mem, (void*)m_mem.mem, sizeof(m_mem.mem))?true:false;
+    return memcmp((void*)m_ram->mem, (void*)m_mem.mem, memSize())?true:false;
   }
   void saveMem(void) {
     // Copy to flash image
-    memcpy((void*)m_mem.mem, (void*)m_ram->mem, sizeof(m_mem.mem));
+    memcpy((void*)m_mem.mem, (void*)m_ram->mem, memSize());
     // Update the checksum of the image
     doChksum();
   }
@@ -47,24 +42,20 @@ public:
   int memSize(void) {
     return (int)sizeof(m_mem.mem);
   }
+  int chkSize(void) {
+    return (int)sizeof(m_mem.chkSum);
+  }
   void doChksum(void) {
     uint8_t *p = (uint8_t*)m_mem.mem;
     m_mem.chkSum = 0;
-    for(int i=0; i<sizeof(m_mem.mem); i++)
+    for(int i=0; i<memSize(); i++)
       m_mem.chkSum += *p++;
-  }
-  uint8_t *pChkSum(void) {
-    return (uint8_t*)&m_mem.chkSum;
   }
   uint8_t chkSum(void) {
     return m_mem.chkSum;
   }
-  int chkSize(void) {
-    return (int)sizeof(m_mem.chkSum);
-  }
   void write(uint64_t *dta);
   uint32_t write(uint32_t addr, int r);
-  void delaydWrite(uint32_t addr) { bwr = addr; }
   uint64_t read(uint32_t addr, int r);
   bool isAddress(int a) {
     return isXmemAddr(a);
@@ -110,10 +101,8 @@ public:
     return a;
   }
   RamDevice_e devID() { return QUAD_DEV; }
-
   void write(uint64_t *dta);
   uint32_t write(uint32_t addr, int r);
-  void delaydWrite(uint32_t addr) { bwr = addr; }
   uint64_t read(uint32_t addr, int r);
 };
 

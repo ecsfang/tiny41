@@ -7,12 +7,12 @@
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
 #include "pico/multicore.h"
-#include "pico/flash.h"
 #include "tiny41.h"
 #include "core_bus.h"
 #include "blinky.h"
 #include "disasm.h"
 #include "serial.h"
+#include "flash.h"
 #include <malloc.h>
 #ifdef USE_PIO
 #include "ir_led.h"
@@ -21,11 +21,10 @@
 
 #include "module.h"
 #include "modfile.h"
+#include "wand.h"
 
 //#define RESET_FLASH
 //#define RESET_RAM
-
-CFat_t fat; // Holds the current FAT entry
 
 extern CDisplay    disp41;
 
@@ -48,49 +47,13 @@ volatile int  g_num = 0;
 volatile int  g_ret = 0;
 volatile bool g_do_cmd = 0;
 
-uint32_t getTotalHeap(void)
-{
-  extern char __StackLimit, __bss_end__;
-  return &__StackLimit - &__bss_end__;
-}
-
-uint32_t getFreeHeap(void)
-{
-  struct mallinfo m = mallinfo();
-  return getTotalHeap() - m.uordblks;
-}
-
-#define BAR_MAXLEN 0x10
-class CBarcode {
-  volatile uint8_t bb[BAR_MAXLEN]; // Max size of a barcode
-  volatile uint8_t nb = 0;         // Bytes left in buffer
-  volatile uint8_t pb = 0;         // Byte pointer into buffer
-public:
-  bool empty(void) { return nb == 0; }
-  bool available(void) { return nb != 0; }
-  void set(uint8_t *bc) {
-    nb = *bc++;
-    if( nb > 0 && nb <= BAR_MAXLEN )
-      memcpy((void *)bb, (void *)bc, nb);
-    pb = 0;
-  }
-  uint8_t get(void) {
-    nb--;
-    return bb[pb++];
-  }
-};
-
-// Hold current barcode to scan
-CBarcode cBar;
-
-
 CBreakpoint brk;
-
-void swapPage(uint16_t *dta, int n);
 
 // Keep track of FI flags (0-13)
 volatile uint16_t carry_fi = 0;
+// When true - set PBSY in next bus cycle
 volatile bool bPBusy = false;
+// When true - clear PBSY in next bus cycle
 volatile bool bClrPBusy = false;
 
 // Indicate to set PBSY next time ...
@@ -100,7 +63,6 @@ void _setFI_PBSY(void)
 }
 void _clrFI_PBSY(void)
 {
-  //bPBusy = false;
   bClrPBusy = true;
 }
 
@@ -122,9 +84,7 @@ inline uint16_t getFI(void)
   return carry_fi & FI_MASK;
 }
 
-volatile int wDelayBuf = 0;
-
-void _power_on()
+void power_on()
 {
   // Drive ISA high to turn on the calculator ...
   gpio_put(P_ISA_DRV, 1);
@@ -137,348 +97,11 @@ void _power_on()
   sleep_ms(10);
   _clrFI_PBSY();
 }
-void power_on(void)
-{
-  printf("Try to power on the calculator ...\n");
-  _power_on();
-}
-
-bool bWdata = false;
-
-
-void wand_done(void)
-{
-  if( bWdata ) {
-    // Clear Wand carry
-    _clrFI_PBSY();
-    bWdata = false;
-    return;
-  }
-}
-
-void wand_data(unsigned char *dta)
-{
-  // Start with first row!
-  _power_on();
-  // Set carry to service the wand
-  _setFI_PBSY();
-  cBar.set(dta);
-  bWdata = true;
-  //_clrFI_PBSY();
-}
 
 #if CF_DBG_DISP_INST
 extern const char *inst50disp[16];
 extern const char *inst70disp[16];
 #endif
-
-// Writing to flash can only be done page wise!
-int pageAdjust(int addr)
-{
-  if( addr % FLASH_PAGE_SIZE ) {
-    addr |= FLASH_PAGE_SIZE-1;
-    addr++;
-  }
-  return addr;
-}
-
-#define FLASH_LOCK_TIMEOUT_MS 5*1000
-typedef struct {
-  int     addr;
-  uint8_t *buf;
-  uint8_t pgs;  // Number of flash pages
-} flash_write_t;
-
-bool diffPage(void *p1, void *p2)
-{
-  return memcmp(p1, p2, sizeof(uint16_t)*ROM_SIZE) ? true : false;
-}
-
-bool invalidFlashPtr(int fptr)
-{
-  return fptr < (FLASH_START+XIP_BASE) || fptr > (FLASH_SIZE+XIP_BASE);
-}
-/*
-static void ffs_write_flash(void *param) {
-  flash_write_t *tmp = (flash_write_t *)param;
-  if( invalidFlashPtr(tmp->addr) ) {
-      sprintf(cbuff, "ffs_write_flash: Bad address: %08X\n\r", tmp->addr);
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      return;
-  }
-  // Offset the flash pointer
-  int fp1 = tmp->addr-XIP_BASE;
-  int fp2 = tmp->addr-XIP_BASE+PG_SIZE;
-  uint32_t ints = save_and_disable_interrupts();
-  flash_range_erase(fp1, PG_SIZE);
-  flash_range_erase(fp2, PG_SIZE);
-  flash_range_program(fp1, tmp->buf, PG_SIZE);
-  flash_range_program(fp2, tmp->buf+PG_SIZE, PG_SIZE);
-  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
-}
-*/
-static void write_flash_page(void *param) {
-  flash_write_t *tmp = (flash_write_t *)param;
-  // Offset the flash pointer
-  int fp = tmp->addr-XIP_BASE;
-  uint8_t *data = tmp->buf;
-  uint32_t ints = save_and_disable_interrupts();
-  for(int i=0; i<tmp->pgs; i++ ) {
-    flash_range_erase(fp, PG_SIZE);
-    flash_range_program(fp, data, PG_SIZE);
-    fp += PG_SIZE;
-    data += PG_SIZE;
-  }
-  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
-}
-
-// Earse a port - two pages (8KB) of flash
-void erasePort(int n, bool bPrt=true)
-{
-  if( bPrt ) {
-    int i = sprintf(cbuff, "\n\rErasing target region %X ", n);
-    sprintf(cbuff+i, "-- [%05X - %05X]\n\r", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-  }
-  uint32_t ints = save_and_disable_interrupts();
-  flash_range_erase(PAGE1(n), FLASH_SECTOR_SIZE);
-  flash_range_erase(PAGE2(n), FLASH_SECTOR_SIZE);
-  restore_interrupts(ints); // Note that a whole number of sectors must be erased at a time.
-  if( bPrt ) {
-    cdc_send_string_and_flush(ITF_CONSOLE, (char*)"Done!\n\r");
-  }
-}
-
-void writeFlash(int offs, uint8_t *data, int sz)
-{
-  uint32_t ints = save_and_disable_interrupts();
-  flash_range_program(offs, data, sz);
-  restore_interrupts(ints);
-  sprintf(cbuff, " --> Write flash @ %08X %d bytes\n\r", offs, sz);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-}
-
-// Write data to given flash port
-// Max 2*FLASH_SECTOR_SIZE of bytes to be written
-void write8Port(int n, uint8_t *data, int sz)
-{
-  int sz1 = sz > FLASH_SECTOR_SIZE ? FLASH_SECTOR_SIZE : sz;
-  sz1 = pageAdjust(sz1);
-  int sz2 = sz > FLASH_SECTOR_SIZE ? sz-FLASH_SECTOR_SIZE : 0;
-  sz2 = pageAdjust(sz2);
-  writeFlash(PAGE1(n), data, sz1);
-  if( sz2 )
-    writeFlash(PAGE2(n), data + sz1, sz2);
-}
-
-uint16_t *writePage(flash_write_t *pDta)
-{
-  int r = flash_safe_execute(write_flash_page, pDta, FLASH_LOCK_TIMEOUT_MS);
-  if (r != PICO_OK) {
-    sprintf(cbuff, "error calling write_flash_page: %d", r);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#ifdef DBG_PRINT
-  } else {
-    sprintf(cbuff, "Wrote 0x%08X to flash @ 0x%08X:%X\n\r", pDta->buf, pDta->addr, pDta->pgs*PG_SIZE);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  }
-  return (uint16_t*)pDta->addr;
-}
-
-/*uint16_t *writeFFSPage(flash_write_t *pDta)
-{
-  int r = flash_safe_execute(write_flash_page, pDta, FLASH_LOCK_TIMEOUT_MS);
-  if (r != PICO_OK) {
-    sprintf(cbuff, "error calling write_flash_page: %d", r);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#ifdef DBG_PRINT
-  } else {
-    sprintf(cbuff, "Wrote flash 0x%08X @ 0x%08X:%X\n\r", pDta->buf, pDta->addr, PG_SIZE);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  }
-  return (uint16_t*)pDta->addr;
-}**/
-
-// Write data to given flash port (page and bank) in ROMMAP
-// One ROM page is always written (4K 10-bit data - two flash pages (8K))
-// Returns pointer to flash image (or NULL if failed)
-uint16_t *writeROMMAP(int p, int b, uint16_t *data)
-{
-  flash_write_t tmp = {FFS_PAGE(p,b), (uint8_t*)data, 2};
-  if( invalidFlashPtr(tmp.addr) ) {
-      sprintf(cbuff, "writeROMMAP: Bad address: %08X\n\r", tmp.addr);
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      return NULL;
-  }
-  // Check if images differs ...
-  if( diffPage((void*)tmp.addr, tmp.buf) ) {
-    // Yes, so lets update the image to flash
-    writePage(&tmp);
-  }
-  // Return address to the flash image
-  return (uint16_t*)tmp.addr;
-}
-
-uint16_t *writePage(int addr, uint8_t *data, uint8_t pgs)
-{
-  flash_write_t tmp = {addr, data, pgs};
-  return writePage(&tmp);
-}
-
-// Function to calculate a simple checksum
-static uint32_t calcChecksum(const uint8_t *data, size_t len) {
-    uint32_t checksum = 0xBADC0DE; // Start with a non-zero value
-    for (size_t i = 0; i < len-sizeof(uint32_t); i++) {
-        checksum += data[i];
-    }
-    return ~checksum;
-}
-
-// Function to verify the checksum
-static bool verifyChecksum(const uint8_t *data, size_t len, uint8_t expected_checksum) {
-    uint32_t chk = calcChecksum(data, len);
-    return chk == expected_checksum;
-}
-
-bool readConfig(Config_t *data, int set)
-{
-  uint32_t cp = CONF_PAGE + CONF_OFFS(set);
-  memcpy(data, (uint8_t*)cp, CONF_SIZE);
-  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
-#ifdef DBG_PRINT
-  sprintf(cbuff, "Read config(%d) @ 0x%08X:%X\n\r", set, cp, CONF_SIZE);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  return chk == data->chkSum;
-}
-
-// Read the config flashpage and updated the
-// corresponding part and write back the page
-uint16_t *writeConfigPage(int offs, void *data, int size)
-{
-  uint16_t *ret = NULL;
-  uint8_t *pg = new uint8_t[FLASH_SECTOR_SIZE];
-  // Read whole config page
-  memcpy(pg, (uint8_t*)CONF_PAGE, FLASH_SECTOR_SIZE);
-  // Update current part of the page
-  memcpy(pg+offs, data, size);
-  // Write back updated configuration
-  ret = writePage(CONF_PAGE, pg, 1);
-  delete[] pg;
-  return ret;
-}
-
-// Update configuration #set in config page
-uint16_t *writeConfig(Config_t *data, int set, bool bChk)
-{
-  if( bChk ) {
-    // Yes, update checksum
-    uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
-    data->chkSum = chk;
-  }
-  return writeConfigPage(CONF_OFFS(set), data, CONF_SIZE);
-}
-
-// Update the setup information in the config page
-uint16_t *writeSetup(Setup_t *data)
-{
-  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Setup_t));
-  data->chkSum = chk;
-  return writeConfigPage(SETUP_OFFS, data, SETUP_SIZE);
-}
-
-bool readSetup(Setup_t *data)
-{
-  uint32_t cp = CONF_PAGE + SETUP_OFFS;
-  memcpy(data, (uint8_t*)cp, SETUP_SIZE);
-  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Setup_t));
-#ifdef DBG_PRINT
-  sprintf(cbuff, "Read setup @ 0x%08X:%X\n\r", cp, SETUP_SIZE);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-#endif
-  return chk == data->chkSum;
-}
-
-/*void writePort(int n, uint16_t *data)
-{
-  // Swap 16-bit word to get right endian for flash ...
-  swapPage(data, FLASH_SECTOR_SIZE);
-  uint8_t *dp = (uint8_t*)data;
-  printf("\nProgramming target region %X ", n);
-  printf("-- [%05X - %05X]\n", PAGE1(n), PAGE2(n) + FLASH_SECTOR_SIZE);
-  write8Port(n, (uint8_t*)data, 2*FLASH_SECTOR_SIZE);
-  swapPage(data, FLASH_SECTOR_SIZE);
-  printf("Done!\n");
-}*/
-
-
-// Make space for information about all flash images
-CModules modules;
-
-// Read flash into ram whitout swapping
-void readFlash(int offs, uint8_t *data, uint16_t size)
-{
-  // Point at the wanted flash image ...
-  const uint8_t *fp = (const uint8_t*)(XIP_BASE + offs);
-  if( invalidFlashPtr((int)fp) ) {
-    sprintf(cbuff, "BAD FLASH POINTER: %p!\n\r", fp);
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-    return;
-  }
-  memcpy(data, fp, size);
-}
-
-// Save a given ram image to flash (emulate Q-RAM)
-// TBD - This must be updated to update file in FFS!
-// TBD - Should check all banks as well
-// If loaded from ROM, then that page should be updated
-// If loaded from MOD, then we must check which page etc that
-// needs to be updated.
-void saveRam(int port, int ovr = 0)
-{
-  int n = 0;
-  if( port >= FIRST_PAGE && port < NR_PAGES ) {
-    if (ovr || modules.isDirty(port)) {
-      modules.clear(port);
-      writeROMMAP(port, 0, modules.getImage(port));
-      n = sprintf(cbuff, "Wrote RAM[%X] to flash\n\r", port);
-    }
-  } else {
-      n = sprintf(cbuff, "Invalid page! [%X]\n\r", port);
-  }
-  if( n )
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-  sprintf(cbuff, "Save RAM @ page %d implemented yet! [%X]\n\r", port);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-}
-
-
-// Swap 16-bit word (n - number of 16-bit words)
-void swapPage(uint16_t *dta, int n)
-{
-  for (int i = 0; i < n; dta++, i++)
-    *dta = __builtin_bswap16(*dta);
-}
-
-bool loadModule(const char *mod, int page)
-{
-  // Check that the module is loaded in flash
-  // FAT is updated to point to this entry
-  if( !fat.find(mod) )
-    return false;
-  return extract_mod(&fat, page) ? false : true;
-}
-
-void initRoms(void)
-{
-  // Read the saved setup and load
-  // previous configuration from previous session
-  modules.restore();
-}
-
-char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 
 // Extract display data from data56
 #define CH9_B03(c) ((c >> 0) & 0x00F) // Bit 0-3
@@ -490,8 +113,8 @@ char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 // Core 1 sits in a loop grabbing bus cycles
 //
 
-#define RISING_EDGE(SIGNAL) ((last_##SIGNAL == 0) && (SIGNAL == 1))
-#define FALLING_EDGE(SIGNAL) ((last_##SIGNAL == 1) && (SIGNAL == 0))
+//#define RISING_EDGE(SIGNAL) ((last_##SIGNAL == 0) && (SIGNAL == 1))
+//#define FALLING_EDGE(SIGNAL) ((last_##SIGNAL == 1) && (SIGNAL == 0))
 
 // Do we drive ROM data?
 volatile int drive_isa_flag = 0;  // Drive ISA in next cycle
@@ -541,7 +164,9 @@ volatile uint16_t rxSize = 0;
 int last_sync = 0;
 int gpio_states = 0;
 
+// Copy of the 41 LCD buffer
 char dtext[2 * NR_CHARS + 1];
+// The punctation part of the 41 LCD buffer
 bool bPunct[2 * NR_CHARS + 1];
 
 char cpu2buf[256];
@@ -559,7 +184,6 @@ void reset_bus_buffer(void)
   }
 }
 
-
 bool bT0Carry = false;
 
 volatile Mode_e cpuMode;
@@ -570,7 +194,7 @@ void core1_main_3(void)
   static int bit_no = 0;        // Current bit-number in bus cycle
   static int bIsaEn = 0;        // True if ISA output is enabled
   static int isDataEn = 0;      // True if DATA output is enabled
-  static int isFiEn = 0;        // True if FI output is enabled
+//  static int isFiEn = 0;        // True if FI output is enabled
   static uint64_t isa = 0LL;    // Current bit-pattern on the ISA bus
   static uint64_t bit = 0LL;    // Bit mask for current bit in cycle
   static uint64_t data56 = 0LL; // Current bit-pattern on DATA bus
@@ -830,7 +454,7 @@ void core1_main_3(void)
 
     case LAST_CYCLE-2:
       // Check if more data to be read from the wand ...
-      if( cBar.available() ) {
+      if( pBar->available() ) {
         setFI(FI_PBSY | FI_WNDB);
       } else {
         clrFI(FI_WNDB);
@@ -939,7 +563,7 @@ void core1_main_3(void)
             if( pRamDev ) {
               // Update any RAM device (QUAD, XMEM etc)
               if( cmd == INST_WDATA ) {
-                pRamDev->delaydWrite(ramAddr);
+                pRamDev->delayedWrite(ramAddr);
               } else if( cmd6 == INST_READ_DATA ) {
                 DATA_OUTPUT(pRamDev->read(ramAddr,r));
               } else if( cmd6 == INST_WRITE_DATA ) {
@@ -951,9 +575,9 @@ void core1_main_3(void)
             // A peripherial is selected ...
             switch( perph ) {
             case WAND_ADDR:
-              if( cmd == INST_WANDRD && cBar.available() ) {
+              if( cmd == INST_WANDRD && pBar->available() ) {
                 // Output next byte from the wand-buffer!
-                DATA_OUTPUT(cBar.get());
+                DATA_OUTPUT(pBar->get());
               }
               break;
 #ifdef USE_TIME_MODULE
@@ -1084,53 +708,17 @@ void core1_main_3(void)
   }
 }
 
-#ifdef USE_TIME_MODULE
-static char bcd[14+1];
-void CTime::tick()
-{
-  // 0.01s = 10ms = 10000us
-  int x, n,i, tic;
-  uint64_t  tm1 = time_us_64();
-  if( (tm1 - tm) > 10000 ) {
-    tm1 = tm1-tm;
-    tic = tm1 / 1000;
-    sprintf(bcd, "%014llx", reg[0].clock);
-
-    x = 14;
-    for(i=0; i<x; i++)
-      bcd[i] -= '0';
-    while( tic ) {
-      n = tic % 10;
-      tic /= 10;
-      for( int i = 13; n && i>0; i--) {
-        bcd[i] += n;
-        if( bcd[i] <= 9 )
-          break;
-        bcd[i] -= 10;
-        n = 1;
-      }
-    }
-    reg[0].clock = 0;
-    for( i = 0; i<14; i++ )
-      reg[0].clock = (reg[0].clock<<4) | bcd[i];
-    tm += tm1;
-  }
-}
-#endif//USE_TIME_MODULE
-
 void post_handling(uint16_t addr)
 {
   // Check if we have more data to send and that the buffer is empty ...
-  // cBar.empty() if all data in buffer have been read
+  // pBar->empty() if all data in buffer have been read
   // FI_WNDB (T2) is low if buffer is empty
-  if( bWdata && cBar.empty() && !chkFI(FI_WNDB) ) {
+  if( pBar->isDone() && !chkFI(FI_WNDB) ) {
     // We have no more data to send!
-    // Clear Wand carry
-    _clrFI_PBSY();
-    bWdata = false;
+    pBar->done();
   }
 #if 0
-  if( (iGetNextWndData > iSendNextWndData) && cBar.empty() && !chkFI(FI_WNDB) ) {
+  if( (iGetNextWndData > iSendNextWndData) && pBar->empty() && !chkFI(FI_WNDB) ) {
     // We have more data to send!
     iSendNextWndData++;
     wand_scan();
@@ -1426,12 +1014,13 @@ void handle_bus(volatile Bus_t *pBus)
 
   nCpu2 = 0;
 
+  // Current peripheral is always included in the msb of data.
   peripheral.set((pBus->data & PA_MASK) >> PA_SHIFT);
 
   if( IS_TRACE() ) {
     if( oCnt == -1)
       oCnt = cnt-1;
-    oCnt = ++oCnt & 0xFFFF;
+    oCnt = ++oCnt & 0xFFFF; // Increment and wrap ...
     // Check if we missed/skipped any trace logs
     if( oCnt != cnt ) {
       nCpu2 += sprintf(cpu2buf+nCpu2, "\n\r\n\r###### SKIPPED %d TRACE CYCLES #########################\n\r", skipClk);
@@ -1611,7 +1200,7 @@ void handle_bus(volatile Bus_t *pBus)
       dump_dregs();
       // Any QROM that needs to be saved ... ?
       // TBD - Should this be done here? Or manually?
-      for(int p=FIRST_PAGE; p<=LAST_PAGE; p++) {
+      for(int p=FIRST_PAGE; p<NR_PAGES; p++) {
         CModule *m = modules[p];
         if( m->isLoaded() && m->isQROM() && m->isDirty() ) {
           //saveRam(p);

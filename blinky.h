@@ -208,9 +208,6 @@ public:
       bwr = r+1; // Delayed write ... bwr = [0x0,0xF] + 1
     return addr;
   }
-  void delaydWrite(uint32_t addr) {
-    bwr = addr;
-  }
   uint64_t read(uint32_t addr, int r) {
     return read(r);
   }

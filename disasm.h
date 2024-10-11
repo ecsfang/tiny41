@@ -38,7 +38,7 @@ typedef struct {
 	uint8_t len;
 } Inst_t;
 
-char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
+extern char *disAsm(int inst, int addr, uint64_t data, uint8_t sync);
 
 #include "disstr.h"
 

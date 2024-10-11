@@ -18,7 +18,7 @@
 #define MEASURE_TIME
 #define LOG_FI          // If true - add FI flags to output log
 
-#define USE_TIME_MODULE
+//#define USE_TIME_MODULE
 #define USE_XF_MODULE
 //#define DISABLE_DISPRINT
 //#define USE_QUAD_MODULE

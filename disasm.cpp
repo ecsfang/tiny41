@@ -22,7 +22,6 @@
 
 #include "instr.h" // Instruction codes ...
 
-//extern int selectedPeripheral(void);
 extern CPeripherial peripheral;
 
 // Buffer for the disassembled string

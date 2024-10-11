@@ -107,11 +107,10 @@ their page number hardcoded.
 #include <memory.h>
 #include "tiny41.h"
 #include "core_bus.h"
+#include "flash.h"
 #include "module.h"
 #include "modfile.h"
 
-extern CModules modules;
-//extern void qRam(int page);
 
 /*******************************/
 #if 0
@@ -226,7 +225,7 @@ int get_file_format(const char *lpszFormat)
 }
 
 // Read module information from a MOD file in flash
-int mod_info(CFat_t *pFat, char *buf)
+int mod_info(CFat *pFat, char *buf)
 {
   CModFile  mod(pFat);
   return sprintf(buf,"%s", mod.getTitle());
@@ -234,7 +233,7 @@ int mod_info(CFat_t *pFat, char *buf)
 
 // Load a ROM file
 // Image is copied into flash, and a offset to flash is saved
-int loadRomFile(CFat_t *pFat, int port)
+int loadRomFile(CFat *pFat, int port)
 {
   int ret = 0;
   int bank = 0; // TBD - must be able to specify bank
@@ -262,7 +261,7 @@ int loadRomFile(CFat_t *pFat, int port)
 //      port - the staring port number (0-F, may be ignored)
 //      pg   - the page in the file to load, or -1 if load all pages
 // TBD - should be possible to specify bank?
-int loadModFile(CFat_t *pFat, int port, int pg)
+int loadModFile(CFat *pFat, int port, int pg)
 {
   int ret = 0;
   // Try to read a modfile from FFS
@@ -353,7 +352,7 @@ int loadModFile(CFat_t *pFat, int port, int pg)
  *  3 for invalid file
  *  4 for allocation error
  ******************************/
-int extract_mod(CFat_t *pFat, int port, int pg)
+int extract_mod(CFat *pFat, int port, int pg)
 {
 #ifdef DBG_PRINT
   sprintf(cbuff,"Extract ROM (%d) @ 0x%X:%X [Page %d]\n\r", port, pFat->offset(), pFat->type(), pg);
@@ -371,4 +370,22 @@ int extract_mod(CFat_t *pFat, int port, int pg)
     return 3;
   }
 
+}
+
+
+bool loadModule(const char *mod, int page)
+{
+  static CFat fat; // Holds the current FAT entry
+  // Check that the module is loaded in flash
+  // FAT is updated to point to this entry
+  if( !fat.find(mod) )
+    return false;
+  return extract_mod(&fat, page) ? false : true;
+}
+
+void initRoms(void)
+{
+  // Read the saved setup and load
+  // previous configuration from previous session
+  modules.restore();
 }

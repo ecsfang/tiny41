@@ -35,9 +35,11 @@ File size=sizeof(ModuleFileHeader)+NumPages*sizeof(ModuleFilePage)
 #endif
 
 #ifdef INCLUDE_EXTERNAL
-char *getPageName(const char *flashPtr, int page);
-int extract_mod( CFat_t *pFat, int page, int pg=-1);
-int get_file_format(const char *lpszFormat);
+extern char *getPageName(const char *flashPtr, int page);
+extern int extract_mod( CFat *pFat, int page, int pg=-1);
+extern bool loadModule(const char *mod, int page);
+extern int get_file_format(const char *lpszFormat);
+extern void initRoms(void);
 #endif
 
 typedef unsigned char byte;
@@ -111,13 +113,13 @@ typedef struct {
 
 // page struct for MOD1
 typedef struct {
-  byte Image[5120];       // the image in packed format (.BIN file format)
+  byte Image[5*1024];     // the image in packed format (.BIN file format)
   byte PageCustom[32];    // for special hardware attributes
 } V1_t;
 
 // page struct for MOD2
 typedef struct {
-  word Image[4096];       // the image in unpacked format (.ROM file format)
+  word Image[4*1024];     // the image in unpacked format (.ROM file format)
   byte PageCustom[32];    // for special hardware attributes
 } V2_t;
 
@@ -155,7 +157,7 @@ protected:
   char *m_name;
   bool m_ok;
 public:
-  CFile(CFat_t *pFat) {
+  CFile(CFat *pFat) {
     m_fPtr = (const uint8_t*)pFat->offset();
     m_name = pFat->name();
     m_ok = false;
@@ -184,7 +186,7 @@ public:
 // Class to hanlde a ROM file
 class CRomFile : public CFile {
  public:
-  CRomFile(CFat_t *pFat) : CFile(pFat) {
+  CRomFile(CFat *pFat) : CFile(pFat) {
   }
   bool verify(void) {
     m_ok = true;
@@ -218,7 +220,7 @@ class CModFile : public CFile {
   int   m_fileFmt;
   dword m_pageSize;
  public:
-  CModFile(CFat_t *pFat) : CFile(pFat) {
+  CModFile(CFat *pFat) : CFile(pFat) {
     pMFH = (ModuleFileHeader *)m_fPtr;
     m_fileFmt = get_file_format(pMFH->FileFormat);
     m_pageSize = sizeof(ModuleHeader_t) + (MOD1_FMT == m_fileFmt ? sizeof(V1_t) : sizeof(V2_t));

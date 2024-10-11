@@ -22,6 +22,9 @@ add_executable(tiny41
   modfile.cpp
   module.cpp
   xfmem.cpp
+  flash.cpp
+  wand.cpp
+  timemod.cpp
   usb/cdc_helper.cpp            # helper functions for the multi-CDC USB interface
   usb/usb-descriptors.cpp       # descriptors for the multi-CDC USB interface
 )

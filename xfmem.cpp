@@ -8,6 +8,7 @@
 #include "ramdev.h"
 #include "xfmem.h"
 #include "hardware/flash.h"
+#include "flash.h"
 
 
 #ifdef USE_XF_MODULE
@@ -18,19 +19,19 @@ static volatile XMem_t __mem;
 CMem ram(0);
 static volatile uint64_t __ram[QUAD_MEM_MOD_SIZE];
 
-extern void erasePort(int n, bool bPrt=true);
-extern void write8Port(int n, uint8_t *data, int sz);
+//extern void erasePort(int n, bool bPrt=true);
+//extern void write8Port(int n, uint8_t *data, int sz);
 extern void readFlash(int offs, uint8_t *data, uint16_t size);
 
 #ifdef USE_XFUNC
 void saveXMem(int xpg)
 {
-  xpg += XF_PAGE;
   // Save copy - clear dirty ...
   xmem.saveMem();
-  erasePort(xpg);
   // Save all XMemory incl chkSum ...
-  write8Port(xpg, (uint8_t*)&xmem.m_mem, xmem.size());
+  writePage(XMEM_PAGE(xpg), (uint8_t*)&xmem.m_mem, (int)(xmem.size()/PAGE_SIZE));
+//  erasePort(xpg);
+//  write8Port(xpg, (uint8_t*)&xmem.m_mem, xmem.size());
   sprintf(cbuff, " -- Saved XMemory (%d bytes [%02X(%02X)]) to flash!\n\r", xmem.size(), xmem.chkSum(), xmem.m_ram->chkSum);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 }
@@ -58,14 +59,10 @@ bool isXmemAddr(uint16_t addr)
 {
   if( (addr >= XMEM_XF_START && addr < XMEM_XF_END) )
     return true;
-#if defined(USE_XMEM1) || defined(USE_XMEM2)
   if( (addr >= XMEM_XM1_START && addr < XMEM_XM1_END) )
     return true;
-#endif
-#if defined(USE_XMEM2)
   if( (addr >= XMEM_XM2_START && addr < XMEM_XM2_END) )
     return true;
-#endif
   return false;
 }
 
@@ -73,15 +70,11 @@ bool isXmemAddr(uint16_t addr)
 int getXmemAddr(uint16_t addr)
 {
   if( (addr >= XMEM_XF_START && addr < XMEM_XF_END) )
-    return addr - XMEM_XF_START + 1;
-#if defined(USE_XMEM1) || defined(USE_XMEM2)
+    return addr - XMEM_XF_START + XMEM_XF_OFFS + 1;
   if( (addr >= XMEM_XM1_START && addr < XMEM_XM1_END) )
     return addr - XMEM_XM1_START + XMEM_XM1_OFFS + 1;
-#endif
-#if defined(USE_XMEM2)
   if( (addr >= XMEM_XM2_START && addr < XMEM_XM2_END) )
     return addr - XMEM_XM2_START + XMEM_XM2_OFFS + 1;
-#endif
   return 0;
 }
 

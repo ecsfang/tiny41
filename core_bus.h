@@ -8,10 +8,11 @@
 
 #include "instr.h"
 #include "ramdev.h"
-#include "fltools/fltools.h"
+//#include "fltools/fltools.h"
 #include "fltools/flconfig.h"
 #include "usb/cdc_helper.h"
-#include "hardware/flash.h"
+//#include "hardware/flash.h"
+#include "flash.h"
 
 #include "tiny41.h"
 
@@ -27,18 +28,11 @@
 #define ROTATE_LEFT(V)  {uint64_t t = (V>>44) & 0xF; V <<= 4; V |= t;}
 
 // #define EMBED_RAM
-#define RAM_SIZE    0x1000
-#define PAGE_SIZE   0x1000
-#define ROM_SIZE    0x1000
-#define PAGE_MASK   0x0FFF
-#define ADDR_MASK   0xFFFF
 #define INST_MASK   (BIT_10-1)
 #define FIRST_PAGE  0x04
-#define NR_PAGES    0x10
-#define NR_BANKS    4
-#define LAST_PAGE   (NR_PAGES - 1)
 #define PAGE(p)     (p>>12)
 #define ISA_SHIFT   44
+
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
@@ -167,13 +161,18 @@ typedef struct {
             gpio_put(n, def);   \
     } while(0)
 
+// Check a GPIO state from current state
 #define GPIO_PIN(x) (gpio_states & (1 << x))
+// Check a GPIO state and update current state
 #define GPIO_PIN_RD(x) ((gpio_states = sio_hw->gpio_in) & (1 << x))
-#define FI(x) GPIO_PIN_RD(x)
-#define WAIT_FALLING(x) do { while(FI(x) == LOW ) {} while(FI(x) == HIGH ) {} } while(0)
-#define WAIT_RISING(x) do { while(FI(x) == LOW ) {} } while(0)
+
 #define LOW 0
 #define HIGH 1
+#define FI(x) GPIO_PIN_RD(x)
+// Check low, then high, then wait until low again
+#define WAIT_FALLING(x) do { while(FI(x) == LOW ) {} while(FI(x) == HIGH ) {} } while(0)
+// Wait for tranision from low to high
+#define WAIT_RISING(x) do { while(FI(x) == LOW ) {} } while(0)
 
 extern void core1_main_3(void);
 
@@ -275,10 +274,10 @@ public:
   }
   void set(int pa) {
     switch (pa) {
-    case DISP_ADDR:
-    case WAND_ADDR:
     case TIMR_ADDR:
     case CRDR_ADDR:
+    case DISP_ADDR:
+    case WAND_ADDR:
       m_pa = pa;
       break;
     default:
@@ -291,14 +290,14 @@ public:
   int print(char *pb) {
     int n;
     switch (get()) {
-    case DISP_ADDR:
-    case WAND_ADDR:
-    case TIMR_ADDR:
-    case CRDR_ADDR:
+    case TIMR_ADDR: // Time Module
+    case CRDR_ADDR: // 82104 Card reader
+    case DISP_ADDR: // 41 LCD display
+    case WAND_ADDR: // 82153 Wand
       n = sprintf(pb, "%c ", "TCDW"[get() - TIMR_ADDR]);
       break;
     default:
-      n = sprintf(pb, "  ");
+      n = sprintf(pb, "  "); // None selected
     }
     return n;
   }
@@ -313,120 +312,9 @@ inline void clrFI(int flag = FI_MASK) {
   carry_fi &= ~flag;
 }
 
-#define FLASH_PAGE(n) (FLASH_START + (n) * FLASH_SECTOR_SIZE)
-
-/*
-There is a very simple FAT table, consiting of:
-name (<24 characters describing the entry)
-offset - offset in flash for the start of the data
-type   - type of entry: MOD/RAM/ROM
-Last entry have offset == 0
-4 pages are reserved for the FAT:
---> 4 * 4 * 1024 / 32 bytes -> 512 entries (modules)
-*/
-
-#if defined(PIMORONI_PICOLIPO_16MB)
-#define FLASH_SIZE  ((16*1024*1024)-1)
-#elif defined(PIMORONI_TINY2040_8MB)
-#define FLASH_SIZE  ((8*1024*1024)-1)
-#elif defined(RASPBERRYPI_PICO2)
-#define FLASH_SIZE  ((4*1024*1024)-1)
-#else
-#error("Must define a board!")
-#endif
-
-class CFat_t {
-  FL_Head_t *p_fatEntry;
-  int m_pos;
-public:
-  CFat_t(FL_Head_t *p=NULL) {
-    init(p);
-  }
-  void init(FL_Head_t *p=NULL) {
-    p_fatEntry = p;
-    m_pos = 0; // Not used - we just init the pointer ...
-    // TBD - We could search for the entry with the current pointer?
-  }
-  // Read next entry in the FAT (and increment pointer)
-  void next() {
-    // Reads FAT entry
-    p_fatEntry = (FL_Head_t*)(FAT_START + m_pos*sizeof(FL_Head_t));
-    m_pos++;
-  }
-  // Read first entry in the FAT
-  void first() {
-    m_pos = 0;
-    next();
-  }
-  // Find a given module name in the FAT.
-  // Return position [1..n] if found, otherwise 0
-  int find(const char *mod) {
-    first();
-    while( offset() ) {
-      if( strcmp(p_fatEntry->name, mod) == 0 )
-        return m_pos;
-      next();
-    }
-    return 0;
-  }
-  // Return offset to the file data for current FAT entry
-  const char *offset(void) {
-    if( p_fatEntry->offs > (FLASH_SIZE+XIP_BASE) ||
-        p_fatEntry->offs < XIP_BASE )
-      return NULL;
-    return (char*)p_fatEntry->offs;
-  }
-  FL_Head_t *fatEntry() {
-    return p_fatEntry;
-  }
-  // Return the module name from the FAT
-  char *name(void) {
-    return p_fatEntry->name;
-  }
-  // Return the module type from the FAT
-  int type(void) {
-    return p_fatEntry->type;
-  }
-};
-
-#define CONF_DESC_LEN 64
-// With current size (16*(4*4+4)+64+4 = 388 bytes), there is room
-// for at least 10 configurations in one flash page (216 bytes left)
-typedef struct {
-  FL_Head_t *fat[NR_BANKS];             // Pointer to FAT entry
-  uint8_t    filePage[NR_BANKS];        // Page in the file image
-} ModuleConfig_t;
-typedef struct {
-  char            desc[CONF_DESC_LEN];  // Description of the config
-  ModuleConfig_t  mod[NR_PAGES];        // The actual page config
-  uint32_t        chkSum;               // Checksum of the config
-} Config_t;
-
-typedef struct {
-  uint32_t config;
-  uint32_t chkSum;               // Checksum of the config
-} Setup_t;
-
-#define CONF_SIZE     sizeof(Config_t)  // Total size of the config
-#define CONF_OFFS(n)  (n*CONF_SIZE)     // Offset in flash for the config
-
-// Place setup directly after config (up to 216 bytes)
-#define SETUP_SIZE    sizeof(Setup_t)   // Total size of the config
-#define SETUP_OFFS    (10*CONF_SIZE)    // Offset in flash for the config
-
-extern void initRoms(void);
-
 #define PRT_BUF_LEN 256
 extern volatile uint8_t prtBuf[PRT_BUF_LEN];
 extern volatile uint8_t wprt;
-
-extern void readFlash(int offs, uint8_t *data, uint16_t size);
-extern uint16_t *writeROMMAP(int p, int b, uint16_t *data);
-extern uint16_t *writePage(int addr, uint8_t *data, uint8_t pgs);
-extern uint16_t *writeConfig(Config_t *data, int set=0, bool bChk=true);
-extern bool readConfig(Config_t *data, int set);
-extern uint16_t *writeSetup(Setup_t *data);
-extern bool      readSetup(Setup_t *data);
 
 #ifdef USE_XF_MODULE
 #include "xfmem.h"
