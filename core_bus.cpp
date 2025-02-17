@@ -49,40 +49,12 @@ volatile bool g_do_cmd = 0;
 
 CBreakpoint brk;
 
-// Keep track of FI flags (0-13)
+// Keep track of FI flags (bitmask, bit0-bit13)
 volatile uint16_t carry_fi = 0;
 // When true - set PBSY in next bus cycle
 volatile bool bPBusy = false;
 // When true - clear PBSY in next bus cycle
 volatile bool bClrPBusy = false;
-
-// Indicate to set PBSY next time ...
-void _setFI_PBSY(void)
-{
-  bPBusy = true;
-}
-void _clrFI_PBSY(void)
-{
-  bClrPBusy = true;
-}
-
-inline uint16_t chkFI(int flag)
-{
-  return carry_fi & flag;
-}
-inline uint16_t getFI(void)
-{
-  if( bPBusy )
-    setFI(FI_PBSY);
-  else
-    clrFI(FI_PBSY);
-  if( bClrPBusy ) {
-    bPBusy = false;
-    bClrPBusy = false;
-  }
-  blinky.fi(&carry_fi);
-  return carry_fi & FI_MASK;
-}
 
 void power_on()
 {
@@ -194,7 +166,6 @@ void core1_main_3(void)
   static int bit_no = 0;        // Current bit-number in bus cycle
   static int bIsaEn = 0;        // True if ISA output is enabled
   static int isDataEn = 0;      // True if DATA output is enabled
-//  static int isFiEn = 0;        // True if FI output is enabled
   static uint64_t isa = 0LL;    // Current bit-pattern on the ISA bus
   static uint64_t bit = 0LL;    // Bit mask for current bit in cycle
   static uint64_t data56 = 0LL; // Current bit-pattern on DATA bus
@@ -296,11 +267,13 @@ void core1_main_3(void)
         dataFI = 0;
       } else {
         dataFI = getFI();
+        // Give Blinky opportunity to update the FI flags
+        blinky.fi(&dataFI);
       }
       // Clear for next cykle ...
       isa = data56 = 0LL;
       fiShift = 0;
-      carry_fi = 0;
+      clrFI();
       // Check if ISA should be active during T0 (peripherial carry)
       if( bT0Carry && !bIsaEn ) {
         gpio_put(P_ISA_DRV, 1);
@@ -482,10 +455,12 @@ void core1_main_3(void)
       cmd6 = cmd & 0x3F;
       // Extract register/address information from the instruction ...
       r = (cmd >> 6) & 0x0F;
-      // Save info about sync in logged data ..
       if( bIsSync ) {
+        // Save info about sync in logged data ..
         pBus->cmd |= CMD_SYNC;
+        // Check for special instructions ...
         switch( cmd ) {
+        // Keep track of the arithmetic mode
         case INST_SETHEX:
           isBase = ARITHM_HEX;
           cmd = 0;
@@ -495,6 +470,7 @@ void core1_main_3(void)
           cmd = 0;
           break;
         case INST_RAM_SLCT:
+          // Next time, data contains the selected RAM address
           // Fetch selected RAM in the next run ...
           bSelRam = true;
           // ... and reset any chip previously enabled ...
@@ -502,6 +478,7 @@ void core1_main_3(void)
           cmd = 0;
           break;
         case INST_PRPH_SLCT:
+          // Next time, data contains the selected peripheral address
           // Fetch selected peripheral from DATA in the next run ...
           bSelPa = true;
           blinky.select(false);

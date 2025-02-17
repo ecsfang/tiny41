@@ -303,13 +303,50 @@ public:
   }
 };
 
+// carry_fi is holding the 14 bits corresponding
+// to the flags in the FI bus signal
 extern volatile uint16_t carry_fi;
+// When true - set PBSY in next bus cycle
+extern volatile bool bPBusy;
+// When true - clear PBSY in next bus cycle
+extern volatile bool bClrPBusy;
 
+// Set a FI flag (set using a bitmask)
 inline void setFI(int flag) {
   carry_fi |= flag;
 }
+// Clear a FI flag (bitmask, default all flags)
 inline void clrFI(int flag = FI_MASK) {
   carry_fi &= ~flag;
+}
+// Check if a specified FI flag is set
+inline uint16_t chkFI(int flag)
+{
+  return carry_fi & flag;
+}
+// Indicate to set PBSY next time ...
+inline void _setFI_PBSY(void)
+{
+  bPBusy = true;
+}
+// Indicate to clear PBSY next time ...
+inline void _clrFI_PBSY(void)
+{
+  bClrPBusy = true;
+}
+// Get the value corresponding to all FI flags
+// to be set during the current bus-cycle
+inline uint16_t getFI(void)
+{
+  if( bPBusy )
+    setFI(FI_PBSY);
+  else
+    clrFI(FI_PBSY);
+  if( bClrPBusy ) {
+    bPBusy = false;
+    bClrPBusy = false;
+  }
+  return carry_fi & FI_MASK;
 }
 
 #define PRT_BUF_LEN 256
