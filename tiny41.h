@@ -18,6 +18,8 @@
 #define MEASURE_TIME
 #define LOG_FI          // If true - add FI flags to output log
 
+#define VOYAGER
+
 //#define USE_TIME_MODULE
 #define USE_XF_MODULE
 //#define DISABLE_DISPRINT
@@ -142,7 +144,11 @@
 
 
 #define NR_CHARS  12
+#ifdef VOYAGER
+#define NR_ANNUN  9
+#else
 #define NR_ANNUN  12
+#endif
 
 #define BUS_CYCLES 56
 #define LAST_CYCLE (BUS_CYCLES-1)

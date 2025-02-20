@@ -29,7 +29,7 @@
 
 // #define EMBED_RAM
 #define INST_MASK   (BIT_10-1)
-#define FIRST_PAGE  0x04
+#define FIRST_PAGE  0x00 //0x04
 #define PAGE(p)     (p>>12)
 #define ISA_SHIFT   44
 

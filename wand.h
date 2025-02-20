@@ -1,6 +1,8 @@
 #ifndef __WAND_H__
 #define __WAND_H__
 
+#include "pico/stdlib.h"
+
 extern void _clrFI_PBSY(void);
 extern void power_on();
 extern void _setFI_PBSY(void);

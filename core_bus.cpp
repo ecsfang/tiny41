@@ -40,6 +40,15 @@ volatile uint16_t  CTime::accuracy;  // 13 bits
 volatile uint16_t  CTime::status;    // 20 bits
 #endif//USE_TIME_MODULE
 
+volatile uint64_t gDisp9 = 0;
+volatile uint64_t gDisp10 = 0;
+volatile uint64_t _gDisp9 = 1L;
+volatile uint64_t _gDisp10 = 1L;
+volatile bool bUpdDisp9 = false;
+volatile bool bUpdDisp10 = false;
+volatile uint16_t gDispUpdate = 0;
+volatile uint16_t lDispUpd = 0;
+
 // Special command buffer from Tiny
 volatile char g_cmd[32];
 volatile int  g_pCmd = 0;
@@ -47,7 +56,32 @@ volatile int  g_num = 0;
 volatile int  g_ret = 0;
 volatile bool g_do_cmd = 0;
 
+volatile uint16_t voyAddr[4] = {
+  0x081, 0x103,
+  0x005, 0x102
+};
+
 CBreakpoint brk;
+
+uint8_t keyMap[0x100] = {
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+  0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+  0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+  0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+  0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+  0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
+  0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
+  0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+  0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F,
+  0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
+  0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF,
+  0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF,
+  0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
+  0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
+  0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
+  0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
+};
+void keyMapInit(void);
 
 // Keep track of FI flags (bitmask, bit0-bit13)
 volatile uint16_t carry_fi = 0;
@@ -166,6 +200,7 @@ void core1_main_3(void)
   static int bit_no = 0;        // Current bit-number in bus cycle
   static int bIsaEn = 0;        // True if ISA output is enabled
   static int isDataEn = 0;      // True if DATA output is enabled
+  static uint64_t tinyIsa = 0LL;// Current bit-pattern on the ISA bus
   static uint64_t isa = 0LL;    // Current bit-pattern on the ISA bus
   static uint64_t bit = 0LL;    // Bit mask for current bit in cycle
   static uint64_t data56 = 0LL; // Current bit-pattern on DATA bus
@@ -192,6 +227,11 @@ void core1_main_3(void)
   static bool bPullIsa = false;
   static uint16_t isBase = ARITHM_UKN;
   static CRamDev *pRamDev = NULL;
+  static CModule *voyager = modules.port(5);
+  static int key = 0;
+  static uint16_t vKey = 0;
+
+  keyMapInit();
 
   pBus = &bus[data_wr];
 
@@ -399,6 +439,10 @@ void core1_main_3(void)
       }
       break;
 
+    case 19:
+      key = keyMap[(data56>>12) & 0xFF];
+      break;
+
     case 29:
       // Got address. If the address is that of the embedded ROM then we
       // flag that we have to put an instruction on the bus later
@@ -414,6 +458,14 @@ void core1_main_3(void)
       }
       break;
 
+/*    case 31:
+      // Check if we should emulate any modules ...
+      if (modules.isInserted(4) && pBus->addr < 4) {
+        pBus->cmd = drive_isa = voyAddr[pBus->addr];
+        drive_isa_flag = 1;
+      }
+      break;
+*/
     case 42: // Enable ISA output in next loop (cycle 43)
       if( drive_isa_flag )
         output_isa = 1;
@@ -496,6 +548,10 @@ void core1_main_3(void)
           // Handle NPIC commands in next cykle
           bTiny = true;
           cmd = 0;
+          vKey = (*voyager)[(data56&0xFFF)+1];
+          //voyager = modules.at(0x4000);
+          //vKey = (*voyager)[key];
+          //tinyIsa = isa;
           break;
         case INST_ENBANK1:
         case INST_ENBANK2:
@@ -520,6 +576,17 @@ void core1_main_3(void)
       output_data = 0;
       data56 &= MASK_56_BIT;
 
+      if( bUpdDisp9 ) {
+        gDisp9 = data56;
+        bUpdDisp9 = false;
+        gDispUpdate++;
+      }
+      if( bUpdDisp10 ) {
+        gDisp10 = data56;
+        bUpdDisp10 = false;
+        gDispUpdate++;
+      }
+
       // Check for any pending writes
       if (pRamDev ) {
 	      pRamDev->write(&data56);
@@ -536,6 +603,8 @@ void core1_main_3(void)
           // - Memory module (not done yet)
           // - XMemory
           // - Blinky RAM
+          bUpdDisp9 = cmd == 0x268;
+          bUpdDisp10 = cmd == 0x2A8;
           if( !perph ) {
             if( pRamDev ) {
               // Update any RAM device (QUAD, XMEM etc)
@@ -592,10 +661,53 @@ void core1_main_3(void)
         }
         if( bTiny ) {
           // Handle any specific Tiny41 instructions
-#if 1
+#ifdef VOYAGER
+#define VOYAGER_PORT  0x5000
+          switch(cmd & 0x3FE) {
+            case 0x03A: // IR_RD 0
+              DATA_OUTPUT((VOYAGER_PORT<<12) | ((*voyager)[key]<<12));
+              break;
+            case 0x07A: // IR_RD 1
+              DATA_OUTPUT(VOYAGER_PORT | (*voyager)[data56&0xFFF]);
+              break;
+            case 0x0BA: // IR_RD 2
+              DATA_OUTPUT((VOYAGER_PORT<<12)| 0x3F0000 | ((data56<<4)&0xFFF0));
+              break;
+            case 0x0FA: // IR_RD 3
+              DATA_OUTPUT((data56 & 0xF0000000000LL)<<12 | vKey); //(*voyager)[data56&0xFFF+1]);
+              break;
+            case 0x13A: // IR_RD 4
+              DATA_OUTPUT((VOYAGER_PORT<<12) | 0x800000);
+              break;
+            case 0x17A: // IR_RD 5
+              DATA_OUTPUT((VOYAGER_PORT | 0x39) << 12);
+              break;
+/*
+            case 0b1100:
+              g_do_cmd = 1;
+              _setFI_PBSY();  // Indicate that we are busy!
+              break;
+            case 0b1000:
+              g_num = data56 & 0xFF; // Save command byte
+              break;
+            case 0b0100:
+              g_cmd[g_pCmd++] = data56 & 0xFF; // Save character
+              g_cmd[g_pCmd] = 0;
+              break;
+            case 0b0000:
+              g_pCmd = 0;           // Reset command
+              g_cmd[g_pCmd] = 0;
+              break;
+*/
+          }
+#endif
+#if 0
           switch(cmd & 0x3FE) {
             case 0x03A:
-              DATA_OUTPUT(g_ret);
+              {
+                int key = (*voyager)[(data56>>12) & 0x3FF]<<12;
+                DATA_OUTPUT(0x4000000LL | key);
+              }
               break;
             case 0b1100:
               g_do_cmd = 1;
@@ -613,7 +725,8 @@ void core1_main_3(void)
               g_cmd[g_pCmd] = 0;
               break;
           }
-#else
+#endif
+#if 0
           switch(cmd & 0b1110) {
             case NPIC_TINY_RAW_INIT:
               // Init raw file transfer...
@@ -760,6 +873,214 @@ void post_handling(uint16_t addr)
     }
     g_do_cmd = 0;
   }
+  if( lDispUpd < gDispUpdate ) {
+    if( gDisp9 != _gDisp9 || gDisp10 != _gDisp10) {
+      uint16_t ch[11];
+      uint16_t ann = 0;
+      ch[0]  = gDisp10 & 0x400000000000L ? '_' : ' ';
+      // Digit 1
+      ch[1]  = (gDisp10 >> 40) & 0x3F;
+      ch[1] |= (gDisp10 >> (47-6)) & 0x040;
+      ch[1] |= (gDisp10 >> (48-6)) & 0x180;
+      // Digit 2
+      ch[2]  = (gDisp10 >> 12) & 0x3F;
+      ch[2] |= (gDisp10 >> (51-6)) & 0x040;
+      ch[2] |= (gDisp10 >> (52-6)) & 0x180;
+      // Digit 3
+      ch[3]  = (gDisp10 >> 6) & 0x3F;
+      ch[3] |= (gDisp10 >> (55-6)) & 0x040;
+      ch[3] |= (gDisp10 >> (24-7)) & 0x180;
+      // Digit 4
+      ch[4]  = (gDisp10 >> 26) & 0x3F;
+      ch[4] |= (gDisp10 >> (19-6)) & 0x040;
+      ch[4] |= (gDisp10 >> (32-7)) & 0x180;
+      // Digit 5
+      ch[5]  = (gDisp10 >> 34) & 0x3F;
+      ch[5] |= (gDisp10 >> (21-6)) & 0x040;
+      ch[5] |= (gDisp10 >> (22-6)) & 0x180;
+      // Digit 6
+      ch[6]  = (gDisp9 >> 50) & 0x3F;
+      ch[6] |= (gDisp9 >> (7-6)) & 0x040;
+      ch[6] |= (gDisp9 >> (48-7)) & 0x180;
+      // Digit 7
+      ch[7]  = (gDisp9 >> 42) & 0x3F;
+      ch[7] |= (gDisp9 >> (9-6)) & 0x040;
+      ch[7] |= (gDisp9 >> (40-7)) & 0x180;
+      // Digit 8
+      ch[8]  = (gDisp9 >> 34) & 0x3F;
+      ch[8] |= (gDisp9 >> (11-6)) & 0x040;
+      ch[8] |= (gDisp9 >> (16-7)) & 0x180;
+      // Digit 9
+      ch[9]  = (gDisp9 >> 28) & 0x3F;
+      ch[9] |= (gDisp9 >> (15-6)) & 0x040;
+      ch[9] |= (gDisp9 >> (12-7)) & 0x180;
+      // Digit 10
+      ch[10] = (gDisp9 >> 22) & 0x3F;
+      ch[10] |= (gDisp9 >> (19-6)) & 0x040;
+      ch[10] |= (gDisp9 >> (20-6)) & 0x180;
+      int n = 0;
+      char pt;
+  //    for(int i=1; i<=10; i++) {
+  //      n += sprintf(cbuff+n, "   %d", i);
+  //    }
+      sprintf(cbuff+n, "\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      n = 0;
+      for(int i=1; i<=10; i++) {
+        n += sprintf(cbuff+n, "   %c", ch[i] & 0x08 ? '_' : ' ');
+      }
+      sprintf(cbuff+n, "\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      n = sprintf(cbuff, "%c", ch[0]);
+      for(int i=1; i<=10; i++) {
+        n += sprintf(cbuff+n, " %c", ch[i] & 0x04 ? '|' : ' ');
+        n += sprintf(cbuff+n,  "%c", ch[i] & 0x01 ? '_' : ' ');
+        n += sprintf(cbuff+n,  "%c", ch[i] & 0x02 ? '|' : ' ');
+      }
+      sprintf(cbuff+n, "\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      n = sprintf(cbuff, "  ");
+      for(int i=1; i<=10; i++) {
+        pt = ' ';
+        if( ch[i] & 0x100 ) pt = '.';
+        if( ch[i] & 0x80 ) pt = ',';
+        n += sprintf(cbuff+n, "%c", ch[i] & 0x10 ? '|' : ' ');
+        n += sprintf(cbuff+n, "%c", ch[i] & 0x40 ? '_' : ' ');
+        n += sprintf(cbuff+n, "%c%c", ch[i] & 0x20 ? '|' : ' ', pt);
+      }
+      //sprintf(cbuff+n, "\n\r%014llX %014llX\n\n\r", gDisp10, gDisp9);
+      sprintf(cbuff+n, "\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+/*
+           _   _       _   _   _   _   _   _
+    _   |  _|  _| |_| |_  |_    | |_| |_| | |
+        |,|_   _|   |, _| |_|   |,|_|  _| |_|.
+          USER  f g BEGIN  GRAD  D.MY  C  PRGM  
+*/
+
+      n = 0;
+      n += sprintf(cbuff+n, "      ");
+      n += sprintf(cbuff+n, "%.4s  ", (gDisp10  & (1LL << 50) ) ? "USER" : "" );
+      n += sprintf(cbuff+n, "%c ",    (gDisp10  & (1LL << 54) ) ? 'f' : ' ' );
+      n += sprintf(cbuff+n, "%c ",    (gDisp10  & (1LL << 18) ) ? 'g' : ' ' );
+      n += sprintf(cbuff+n, "%.5s  ", (gDisp10  & (1LL << 20) ) ? "BEGIN" : "" );
+      n += sprintf(cbuff+n, "%c",     (gDisp9   & (1LL <<  6) ) ? 'G' : ' ' );
+      n += sprintf(cbuff+n, "%.3s  ", (gDisp9   & (1LL <<  8) ) ? "RAD" : "" );
+      n += sprintf(cbuff+n, "%.4s  ", (gDisp9   & (1LL << 10) ) ? "D.MY" : "" );
+      n += sprintf(cbuff+n, "%c  ",   (gDisp9   & (1LL << 14) ) ? 'C' : ' ' );
+      n += sprintf(cbuff+n, "%.4s",   (gDisp9   & (1LL << 18) ) ? "PRGM" : "" );
+      sprintf(cbuff+n, "\n\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      //sprintf(cbuff, "\n\r%014llX %014llX\n\n\r", gDisp10, gDisp9);
+      //sprintf(cbuff, "\n\r");
+      //cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+      _gDisp10 = gDisp10;
+      _gDisp9 = gDisp9;
+
+      char lcd[32];
+
+      if( gDisp10  & (1LL << 50) ) ann |= 1<<8;
+      if( gDisp10  & (1LL << 54) ) ann |= 1<<7;
+      if( gDisp10  & (1LL << 18) ) ann |= 1<<6;
+      if( gDisp10  & (1LL << 20) ) ann |= 1<<5;
+      if( gDisp9   & (1LL <<  6) ) ann |= 1<<4;
+      if( gDisp9   & (1LL <<  8) ) ann |= 1<<3;
+      if( gDisp9   & (1LL << 10) ) ann |= 1<<2;
+      if( gDisp9   & (1LL << 14) ) ann |= 1<<1;
+      if( gDisp9   & (1LL << 18) ) ann |= 1<<0;
+
+      lcd[0] = gDisp10 & 0x400000000000L ? '-' : ' ';
+      n = 1;
+      int p = 0;
+      for(int i=1; i<=10; i++) {
+        p += sprintf(cbuff+p, " %02X", ch[i]);
+        switch( ch[i] & 0x7F ) {
+        case 0x7E: lcd[n++] = '0'; break;
+        case 0x22: lcd[n++] = '1'; break;
+        case 0x5B: lcd[n++] = '2'; break;
+        case 0x6B: lcd[n++] = '3'; break;
+        case 0x27: lcd[n++] = '4'; break;
+        case 0x6D: lcd[n++] = '5'; break;
+        case 0x7D: lcd[n++] = '6'; break;
+        case 0x2A: lcd[n++] = '7'; break;
+        case 0x7F: lcd[n++] = '8'; break;
+        case 0x6F: lcd[n++] = '9'; break;
+        case 0x0C: lcd[n++] = 'r'; break; // running
+        case 0x11: lcd[n++] = 'r'; break; // Error
+        case 0x07: lcd[n++] = 'u'; break;
+        case 0x02: lcd[n++] = 'i'; break;
+        case 0x0E: lcd[n++] = 'n'; break;
+        case 0x71: lcd[n++] = 'o'; break;
+        case 0x1F: lcd[n++] = 'P'; break;
+        case 0x01: lcd[n++] = '-'; break;
+        case 0x5D: lcd[n++] = 'E'; break;
+        case 0x00: lcd[n++] = ' '; break;
+        }
+        if( ch[i] & 0x80 )  lcd[n++] = ',';
+        else if( ch[i] & 0x100 ) lcd[n++] = '.';
+      }
+      while(n < 30)
+        lcd[n++] = ' ';
+      lcd[n] = 0;
+      bool bp[12];
+      memset(bp, 1, 12);
+      Write41String(disp41.buf(), 5, LCD_ROW, lcd, bp);
+      // Turn on all annunciators ...
+      UpdateAnnun(ann, false);
+  
+      disp41.rend(REND_LCD);
+      disp41.render();
+      sprintf(cbuff+p, "\n\n\r");
+      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+    }
+    lDispUpd++;
+  }
+}
+
+void keyMapInit() {
+  keyMap[0x70] = 0x13; // sqrt
+  keyMap[0xC0] = 0x33; // e^x
+  keyMap[0x80] = 0x73; // 10^x
+  keyMap[0xC6] = 0xc3; // y^x  (USER)
+  keyMap[0x30] = 0x83; // 1/x
+  keyMap[0x73] = 0x82; // CHS
+  keyMap[0x34] = 0xc2; // 7
+  keyMap[0x74] = 0x72; // 8
+  keyMap[0x84] = 0x32; // 9
+  keyMap[0x17] = 0x12; // divide
+
+  keyMap[0xC4] = 0x10; // %   (ALPHA)
+  keyMap[0x32] = 0x30; // GTO (XEQ)
+  keyMap[0x71] = 0x70; // SIN
+  keyMap[0x81] = 0xc0; // COS
+  keyMap[0xC1] = 0x80; // TAN
+  keyMap[0x83] = 0x87; // EEX
+  keyMap[0x35] = 0xC7; // 4
+  keyMap[0x75] = 0x77; // 5
+  keyMap[0x85] = 0x37; // 6
+  keyMap[0x16] = 0x17; // multiply
+  
+  keyMap[0x87] = 0x11; // R/S
+  keyMap[0xC2] = 0x31; // SST
+  keyMap[0x31] = 0x71; // Rdn
+  keyMap[0x11] = 0xc1; // x<>y
+  keyMap[0xC3] = 0x81; // CLx
+  keyMap[0x13] = 0x84; // ENTER
+  keyMap[0x36] = 0xc4; // 1
+  keyMap[0x76] = 0x74; // 2
+  keyMap[0x86] = 0x34; // 3
+  keyMap[0x14] = 0x14; // subtract
+  
+  keyMap[0x18] = 0x18; // ON
+  keyMap[0x12] = 0x38; // f
+  keyMap[0xC5] = 0x78; // P/R
+  keyMap[0x72] = 0xc8; // STO
+  keyMap[0x82] = 0x88; // RCL
+  //keyMap[0x] = 0x17; // n/a
+  keyMap[0x37] = 0xc5; // 0
+  keyMap[0x77] = 0x75; // decimal
+  keyMap[0x10] = 0x35; // Sigma+
+  keyMap[0x15] = 0x15; // add
 }
 
 #ifdef DUMP_CYCLE
@@ -889,7 +1210,7 @@ void dump_dregs(void)
   dtext[j] = '\0';
 
 #if CF_DISPLAY_LCD
-  UpdateLCD(dtext, bPunct, display_on);
+  //UpdateLCD(dtext, bPunct, display_on);
 #endif
 }
 
@@ -1121,7 +1442,9 @@ void handle_bus(volatile Bus_t *pBus)
 #if CF_DBG_DISP_INST
     printf("\n\r%s %03llX", "WRTEN", data56 & 0xFFF);
 #endif
+#ifndef VOYAGER
     UpdateAnnun((uint16_t)(data56 & 0xFFF), true);
+#endif
     break;
 
   case INST_SRLDA:  // All ...50 instructions

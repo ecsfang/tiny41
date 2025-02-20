@@ -27,8 +27,8 @@
 #ifdef DO_OVERCLOCK
 // #define OVERCLOCK 135000
 // #define OVERCLOCK 180000
- #define OVERCLOCK 200000
-//#define OVERCLOCK 270000        // 270 MHz
+// #define OVERCLOCK 200000
+#define OVERCLOCK 270000        // 270 MHz
 // #define OVERCLOCK 360000
 #endif
 
@@ -214,10 +214,17 @@ int main()
     disp41.rend(REND_ALL);
     disp41.render();
 
+#ifdef VOYAGER
+char *text[] = {
+    (char *)" \x2c Voyager \x2e",
+    (char *)"    HP-10C"
+};
+#else
     char *text[] = {
         (char *)" \x2c Tiny41 \x2e",
         (char *)"\x5e 3.1415"
     };
+#endif
     bool bp[12];
     memset(bp, 0, 12);
 
@@ -453,9 +460,22 @@ void printLCD(const char *txt, int x, int row)
 
 typedef struct
 {
-    char ann[4];
+    char ann[6];
 } Annu_t;
 
+#ifdef VOYAGER
+Annu_t annu[NR_ANNUN] = {
+    {"U " },    // Battery
+    {"f "},    // USer
+    {"g "  },    // G in Grad
+    {"B " },    // Rad
+    {"G"},    // SHift
+    {"RD "  },    // Flag 0-4
+    {"DMY "  },
+    {"C "  },
+    {"PM"  }
+};
+#else
 Annu_t annu[NR_ANNUN] = {
     {"B " },    // Battery
     {"US "},    // USer
@@ -470,6 +490,7 @@ Annu_t annu[NR_ANNUN] = {
     {"P " },    // Prgm
     {"AL" }     // ALpha
 };
+#endif
 
 void UpdateAnnun(uint16_t ann, bool nl)
 {
