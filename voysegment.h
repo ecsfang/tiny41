@@ -148,8 +148,11 @@ public:
         uint64_t p = m_r[(*pDigits)[d].reg];
         return p & (1LL << (*pDigits)[d].bit[seg]) ? true : false;
     }
-    bool sign(void) {
+    bool hasSign(void) {
         return segment(-1, SEG_g);
+    }
+    char getSign(void) {
+        return hasSign()?'-':' ';
     }
     // Get decimal point for digit (0-9)
     char point(int d) {
@@ -157,9 +160,61 @@ public:
         if( segment(d, SEG_h) ) return '.';
         return ' ';
     }
+    bool hasPoint(int d) {
+        return segment(d, SEG_i) || segment(d, SEG_h);
+    }
     // Get annunciator (segment 'j' in each digit)
     // Return true if annunciator is on
     bool annun(int n) {
         return segment(n+1, SEG_j);
+    }
+    int getAnnun(void) {
+        int ann = 0;
+        if( annun(ANN_USER) )  ann |= 1<<8;
+        if( annun(ANN_F) )     ann |= 1<<7;
+        if( annun(ANN_G) )     ann |= 1<<6;
+        if( annun(ANN_BEGIN) ) ann |= 1<<5;
+        if( annun(ANN_GRAD) )  ann |= 1<<4;
+        if( annun(ANN_RAD) )   ann |= 1<<3;
+        if( annun(ANN_DMY) )   ann |= 1<<2;
+        if( annun(ANN_C) )     ann |= 1<<1;
+        if( annun(ANN_PRGM) )  ann |= 1<<0;
+        return ann;
+    }
+    int getSegments(int d) {
+        int c = 0;
+        if( segment(d, SEG_g) ) c |= 0b000000001;
+        if( segment(d, SEG_b) ) c |= 0b000000010;
+        if( segment(d, SEG_f) ) c |= 0b000000100;
+        if( segment(d, SEG_a) ) c |= 0b000001000;
+        if( segment(d, SEG_e) ) c |= 0b000010000;
+        if( segment(d, SEG_c) ) c |= 0b000100000;
+        if( segment(d, SEG_d) ) c |= 0b001000000;
+        return c;
+    }
+    char getChar(int d) {
+        switch( getSegments(d)) {
+            case 0x7E: return '0';
+            case 0x22: return '1';
+            case 0x5B: return '2';
+            case 0x6B: return '3';
+            case 0x27: return '4';
+            case 0x6D: return '5';
+            case 0x7D: return '6';
+            case 0x2A: return '7';
+            case 0x7F: return '8';
+            case 0x6F: return '9';
+            case 0x0C: return 'r'; // running
+            case 0x11: return 'r'; // Error
+            case 0x07: return 'u';
+            case 0x02: return 'i';
+            case 0x0E: return 'n';
+            case 0x71: return 'o';
+            case 0x1F: return 'P';
+            case 0x01: return '-';
+            case 0x5D: return 'E';
+            case 0x00: return ' ';
+        }
+        return '?';
     }
 };

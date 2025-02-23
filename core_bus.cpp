@@ -29,6 +29,7 @@
 //#define RESET_RAM
 
 extern CDisplay    disp41;
+bool display_on = false;
 
 CBlinky blinky;
 volatile uint64_t  CBlinky::reg[8];    // First 8 registers
@@ -879,8 +880,7 @@ void post_handling(uint16_t addr)
     if( gDisp9 != _gDisp9 || gDisp10 != _gDisp10) {
       CLCD *pLcd = new CLCD(gDisp9, gDisp10, true);
       uint16_t ch[10], sign;
-      uint16_t ann = 0;
-      sign = pLcd->sign() ? '_' : ' ';
+      sign = pLcd->hasSign() ? '_' : ' ';
       int n = 0;
       char pt;
       sprintf(cbuff, "\n\r");
@@ -936,46 +936,15 @@ void post_handling(uint16_t addr)
 
       char lcd[32];
 
-      if( pLcd->annun(ANN_USER) )  ann |= 1<<8;
-      if( pLcd->annun(ANN_F) )     ann |= 1<<7;
-      if( pLcd->annun(ANN_G) )     ann |= 1<<6;
-      if( pLcd->annun(ANN_BEGIN) ) ann |= 1<<5;
-      if( pLcd->annun(ANN_GRAD) )  ann |= 1<<4;
-      if( pLcd->annun(ANN_RAD) )   ann |= 1<<3;
-      if( pLcd->annun(ANN_DMY) )   ann |= 1<<2;
-      if( pLcd->annun(ANN_C) )     ann |= 1<<1;
-      if( pLcd->annun(ANN_PRGM) )  ann |= 1<<0;
-
       // Get the sign of the mantissa
-      lcd[0] = gDisp10 & 0x400000000000L ? '-' : ' ';
+      lcd[0] = pLcd->getSign();
       n = 1;
       int p = 0;
       for(int i=0; i<10; i++) {
         p += sprintf(cbuff+p, " %02X", ch[i]);
-        switch( ch[i] & 0x7F ) {
-        case 0x7E: lcd[n++] = '0'; break;
-        case 0x22: lcd[n++] = '1'; break;
-        case 0x5B: lcd[n++] = '2'; break;
-        case 0x6B: lcd[n++] = '3'; break;
-        case 0x27: lcd[n++] = '4'; break;
-        case 0x6D: lcd[n++] = '5'; break;
-        case 0x7D: lcd[n++] = '6'; break;
-        case 0x2A: lcd[n++] = '7'; break;
-        case 0x7F: lcd[n++] = '8'; break;
-        case 0x6F: lcd[n++] = '9'; break;
-        case 0x0C: lcd[n++] = 'r'; break; // running
-        case 0x11: lcd[n++] = 'r'; break; // Error
-        case 0x07: lcd[n++] = 'u'; break;
-        case 0x02: lcd[n++] = 'i'; break;
-        case 0x0E: lcd[n++] = 'n'; break;
-        case 0x71: lcd[n++] = 'o'; break;
-        case 0x1F: lcd[n++] = 'P'; break;
-        case 0x01: lcd[n++] = '-'; break;
-        case 0x5D: lcd[n++] = 'E'; break;
-        case 0x00: lcd[n++] = ' '; break;
-        }
-        if( ch[i] & 0x80 )  lcd[n++] = ',';
-        else if( ch[i] & 0x100 ) lcd[n++] = '.';
+        lcd[n++] = pLcd->getChar(i);
+        if( pLcd->hasPoint(i) )
+          lcd[n++] = pLcd->point(i);
       }
       while(n < 30)
         lcd[n++] = ' ';
@@ -983,141 +952,13 @@ void post_handling(uint16_t addr)
       bool bp[12];
       memset(bp, 1, 12);
       Write41String(disp41.buf(), 5, LCD_ROW, lcd, bp);
-      // Turn on all annunciators ...
-      UpdateAnnun(ann, false);
+      // Turn on annunciators ...
+      UpdateAnnun(pLcd->getAnnun(), false);
   
       disp41.rend(REND_LCD);
       disp41.render();
-      sprintf(cbuff+p, "\n\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
     }
     lDispUpd++;
-#if 0    
-    if( gDisp9 != _gDisp9 || gDisp10 != _gDisp10) {
-      uint16_t ch[10], sign;
-      uint16_t ann = 0;
-      sign = gDisp10 & 0x400000000000L ? '_' : ' ';
-      for(int i=0;i<10;i++) {
-        // Get info about digit segments
-        ch[i]  = (gDisp10 >> (hp10seg[i][0]-0)) & SEG_MASK1;
-        ch[i] |= (gDisp10 >> (hp10seg[i][1]-6)) & SEG_MASK2;
-        ch[i] |= (gDisp10 >> (hp10seg[i][2]-6)) & SEG_MASK3;
-      }
-      int n = 0;
-      char pt;
-      sprintf(cbuff+n, "\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      n = 0;
-      for(int i=0; i<10; i++) {
-        n += sprintf(cbuff+n, "   %c", ch[i] & SEG_a ? '_' : ' ');
-      }
-      sprintf(cbuff+n, "\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      n = sprintf(cbuff, "%c", sign);
-      for(int i=0; i<10; i++) {
-        n += sprintf(cbuff+n, " %c", ch[i] & SEG_f ? '|' : ' ');
-        n += sprintf(cbuff+n,  "%c", ch[i] & SEG_g ? '_' : ' ');
-        n += sprintf(cbuff+n,  "%c", ch[i] & SEG_b ? '|' : ' ');
-      }
-      sprintf(cbuff+n, "\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      n = sprintf(cbuff, "  ");
-      for(int i=0; i<10; i++) {
-        pt = ' ';
-        if( ch[i] & SEG_h ) pt = '.';
-        if( ch[i] & SEG_i ) pt = ',';
-        n += sprintf(cbuff+n, "%c",   ch[i] & SEG_e ? '|' : ' ');
-        n += sprintf(cbuff+n, "%c",   ch[i] & SEG_d ? '_' : ' ');
-        n += sprintf(cbuff+n, "%c%c", ch[i] & SEG_c ? '|' : ' ', pt);
-      }
-      //sprintf(cbuff+n, "\n\r%014llX %014llX\n\n\r", gDisp10, gDisp9);
-      sprintf(cbuff+n, "\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-/*
-           _   _       _   _   _   _   _   _
-    _   |  _|  _| |_| |_  |_    | |_| |_| | |
-        |,|_   _|   |, _| |_|   |,|_|  _| |_|.
-          USER  f g BEGIN  GRAD  D.MY  C  PRGM  
-*/
-
-      n = 0;
-      n += sprintf(cbuff+n, "      ");
-      n += sprintf(cbuff+n, "%.4s  ", (gDisp10  & (1LL << 50) ) ? "USER" : "" );
-      n += sprintf(cbuff+n, "%c ",    (gDisp10  & (1LL << 54) ) ? 'f' : ' ' );
-      n += sprintf(cbuff+n, "%c ",    (gDisp10  & (1LL << 18) ) ? 'g' : ' ' );
-      n += sprintf(cbuff+n, "%.5s  ", (gDisp10  & (1LL << 20) ) ? "BEGIN" : "" );
-      n += sprintf(cbuff+n, "%c",     (gDisp9   & (1LL <<  6) ) ? 'G' : ' ' );
-      n += sprintf(cbuff+n, "%.3s  ", (gDisp9   & (1LL <<  8) ) ? "RAD" : "" );
-      n += sprintf(cbuff+n, "%.4s  ", (gDisp9   & (1LL << 10) ) ? "D.MY" : "" );
-      n += sprintf(cbuff+n, "%c  ",   (gDisp9   & (1LL << 14) ) ? 'C' : ' ' );
-      n += sprintf(cbuff+n, "%.4s",   (gDisp9   & (1LL << 18) ) ? "PRGM" : "" );
-      sprintf(cbuff+n, "\n\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      //sprintf(cbuff, "\n\r%014llX %014llX\n\n\r", gDisp10, gDisp9);
-      //sprintf(cbuff, "\n\r");
-      //cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-      _gDisp10 = gDisp10;
-      _gDisp9 = gDisp9;
-
-      char lcd[32];
-
-      if( gDisp10  & (1LL << 50) ) ann |= 1<<8;
-      if( gDisp10  & (1LL << 54) ) ann |= 1<<7;
-      if( gDisp10  & (1LL << 18) ) ann |= 1<<6;
-      if( gDisp10  & (1LL << 20) ) ann |= 1<<5;
-      if( gDisp9   & (1LL <<  6) ) ann |= 1<<4;
-      if( gDisp9   & (1LL <<  8) ) ann |= 1<<3;
-      if( gDisp9   & (1LL << 10) ) ann |= 1<<2;
-      if( gDisp9   & (1LL << 14) ) ann |= 1<<1;
-      if( gDisp9   & (1LL << 18) ) ann |= 1<<0;
-
-      // Get the sign of the mantissa
-      lcd[0] = gDisp10 & 0x400000000000L ? '-' : ' ';
-      n = 1;
-      int p = 0;
-      for(int i=0; i<10; i++) {
-        p += sprintf(cbuff+p, " %02X", ch[i]);
-        switch( ch[i] & 0x7F ) {
-        case 0x7E: lcd[n++] = '0'; break;
-        case 0x22: lcd[n++] = '1'; break;
-        case 0x5B: lcd[n++] = '2'; break;
-        case 0x6B: lcd[n++] = '3'; break;
-        case 0x27: lcd[n++] = '4'; break;
-        case 0x6D: lcd[n++] = '5'; break;
-        case 0x7D: lcd[n++] = '6'; break;
-        case 0x2A: lcd[n++] = '7'; break;
-        case 0x7F: lcd[n++] = '8'; break;
-        case 0x6F: lcd[n++] = '9'; break;
-        case 0x0C: lcd[n++] = 'r'; break; // running
-        case 0x11: lcd[n++] = 'r'; break; // Error
-        case 0x07: lcd[n++] = 'u'; break;
-        case 0x02: lcd[n++] = 'i'; break;
-        case 0x0E: lcd[n++] = 'n'; break;
-        case 0x71: lcd[n++] = 'o'; break;
-        case 0x1F: lcd[n++] = 'P'; break;
-        case 0x01: lcd[n++] = '-'; break;
-        case 0x5D: lcd[n++] = 'E'; break;
-        case 0x00: lcd[n++] = ' '; break;
-        }
-        if( ch[i] & 0x80 )  lcd[n++] = ',';
-        else if( ch[i] & 0x100 ) lcd[n++] = '.';
-      }
-      while(n < 30)
-        lcd[n++] = ' ';
-      lcd[n] = 0;
-      bool bp[12];
-      memset(bp, 1, 12);
-      Write41String(disp41.buf(), 5, LCD_ROW, lcd, bp);
-      // Turn on all annunciators ...
-      UpdateAnnun(ann, false);
-  
-      disp41.rend(REND_LCD);
-      disp41.render();
-      sprintf(cbuff+p, "\n\n\r");
-      cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
-    }
-    lDispUpd++;
-#endif
   }
 }
 
@@ -1247,7 +1088,6 @@ void process_bus(void)
 }
 
 uint64_t dreg_a = 0, dreg_b = 0, dreg_c = 0;
-bool display_on = false;
 
 void dump_dregs(void)
 {
