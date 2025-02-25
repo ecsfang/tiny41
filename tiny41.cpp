@@ -286,6 +286,8 @@ char *text[] = {
     IGNORE_LOOP_COND(0xA20B, 0xA210);
     // Ignore key in Zenrom ...
     IGNORE_LOOP_COND(0xA8F0, 0xA8F8);
+    // Ignore key in HP10C ...
+    IGNORE_LOOP_COND(0x5729, 0x572C);
     // Ignore key
     IGNORE_LOOP(0x009A);
     // FOR DEBOUNCE (DRSY30)

@@ -10,3 +10,4 @@ $ cmake .. -DPICO_BOARD=pico2
 $ make
 $ cp tiny41.uf2 /media/thomas/RPI-RP2
 $ cp tiny41.uf2 /media/sefangeth/RP2350/
+

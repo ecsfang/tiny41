@@ -949,8 +949,8 @@ void post_handling(uint16_t addr)
       while(n < 30)
         lcd[n++] = ' ';
       lcd[n] = 0;
-      bool bp[12];
-      memset(bp, 1, 12);
+      bool bp[24];
+      memset(bp, 1, 24);
       Write41String(disp41.buf(), 5, LCD_ROW, lcd, bp);
       // Turn on annunciators ...
       UpdateAnnun(pLcd->getAnnun(), false);
