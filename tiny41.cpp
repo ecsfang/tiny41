@@ -46,6 +46,7 @@ void bus_init(void)
     INIT_PIN(P_CLK1, GPIO_IN, 0);
     INIT_PIN(P_CLK2, GPIO_IN, 0);
     INIT_PIN(P_SYNC, GPIO_IN, 0);
+    gpio_pull_up(P_SYNC);
     INIT_PIN(P_ISA, GPIO_IN, 0);
     INIT_PIN(P_DATA, GPIO_IN, 0);
     // Init the ISA driver ...

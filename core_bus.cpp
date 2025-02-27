@@ -51,6 +51,7 @@ volatile bool bUpdDisp9 = false;
 volatile bool bUpdDisp10 = false;
 volatile uint16_t gDispUpdate = 0;
 volatile uint16_t lDispUpd = 0;
+volatile int vModel;
 
 // Special command buffer from Tiny
 volatile char g_cmd[32];
@@ -233,6 +234,7 @@ void core1_main_3(void)
   static CModule *voyager = modules.port(5);
   static int key = 0;
   static uint16_t vKey = 0;
+  static uint16_t vOffs = 0;
 
   keyMapInit();
 
@@ -487,6 +489,7 @@ void core1_main_3(void)
       } else {
         clrFI(FI_WNDB);
       }
+      vOffs = data56&0xFFF;
       break;
 
     case LAST_CYCLE-1:
@@ -551,10 +554,8 @@ void core1_main_3(void)
           // Handle NPIC commands in next cykle
           bTiny = true;
           cmd = 0;
-          vKey = (*voyager)[(data56&0xFFF)+1];
-          //voyager = modules.at(0x4000);
-          //vKey = (*voyager)[key];
-          //tinyIsa = isa;
+          vKey = (*voyager)[vOffs+1];
+          vModel = (*voyager)[0];
           break;
         case INST_ENBANK1:
         case INST_ENBANK2:
@@ -665,43 +666,35 @@ void core1_main_3(void)
         if( bTiny ) {
           // Handle any specific Tiny41 instructions
 #ifdef VOYAGER
+#define IR_RD(n)  (n<<6)|0x3A
+#define VTABLE_1  ((VOYAGER_PORT<<12)| 0x3F0000)
+#define VTABLE_2  ((VOYAGER_PORT<<12)| 0x3E0000)
 #define VOYAGER_PORT  0x5000
           switch(cmd & 0x3FE) {
-            case 0x03A: // IR_RD 0
-              DATA_OUTPUT((VOYAGER_PORT<<12) | ((*voyager)[key]<<12));
+            case IR_RD(0):  // Get key from C[M] then Return 00000005kkk000
+              DATA_OUTPUT( (VOYAGER_PORT | (*voyager)[key]) << 12 );
               break;
-            case 0x07A: // IR_RD 1
-              DATA_OUTPUT(VOYAGER_PORT | (*voyager)[data56&0xFFF]);
+            case IR_RD(1):  // Get C[X] then Return 00000000005nnn
+              DATA_OUTPUT(VOYAGER_PORT | (*voyager)[vOffs]); //data56&0xFFF]);
               break;
-            case 0x0BA: // IR_RD 2
-              DATA_OUTPUT((VOYAGER_PORT<<12)| 0x3F0000 | ((data56<<4)&0xFFF0));
+            case IR_RD(2):  // Get C[X] then Return 000000053Fn..0
+              DATA_OUTPUT( VTABLE_1 | (vOffs<<4));
               break;
-            case 0x0FA: // IR_RD 3
+            case IR_RD(6):  // Get C[X] then Return 000000053En..0
+              DATA_OUTPUT( VTABLE_2 | (vOffs<<4));
+              break;
+            case IR_RD(3):  // Get C[X]+1 then Return S0000000000kkk
               DATA_OUTPUT((data56 & 0xF0000000000LL)<<12 | vKey); //(*voyager)[data56&0xFFF+1]);
               break;
-            case 0x13A: // IR_RD 4
+            case IR_RD(4):  // Return 00000005800000
               DATA_OUTPUT((VOYAGER_PORT<<12) | 0x800000);
               break;
-            case 0x17A: // IR_RD 5
-              DATA_OUTPUT((VOYAGER_PORT | 0x39) << 12);
+            case IR_RD(5):  // Return 00000005039000 or 00000005089000
+              DATA_OUTPUT((VOYAGER_PORT | (vModel == 0x107) ? 0x39 : 0x89) << 12);
               break;
-/*
-            case 0b1100:
-              g_do_cmd = 1;
-              _setFI_PBSY();  // Indicate that we are busy!
+            case IR_RD(7):  // Return 00000000kkkiii
+              DATA_OUTPUT( ((*voyager)[vOffs+1] << 12) | (*voyager)[vOffs] );
               break;
-            case 0b1000:
-              g_num = data56 & 0xFF; // Save command byte
-              break;
-            case 0b0100:
-              g_cmd[g_pCmd++] = data56 & 0xFF; // Save character
-              g_cmd[g_pCmd] = 0;
-              break;
-            case 0b0000:
-              g_pCmd = 0;           // Reset command
-              g_cmd[g_pCmd] = 0;
-              break;
-*/
           }
 #endif
 #if 0
@@ -878,7 +871,7 @@ void post_handling(uint16_t addr)
   }
   if( lDispUpd < gDispUpdate ) {
     if( gDisp9 != _gDisp9 || gDisp10 != _gDisp10) {
-      CLCD *pLcd = new CLCD(gDisp9, gDisp10, true);
+      CLCD *pLcd = new CLCD(gDisp9, gDisp10, vModel);
       uint16_t ch[10], sign;
       sign = pLcd->hasSign() ? '_' : ' ';
       int n = 0;

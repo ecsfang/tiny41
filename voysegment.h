@@ -136,10 +136,10 @@ class CLCD {
     const AllDigits_t *pDigits;
     uint64_t m_r[2];
 public:
-    CLCD(uint64_t r0, uint64_t r1, bool b10C=false) {
+    CLCD(uint64_t r0, uint64_t r1, int vMod) {
+        pDigits = (vMod == 0x107) ? &_hp10seg : &_hp1Xseg;
         m_r[0] = r0;
         m_r[1] = r1;
-        pDigits = b10C ? &_hp10seg : &_hp1Xseg;
     }
     // Get segment for given digit (0-9)
     // Return true if segment is on
