@@ -85,7 +85,7 @@ uint8_t keyMap[0x100] = {
   0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
   0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
 };
-void keyMapInit(void);
+void keyMapInit(int mod);
 
 // Keep track of FI flags (bitmask, bit0-bit13)
 volatile uint16_t carry_fi = 0;
@@ -236,7 +236,7 @@ void core1_main_3(void)
   static uint16_t vKey = 0;
   static uint16_t vOffs = 0;
 
-  keyMapInit();
+  keyMapInit(16);
 
   pBus = &bus[data_wr];
 
@@ -669,31 +669,35 @@ void core1_main_3(void)
 #define IR_RD(n)  (n<<6)|0x3A
 #define VTABLE_1  ((VOYAGER_PORT<<12)| 0x3F0000)
 #define VTABLE_2  ((VOYAGER_PORT<<12)| 0x3E0000)
+#define CMD16_TABLE (VOYAGER_PORT | 0xC00)
 #define VOYAGER_PORT  0x5000
           switch(cmd & 0x3FE) {
             case IR_RD(0):  // Get key from C[M] then Return 00000005kkk000
               DATA_OUTPUT( (VOYAGER_PORT | (*voyager)[key]) << 12 );
               break;
             case IR_RD(1):  // Get C[X] then Return 00000000005nnn
-              DATA_OUTPUT(VOYAGER_PORT | (*voyager)[vOffs]); //data56&0xFFF]);
+              DATA_OUTPUT(VOYAGER_PORT | (*voyager)[vOffs]);
               break;
             case IR_RD(2):  // Get C[X] then Return 000000053Fn..0
               DATA_OUTPUT( VTABLE_1 | (vOffs<<4));
               break;
-            case IR_RD(6):  // Get C[X] then Return 000000053En..0
-              DATA_OUTPUT( VTABLE_2 | (vOffs<<4));
-              break;
             case IR_RD(3):  // Get C[X]+1 then Return S0000000000kkk
-              DATA_OUTPUT((data56 & 0xF0000000000LL)<<12 | vKey); //(*voyager)[data56&0xFFF+1]);
+              DATA_OUTPUT((data56 & 0xF0000000000LL)<<12 | vKey);
               break;
             case IR_RD(4):  // Return 00000005800000
               DATA_OUTPUT((VOYAGER_PORT<<12) | 0x800000);
               break;
             case IR_RD(5):  // Return 00000005039000 or 00000005089000
-              DATA_OUTPUT((VOYAGER_PORT | (vModel == 0x107) ? 0x39 : 0x89) << 12);
+              DATA_OUTPUT((VOYAGER_PORT | ((vModel == 0x107) ? 0x39 : 0x89)) << 12);
+              break;
+            case IR_RD(6):  // Get C[X] then Return 000000053En..0
+              DATA_OUTPUT( VTABLE_2 | (vOffs<<4));
               break;
             case IR_RD(7):  // Return 00000000kkkiii
               DATA_OUTPUT( ((*voyager)[vOffs+1] << 12) | (*voyager)[vOffs] );
+              break;
+            case IR_RD(8):  // Return 00000005Cxx000
+              DATA_OUTPUT( (CMD16_TABLE + vOffs) << 12 );
               break;
           }
 #endif
@@ -909,9 +913,9 @@ void post_handling(uint16_t addr)
 */
 
       n = 0;
-      n += sprintf(cbuff+n, "      ");
+      n += sprintf(cbuff+n, "     ");
       n += sprintf(cbuff+n, "%.4s  ", pLcd->annun(ANN_USER)  ? "USER" : "" );
-      n += sprintf(cbuff+n, "%c ",    pLcd->annun(ANN_F)     ? 'f' : ' ' );
+      n += sprintf(cbuff+n, "%c  ",   pLcd->annun(ANN_F)     ? 'f' : ' ' );
       n += sprintf(cbuff+n, "%c ",    pLcd->annun(ANN_G)     ? 'g' : ' ' );
       n += sprintf(cbuff+n, "%.5s  ", pLcd->annun(ANN_BEGIN) ? "BEGIN" : "" );
       n += sprintf(cbuff+n, "%c",     pLcd->annun(ANN_GRAD)  ? 'G' : ' ' );
@@ -955,7 +959,7 @@ void post_handling(uint16_t addr)
   }
 }
 
-void keyMapInit() {
+void keyMap10Init(void) {
   keyMap[0x70] = 0x13; // sqrt
   keyMap[0xC0] = 0x33; // e^x
   keyMap[0x80] = 0x73; // 10^x
@@ -999,6 +1003,63 @@ void keyMapInit() {
   keyMap[0x77] = 0x75; // decimal
   keyMap[0x10] = 0x35; // Sigma+
   keyMap[0x15] = 0x15; // add
+}
+
+void keyMap16Init(void) {
+  keyMap[0x10] = 0x13; // A
+  keyMap[0x30] = 0x33; // B
+  keyMap[0x70] = 0x73; // C
+  keyMap[0x80] = 0xc3; // D
+  keyMap[0xC0] = 0x83; // E
+  keyMap[0x11] = 0x82; // F
+  keyMap[0x34] = 0xc2; // 7
+  keyMap[0x74] = 0x72; // 8
+  keyMap[0x84] = 0x32; // 9
+  keyMap[0x17] = 0x12; // divide
+
+  keyMap[0x32] = 0x10; // GSB
+  keyMap[0xC5] = 0x30; // GTO
+  keyMap[0x31] = 0x70; // HEX
+  keyMap[0x71] = 0xc0; // DEC
+  keyMap[0x81] = 0x80; // OCT
+  keyMap[0xC1] = 0x87; // BIN
+  keyMap[0x35] = 0xC7; // 4
+  keyMap[0x75] = 0x77; // 5
+  keyMap[0x85] = 0x37; // 6
+  keyMap[0x16] = 0x17; // multiply
+  
+  keyMap[0x87] = 0x11; // R/S
+  keyMap[0xC2] = 0x31; // SST
+  keyMap[0x73] = 0x71; // Rdn
+  keyMap[0x83] = 0xc1; // x<>y
+  keyMap[0xC3] = 0x81; // BSP
+  keyMap[0x13] = 0x84; // ENTER
+  keyMap[0x36] = 0xc4; // 1
+  keyMap[0x76] = 0x74; // 2
+  keyMap[0x86] = 0x34; // 3
+  keyMap[0x14] = 0x14; // subtract
+  
+  keyMap[0x18] = 0x18; // ON
+  keyMap[0x12] = 0x38; // f
+  keyMap[0xC4] = 0x78; // g
+  keyMap[0x72] = 0xc8; // STO
+  keyMap[0x82] = 0x88; // RCL
+  //keyMap[0x] = 0x17; // n/a
+  keyMap[0x37] = 0xc5; // 0
+  keyMap[0x77] = 0x75; // decimal
+  keyMap[0xC6] = 0x35; // CHS
+  keyMap[0x15] = 0x15; // add
+}
+
+void keyMapInit(int m) {
+  switch( m ) {
+  case 10:
+    keyMap10Init();
+    break;
+  case 16:
+    keyMap16Init();
+    break;
+  }
 }
 
 #ifdef DUMP_CYCLE
