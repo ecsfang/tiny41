@@ -607,8 +607,6 @@ void core1_main_3(void)
           // - Memory module (not done yet)
           // - XMemory
           // - Blinky RAM
-          bUpdDisp9 = cmd == 0x268;
-          bUpdDisp10 = cmd == 0x2A8;
           if( !perph ) {
             if( pRamDev ) {
               // Update any RAM device (QUAD, XMEM etc)
@@ -620,6 +618,11 @@ void core1_main_3(void)
                 // Update ram select pointer
                 ramad = pRamDev->write(ramad, r);
               }
+            }
+            if( ramad < 0x10 ) {
+              // Check if Voyager display registers are updated
+              bUpdDisp9 = cmd == 0x268;
+              bUpdDisp10 = cmd == 0x2A8;
             }
           } else {
             // A peripherial is selected ...
