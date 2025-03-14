@@ -51,7 +51,6 @@ volatile bool bUpdDisp9 = false;
 volatile bool bUpdDisp10 = false;
 volatile uint16_t gDispUpdate = 0;
 volatile uint16_t lDispUpd = 0;
-volatile int vModel;
 
 // Special command buffer from Tiny
 volatile char g_cmd[32];
@@ -64,6 +63,36 @@ volatile uint16_t voyAddr[4] = {
   0x081, 0x103,
   0x005, 0x102
 };
+
+volatile Voyager_e vModel = V_NONE;
+
+const Voyager_e voyModel[16] = {
+  V_15C,  // 0
+  V_NONE, // 1
+  V_NONE, // 2
+  V_10C,  // 3
+  V_NONE, // 4
+  V_NONE, // 5
+  V_NONE, // 6
+  V_NONE, // 7
+  V_NONE, // 8
+  V_NONE, // 9
+  V_NONE, // A
+  V_NONE, // B
+  V_NONE, // C
+  V_NONE, // D
+  V_NONE, // E
+  V_16C   // F
+};
+
+const uint32_t voyMain[6] = {
+  0x00,                         // None
+  (VOYAGER_PORT | 0x39) << 12,  // HP10C
+  (VOYAGER_PORT | 0x00) << 12,  // HP11C
+  (VOYAGER_PORT | 0x00) << 12,  // HP12C
+  (VOYAGER_PORT | 0x96) << 12,  // HP15C
+  (VOYAGER_PORT | 0x89) << 12   // HP16C
+}; 
 
 CBreakpoint brk;
 
@@ -234,6 +263,7 @@ void core1_main_3(void)
   static CModule *voyager = modules.port(5);
   static int key = 0;
   static uint16_t vKey = 0;
+  static uint16_t vInst = 0;
   static uint16_t vOffs = 0;
 
   keyMapInit(16);
@@ -445,6 +475,7 @@ void core1_main_3(void)
       break;
 
     case 19:
+      // Re-map Voyager key to HP41 keyboard map
       key = keyMap[(data56>>12) & 0xFF];
       break;
 
@@ -554,8 +585,9 @@ void core1_main_3(void)
           // Handle NPIC commands in next cykle
           bTiny = true;
           cmd = 0;
-          vKey = (*voyager)[vOffs+1];
-          vModel = (*voyager)[0];
+          vInst = VROM(vOffs);
+          vKey  = VROM(vOffs+1);
+          vModel = voyModel[(VROM(5)>>4)&0xF]; // 10C:13F 15C:10F 16C:0FF
           break;
         case INST_ENBANK1:
         case INST_ENBANK2:
@@ -669,39 +701,53 @@ void core1_main_3(void)
         if( bTiny ) {
           // Handle any specific Tiny41 instructions
 #ifdef VOYAGER
-#define IR_RD(n)  (n<<6)|0x3A
-#define VTABLE_1  ((VOYAGER_PORT<<12)| 0x3F0000)
-#define VTABLE_2  ((VOYAGER_PORT<<12)| 0x3E0000)
-#define CMD16_TABLE (VOYAGER_PORT | 0xC00)
-#define VOYAGER_PORT  0x5000
+#define VOY_FUNC(n)  (n<<6)|PIL_READ_DATA
+
           switch(cmd & 0x3FE) {
-            case IR_RD(0):  // Get key from C[M] then Return 00000005kkk000
-              DATA_OUTPUT( (VOYAGER_PORT | (*voyager)[key]) << 12 );
-              break;
-            case IR_RD(1):  // Get C[X] then Return 00000000005nnn
-              DATA_OUTPUT(VOYAGER_PORT | (*voyager)[vOffs]);
-              break;
-            case IR_RD(2):  // Get C[X] then Return 000000053Fn..0
-              DATA_OUTPUT( VTABLE_1 | (vOffs<<4));
-              break;
-            case IR_RD(3):  // Get C[X]+1 then Return S0000000000kkk
-              DATA_OUTPUT((data56 & 0xF0000000000LL)<<12 | vKey);
-              break;
-            case IR_RD(4):  // Return 00000005800000
-              DATA_OUTPUT((VOYAGER_PORT<<12) | 0x800000);
-              break;
-            case IR_RD(5):  // Return 00000005039000 or 00000005089000
-              DATA_OUTPUT((VOYAGER_PORT | ((vModel == 0x107) ? 0x39 : 0x89)) << 12);
-              break;
-            case IR_RD(6):  // Get C[X] then Return 000000053En..0
-              DATA_OUTPUT( VTABLE_2 | (vOffs<<4));
-              break;
-            case IR_RD(7):  // Return 00000000kkkiii
-              DATA_OUTPUT( ((*voyager)[vOffs+1] << 12) | (*voyager)[vOffs] );
-              break;
-            case IR_RD(8):  // Return 00000005Cxx000
-              DATA_OUTPUT( (CMD16_TABLE + vOffs) << 12 );
-              break;
+          case VOY_FUNC(0x0):
+            // Get key from C[M] then Return 00000005kkk000
+            DATA_OUTPUT( VOY_PORT(VROM(key)) << 12 );
+            break;
+          case VOY_FUNC(0x1):
+            // Get C[X] then Return 00000000005nnn
+            DATA_OUTPUT( VOY_PORT(vInst) );
+            break;
+          case VOY_FUNC(0x2):
+            // Offset to char table 1 (0x053Fn..0)
+            DATA_OUTPUT( VTABLE_1(vOffs) );
+            break;
+          case VOY_FUNC(0x3):
+            // Get C[X]+1 then Return S0000000000kkk
+            DATA_OUTPUT( MANT(data56 & 0xF0000000000LL) | vKey );
+            break;
+          case VOY_FUNC(0x4):
+            // Return instruction table address (HP10C)
+            DATA_OUTPUT( CMD10_TABLE(0) );
+            break;
+          case VOY_FUNC(0x5):
+            // Return offset to main loop
+            DATA_OUTPUT( voyMain[vModel] );
+            break;
+          case VOY_FUNC(0x6):
+            // Offset to char table 2 (0x053En..0)
+            DATA_OUTPUT( VTABLE_2(vOffs) );
+            break;
+          case VOY_FUNC(0x7):
+            // Return 00000000kkkiii
+            DATA_OUTPUT( MANT(vKey) | vInst );
+            break;
+          case VOY_FUNC(0x8):
+            // Return instruction address (HP16C)
+            DATA_OUTPUT( CMD16_TABLE(vOffs) );
+            break;
+          case VOY_FUNC(0x9):
+          case VOY_FUNC(0xA):
+          case VOY_FUNC(0xB):
+          case VOY_FUNC(0xC):
+          case VOY_FUNC(0xD):
+          case VOY_FUNC(0xE):
+          case VOY_FUNC(0xF):
+            break;
           }
 #endif
 #if 0

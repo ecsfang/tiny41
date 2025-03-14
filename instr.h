@@ -6,6 +6,7 @@
 
 #define INST_WRITE_DATA                00050    // 0000 0010 1000   0x28
 #define INST_READ_DATA                 00070    // 0000 0011 1000   0x38
+#define PIL_READ_DATA                  00072    // 0000 0011 1010   0x3A
 
 #define INST_RW_MASK                   0x2F
 #define INST_READ_OR_WRITE             (INST_READ_DATA & INST_WRITE_DATA)

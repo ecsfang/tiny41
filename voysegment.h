@@ -39,6 +39,32 @@ Annun:       |    |    |   ?| ?  |   ?|    |    |    |    | ?  |    | ?  |
 #define REG09   0
 #define REG10   1
 
+// Define the hardcoded port for the Voyager ROM code
+#define VOYAGER_PORT    0x5000
+#define VROM(x)         ( (*voyager)[x] )
+#define VOY_PORT(x)     ( VOYAGER_PORT | (x) )
+#define MANT(x)         ( (x)<<12 )
+#define VOY_CTABLE1     MANT(VOY_PORT(0x3F0))
+#define VOY_CTABLE2     MANT(VOY_PORT(0x3E0))
+
+// Defines the offset to the display character table 1
+#define VTABLE_1(x)     ( VOY_CTABLE1 | ((x) << 4) )
+// Defines the offset to the display character table 2 (HP16C only)
+#define VTABLE_2(x)     ( VOY_CTABLE2 | ((x) << 4) )
+// Defines the offset to the instruction address offset (HP10C only?)
+#define CMD10_TABLE(x)  MANT(VOY_PORT(0x800 + x))
+// Defines the offset to the instruction address offset (HP16C only?)
+#define CMD16_TABLE(x)  MANT(VOY_PORT(0xC00 + x))
+
+typedef enum {
+    V_NONE,
+    V_10C,
+    V_11C,
+    V_12C,
+    V_15C,
+    V_16C
+} Voyager_e;
+
 enum {
     SEG_a = 0, 
     SEG_b = 1, 
@@ -136,8 +162,8 @@ class CLCD {
     const AllDigits_t *pDigits;
     uint64_t m_r[2];
 public:
-    CLCD(uint64_t r0, uint64_t r1, int vMod) {
-        pDigits = (vMod == 0x107) ? &_hp10seg : &_hp1Xseg;
+    CLCD(uint64_t r0, uint64_t r1, Voyager_e vMod) {
+        pDigits = (vMod == V_10C) ? &_hp10seg : &_hp1Xseg;
         m_r[0] = r0;
         m_r[1] = r1;
     }
