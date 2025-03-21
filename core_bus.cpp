@@ -261,10 +261,8 @@ void core1_main_3(void)
   static uint16_t isBase = ARITHM_UKN;
   static CRamDev *pRamDev = NULL;
   static CModule *voyager = modules.port(5);
-  static int key = 0;
-  static uint16_t vKey = 0;
-  static uint16_t vInst = 0;
-  static uint16_t vOffs = 0;
+  static int vKey = 0;          // Will contain the remapped Voyager key code
+  static uint16_t vCX = 0;      // Will contain C[S&X] at last cycle
 
   keyMapInit(16);
 
@@ -476,7 +474,7 @@ void core1_main_3(void)
 
     case 19:
       // Re-map Voyager key to HP41 keyboard map
-      key = keyMap[(data56>>12) & 0xFF];
+      vKey = keyMap[(data56>>12) & 0xFF];
       break;
 
     case 29:
@@ -520,7 +518,8 @@ void core1_main_3(void)
       } else {
         clrFI(FI_WNDB);
       }
-      vOffs = data56&0xFFF;
+      // Extract C[S&X]
+      vCX = data56&0xFFF;
       break;
 
     case LAST_CYCLE-1:
@@ -585,8 +584,6 @@ void core1_main_3(void)
           // Handle NPIC commands in next cykle
           bTiny = true;
           cmd = 0;
-          vInst = VROM(vOffs);
-          vKey  = VROM(vOffs+1);
           vModel = voyModel[(VROM(5)>>4)&0xF]; // 10C:13F 15C:10F 16C:0FF
           break;
         case INST_ENBANK1:
@@ -706,19 +703,19 @@ void core1_main_3(void)
           switch(cmd & 0x3FE) {
           case VOY_FUNC(0x0):
             // Get key from C[M] then Return 00000005kkk000
-            DATA_OUTPUT( VOY_PORT(VROM(key)) << 12 );
+            DATA_OUTPUT( VOY_PORT(VROM(vKey)) << 12 );
             break;
           case VOY_FUNC(0x1):
             // Get C[X] then Return 00000000005nnn
-            DATA_OUTPUT( VOY_PORT(vInst) );
+            DATA_OUTPUT( VOY_PORT(VROM(vCX)) );
             break;
           case VOY_FUNC(0x2):
             // Offset to char table 1 (0x053Fn..0)
-            DATA_OUTPUT( VTABLE_1(vOffs) );
+            DATA_OUTPUT( VTABLE_1(vCX) );
             break;
           case VOY_FUNC(0x3):
             // Get C[X]+1 then Return S0000000000kkk
-            DATA_OUTPUT( MANT(data56 & 0xF0000000000LL) | vKey );
+            DATA_OUTPUT( MANT(data56 & 0xF0000000000LL) | VROM(vCX+1) );
             break;
           case VOY_FUNC(0x4):
             // Return instruction table address (HP10C)
@@ -730,15 +727,15 @@ void core1_main_3(void)
             break;
           case VOY_FUNC(0x6):
             // Offset to char table 2 (0x053En..0)
-            DATA_OUTPUT( VTABLE_2(vOffs) );
+            DATA_OUTPUT( VTABLE_2(vCX) );
             break;
           case VOY_FUNC(0x7):
             // Return 00000000kkkiii
-            DATA_OUTPUT( MANT(vKey) | vInst );
+            DATA_OUTPUT( MANT(VROM(vCX+1)) | VROM(vCX) );
             break;
           case VOY_FUNC(0x8):
             // Return instruction address (HP16C)
-            DATA_OUTPUT( CMD16_TABLE(vOffs) );
+            DATA_OUTPUT( CMD16_TABLE(vCX) );
             break;
           case VOY_FUNC(0x9):
           case VOY_FUNC(0xA):

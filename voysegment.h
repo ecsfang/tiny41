@@ -161,9 +161,11 @@ const Digit_t _hp10seg[11] = {
 class CLCD {
     const AllDigits_t *pDigits;
     uint64_t m_r[2];
+    Voyager_e m_mod;
 public:
     CLCD(uint64_t r0, uint64_t r1, Voyager_e vMod) {
-        pDigits = (vMod == V_10C) ? &_hp10seg : &_hp1Xseg;
+        m_mod = vMod;
+        pDigits = (m_mod == V_10C) ? &_hp10seg : &_hp1Xseg;
         m_r[0] = r0;
         m_r[1] = r1;
     }
@@ -220,27 +222,46 @@ public:
     }
     char getChar(int d) {
         switch( getSegments(d)) {
-            case 0x7E: return '0';
-            case 0x22: return '1';
-            case 0x5B: return '2';
-            case 0x6B: return '3';
-            case 0x27: return '4';
-            case 0x6D: return '5';
-            case 0x7D: return '6';
-            case 0x2A: return '7';
-            case 0x7F: return '8';
-            case 0x6F: return '9';
-            case 0x0C: return 'r'; // running
-            case 0x11: return 'r'; // Error
-            case 0x07: return 'u';
-            case 0x02: return 'i';
-            case 0x0E: return 'n';
-            case 0x71: return 'o';
-            case 0x1F: return 'P';
-            case 0x01: return '-';
-            case 0x5D: return 'E';
             case 0x00: return ' ';
+            case 0x01: return '-';
+            case 0x02: return 'i';
+            case 0x07: return 'u';
+            case 0x0C: return 'R';
+            case 0x0E: return 'n';
+            case 0x10: return '-';
+            case 0x11: return 'r'; // Error
+            case 0x17: return 'H';
+            case 0x1D: return 'F';
+            case 0x1F: return 'P';
+            case 0x21: return 'R';
+            case 0x22: return '1';
+            case 0x27: return '4';
+            case 0x2A: return '7';
+            case 0x35: return 'H';
+            case 0x36: return '4';
+            case 0x3D: return 'P';
+            case 0x3F: return 'A';
+            case 0x4D: return 'C';
+            case 0x53: return 'O';
+            case 0x57: return 'B';
+            case 0x5B: return '2';
+            case 0x5C: return 'C';
+            case 0x5D: return 'E';
+            case 0x5E: return '5';
+            case 0x5F: return '6';
+            case 0x6B: return '3';
+            case 0x6D: return '5';
+            case 0x6F: return (m_mod == V_10C) ? '0':'9';
+            case 0x71: return 'o';
+            case 0x73: return 'D';
+            case 0x75: return 'B';
+            case 0x79: return '2';
+            case 0x7A: return '3';
+            case 0x7D: return '6';
+            case 0x7E: return (m_mod == V_10C) ? '9':'0';
+            case 0x7F: return '8';
         }
         return '?';
     }
 };
+
