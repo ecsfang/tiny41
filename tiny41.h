@@ -18,7 +18,7 @@
 #define MEASURE_TIME
 #define LOG_FI          // If true - add FI flags to output log
 
-#define VOYAGER
+//#define VOYAGER
 
 //#define USE_TIME_MODULE
 #define USE_XF_MODULE
@@ -138,17 +138,41 @@
 #define LED_PIN_B PICO_DEFAULT_LED_PIN
 // User switch is tied to GND (active low)
 #define USER_SW     23
+
+#elif defined(PIMORONI_PICO_PLUS2_RP2350)
+
+#define P_DATA      16
+#define P_DATA_DRV  20
+#define P_DATA_OE   21
+
+#define P_ISA       14
+#define P_ISA_DRV   18
+#define P_ISA_OE    19
+
+#define P_FI_OE     22
+
+#define P_PWO       17
+#define P_SYNC      15
+#define P_CLK2      13
+#define P_CLK1      12
+
+#define P_IR_LED    26
+
+// On Pico Lipo, the LED is tied to GND
+#define LED_ON      1
+#define LED_OFF     0
+
+#define LED_PIN_B PICO_DEFAULT_LED_PIN
+// User switch is tied to GND (active low)
+#define USER_SW     45
+
+
 #else
 #error("Must define a board!")
 #endif
 
 
-#define NR_CHARS  12
-#ifdef VOYAGER
-#define NR_ANNUN  9
-#else
-#define NR_ANNUN  12
-#endif
+#define NR_LCD_CHARS  12    // Characters in the 41 LCD display
 
 #define BUS_CYCLES 56
 #define LAST_CYCLE (BUS_CYCLES-1)

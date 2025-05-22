@@ -23,13 +23,15 @@
 #include "modfile.h"
 #include "wand.h"
 
-#include "voysegment.h"
+#ifdef VOYAGER
+#include "voyager.h"
+#endif
 
 //#define RESET_FLASH
 //#define RESET_RAM
 
 extern CDisplay    disp41;
-bool display_on = false;
+bool display_on = false;    // Track the state of the display (on/off)
 
 CBlinky blinky;
 volatile uint64_t  CBlinky::reg[8];    // First 8 registers
@@ -43,6 +45,7 @@ volatile uint16_t  CTime::accuracy;  // 13 bits
 volatile uint16_t  CTime::status;    // 20 bits
 #endif//USE_TIME_MODULE
 
+#ifdef VOYAGER
 volatile uint64_t gDisp9 = 0;
 volatile uint64_t gDisp10 = 0;
 volatile uint64_t _gDisp9 = 1L;
@@ -51,6 +54,8 @@ volatile bool bUpdDisp9 = false;
 volatile bool bUpdDisp10 = false;
 volatile uint16_t gDispUpdate = 0;
 volatile uint16_t lDispUpd = 0;
+volatile Voyager_e vModel = V_NONE;
+#endif
 
 // Special command buffer from Tiny
 volatile char g_cmd[32];
@@ -59,62 +64,8 @@ volatile int  g_num = 0;
 volatile int  g_ret = 0;
 volatile bool g_do_cmd = 0;
 
-volatile uint16_t voyAddr[4] = {
-  0x081, 0x103,
-  0x005, 0x102
-};
-
-volatile Voyager_e vModel = V_NONE;
-
-const Voyager_e voyModel[16] = {
-  V_15C,  // 0
-  V_NONE, // 1
-  V_NONE, // 2
-  V_10C,  // 3
-  V_NONE, // 4
-  V_NONE, // 5
-  V_NONE, // 6
-  V_NONE, // 7
-  V_NONE, // 8
-  V_NONE, // 9
-  V_NONE, // A
-  V_NONE, // B
-  V_NONE, // C
-  V_NONE, // D
-  V_NONE, // E
-  V_16C   // F
-};
-
-const uint32_t voyMain[6] = {
-  0x00,                         // None
-  (VOYAGER_PORT | 0x39) << 12,  // HP10C
-  (VOYAGER_PORT | 0x00) << 12,  // HP11C
-  (VOYAGER_PORT | 0x00) << 12,  // HP12C
-  (VOYAGER_PORT | 0x96) << 12,  // HP15C
-  (VOYAGER_PORT | 0x89) << 12   // HP16C
-}; 
 
 CBreakpoint brk;
-
-uint8_t keyMap[0x100] = {
-  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-  0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-  0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
-  0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
-  0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
-  0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
-  0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
-  0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
-  0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F,
-  0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
-  0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF,
-  0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF,
-  0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
-  0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
-  0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
-  0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
-};
-void keyMapInit(int mod);
 
 // Keep track of FI flags (bitmask, bit0-bit13)
 volatile uint16_t carry_fi = 0;
@@ -188,6 +139,12 @@ volatile uint64_t data56_out = 0;
 bool bET11967 = false;
 volatile uint64_t data2FI = 0;
 
+//#ifdef PIMORONI_PICO_PLUS2_RP2350
+//extern uint8_t* psram_mem;
+//volatile Bus_t *bus = (Bus_t *)psram_mem;
+//#else
+//volatile Bus_t bus[NUM_BUS_T];
+//#endif
 volatile Bus_t bus[NUM_BUS_T];
 
 volatile uint8_t prtBuf[PRT_BUF_LEN];
@@ -204,9 +161,9 @@ int last_sync = 0;
 int gpio_states = 0;
 
 // Copy of the 41 LCD buffer
-char dtext[2 * NR_CHARS + 1];
+char dtext[2 * NR_LCD_CHARS + 1];
 // The punctation part of the 41 LCD buffer
-bool bPunct[2 * NR_CHARS + 1];
+bool bPunct[2 * NR_LCD_CHARS + 1];
 
 char cpu2buf[256];
 int nCpu2 = 0;
@@ -228,7 +185,7 @@ bool bT0Carry = false;
 volatile Mode_e cpuMode;
 void logC(const char *s);
 
-void core1_main_3(void)
+void __no_inline_not_in_flash_func(core1_main_3)(void)
 {
   static int bit_no = 0;        // Current bit-number in bus cycle
   static int bIsaEn = 0;        // True if ISA output is enabled
@@ -237,7 +194,7 @@ void core1_main_3(void)
   static uint64_t isa = 0LL;    // Current bit-pattern on the ISA bus
   static uint64_t bit = 0LL;    // Bit mask for current bit in cycle
   static uint64_t data56 = 0LL; // Current bit-pattern on DATA bus
-  static uint8_t fiShift = 0;   // Current shift of FI
+//  static uint8_t fiShift = 0;   // Current shift of FI
   static uint16_t dataFI = 0;   // State of FI to be sent
   static int sync = 0;          // True if sync detected
   static bool bIsSync = false;  // True if current cycle have sync
@@ -260,11 +217,15 @@ void core1_main_3(void)
   static bool bPullIsa = false;
   static uint16_t isBase = ARITHM_UKN;
   static CRamDev *pRamDev = NULL;
+  static uint16_t vCX = 0;      // Will contain C[S&X] at last cycle
+#ifdef VOYAGER
   static CModule *voyager = modules.port(5);
   static int vKey = 0;          // Will contain the remapped Voyager key code
-  static uint16_t vCX = 0;      // Will contain C[S&X] at last cycle
+#endif
 
+#ifdef VOYAGER
   keyMapInit(16);
+#endif
 
   pBus = &bus[data_wr];
 
@@ -331,21 +292,21 @@ void core1_main_3(void)
 // Clk2  _______/\_______/\_______/\_______/\_______/\_______/\_______/\_______/\___
 // DATA  |  T51   |  T52   |  T53   |  T54   |  T55   |  T0    |  T1    |  T2    |
 
-    if( bit_no >= LAST_CYCLE ) {
+    //if( bit_no >= LAST_CYCLE ) {
+    if( bit_no == LAST_CYCLE ) {
       // Setup FI-signal for next round ...
       if( bET11967 ) {
         // Service module installed, shortcut DATA and FI
         data2FI = ~data56;
-        gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
         dataFI = 0;
       } else {
+        // Get any peripherial flags
         dataFI = getFI();
         // Give Blinky opportunity to update the FI flags
         blinky.fi(&dataFI);
       }
       // Clear for next cykle ...
       isa = data56 = 0LL;
-      fiShift = 0;
       clrFI();
       // Check if ISA should be active during T0 (peripherial carry)
       if( bT0Carry && !bIsaEn ) {
@@ -355,12 +316,15 @@ void core1_main_3(void)
     }
 
     // Drive the FI carry flags for each nibble
+    // Bit is valid for a whole nibble (4 bits)
     if( (bit_no & 0b11) == 0b11 ) {
-      if( bET11967 )
-        gpio_put(P_FI_OE, (data2FI>>(fiShift*4)) & 1);
-      else
-        gpio_put(P_FI_OE, (dataFI>>fiShift) & 1);
-      fiShift++;
+      if( bET11967 ) {
+        gpio_put(P_FI_OE, data2FI & 1);
+        data2FI >>= 4;  // Shift down next nibble
+      } else {
+        gpio_put(P_FI_OE, dataFI & 1);
+        dataFI >>= 1;   // Shift down next bit
+      }
     }
 
     // Do we drive the DATA line (bit 0-55)?
@@ -369,6 +333,8 @@ void core1_main_3(void)
       gpio_put(P_DATA_DRV, data56_out & 1);
       data56_out >>= 1;
     }
+
+    // Turn off peripherial carry
     if( bT0Carry && bIsaEn && bit_no > 2 && bPWO ) {
       gpio_put(P_ISA_OE, (bIsaEn = DISABLE_OE));
       bT0Carry = false;
@@ -472,10 +438,12 @@ void core1_main_3(void)
       }
       break;
 
-    case 19:
-      // Re-map Voyager key to HP41 keyboard map
+#ifdef VOYAGER
+      case 19:
+    // Re-map Voyager key to HP41 keyboard map
       vKey = keyMap[(data56>>12) & 0xFF];
       break;
+#endif
 
     case 29:
       // Got address. If the address is that of the embedded ROM then we
@@ -495,8 +463,6 @@ void core1_main_3(void)
 /*    case 31:
       // Check if we should emulate any modules ...
       if (modules.isInserted(4) && pBus->addr < 4) {
-        pBus->cmd = drive_isa = voyAddr[pBus->addr];
-        drive_isa_flag = 1;
       }
       break;
 */
@@ -584,7 +550,9 @@ void core1_main_3(void)
           // Handle NPIC commands in next cykle
           bTiny = true;
           cmd = 0;
+#ifdef VOYAGER
           vModel = voyModel[(VROM(5)>>4)&0xF]; // 10C:13F 15C:10F 16C:0FF
+#endif
           break;
         case INST_ENBANK1:
         case INST_ENBANK2:
@@ -609,6 +577,7 @@ void core1_main_3(void)
       output_data = 0;
       data56 &= MASK_56_BIT;
 
+#ifdef VOYAGER
       if( bUpdDisp9 ) {
         gDisp9 = data56;
         bUpdDisp9 = false;
@@ -619,6 +588,7 @@ void core1_main_3(void)
         bUpdDisp10 = false;
         gDispUpdate++;
       }
+#endif
 
       // Check for any pending writes
       if (pRamDev ) {
@@ -648,11 +618,13 @@ void core1_main_3(void)
                 ramad = pRamDev->write(ramad, r);
               }
             }
-            if( ramad < 0x10 ) {
+#ifdef VOYAGER
+            if( vModel && ramad < 0x10 ) {
               // Check if Voyager display registers are updated
-              bUpdDisp9 = cmd == 0x268;
-              bUpdDisp10 = cmd == 0x2A8;
+              bUpdDisp9 = cmd == INST_VDSP_R9;
+              bUpdDisp10 = cmd == INST_VDSP_R10;
             }
+#endif
           } else {
             // A peripherial is selected ...
             switch( perph ) {
@@ -919,6 +891,7 @@ void post_handling(uint16_t addr)
     }
     g_do_cmd = 0;
   }
+#ifdef VOYAGER
   if( lDispUpd < gDispUpdate ) {
     if( gDisp9 != _gDisp9 || gDisp10 != _gDisp10) {
       CLCD *pLcd = new CLCD(gDisp9, gDisp10, vModel);
@@ -1003,109 +976,7 @@ void post_handling(uint16_t addr)
     }
     lDispUpd++;
   }
-}
-
-void keyMap10Init(void) {
-  keyMap[0x70] = 0x13; // sqrt
-  keyMap[0xC0] = 0x33; // e^x
-  keyMap[0x80] = 0x73; // 10^x
-  keyMap[0xC6] = 0xc3; // y^x  (USER)
-  keyMap[0x30] = 0x83; // 1/x
-  keyMap[0x73] = 0x82; // CHS
-  keyMap[0x34] = 0xc2; // 7
-  keyMap[0x74] = 0x72; // 8
-  keyMap[0x84] = 0x32; // 9
-  keyMap[0x17] = 0x12; // divide
-
-  keyMap[0xC4] = 0x10; // %   (ALPHA)
-  keyMap[0x32] = 0x30; // GTO (XEQ)
-  keyMap[0x71] = 0x70; // SIN
-  keyMap[0x81] = 0xc0; // COS
-  keyMap[0xC1] = 0x80; // TAN
-  keyMap[0x83] = 0x87; // EEX
-  keyMap[0x35] = 0xC7; // 4
-  keyMap[0x75] = 0x77; // 5
-  keyMap[0x85] = 0x37; // 6
-  keyMap[0x16] = 0x17; // multiply
-  
-  keyMap[0x87] = 0x11; // R/S
-  keyMap[0xC2] = 0x31; // SST
-  keyMap[0x31] = 0x71; // Rdn
-  keyMap[0x11] = 0xc1; // x<>y
-  keyMap[0xC3] = 0x81; // CLx
-  keyMap[0x13] = 0x84; // ENTER
-  keyMap[0x36] = 0xc4; // 1
-  keyMap[0x76] = 0x74; // 2
-  keyMap[0x86] = 0x34; // 3
-  keyMap[0x14] = 0x14; // subtract
-  
-  keyMap[0x18] = 0x18; // ON
-  keyMap[0x12] = 0x38; // f
-  keyMap[0xC5] = 0x78; // P/R
-  keyMap[0x72] = 0xc8; // STO
-  keyMap[0x82] = 0x88; // RCL
-  //keyMap[0x] = 0x17; // n/a
-  keyMap[0x37] = 0xc5; // 0
-  keyMap[0x77] = 0x75; // decimal
-  keyMap[0x10] = 0x35; // Sigma+
-  keyMap[0x15] = 0x15; // add
-}
-
-void keyMap16Init(void) {
-  keyMap[0x10] = 0x13; // A
-  keyMap[0x30] = 0x33; // B
-  keyMap[0x70] = 0x73; // C
-  keyMap[0x80] = 0xc3; // D
-  keyMap[0xC0] = 0x83; // E
-  keyMap[0x11] = 0x82; // F
-  keyMap[0x34] = 0xc2; // 7
-  keyMap[0x74] = 0x72; // 8
-  keyMap[0x84] = 0x32; // 9
-  keyMap[0x17] = 0x12; // divide
-
-  keyMap[0x32] = 0x10; // GSB
-  keyMap[0xC5] = 0x30; // GTO
-  keyMap[0x31] = 0x70; // HEX
-  keyMap[0x71] = 0xc0; // DEC
-  keyMap[0x81] = 0x80; // OCT
-  keyMap[0xC1] = 0x87; // BIN
-  keyMap[0x35] = 0xC7; // 4
-  keyMap[0x75] = 0x77; // 5
-  keyMap[0x85] = 0x37; // 6
-  keyMap[0x16] = 0x17; // multiply
-  
-  keyMap[0x87] = 0x11; // R/S
-  keyMap[0xC2] = 0x31; // SST
-  keyMap[0x73] = 0x71; // Rdn
-  keyMap[0x83] = 0xc1; // x<>y
-  keyMap[0xC3] = 0x81; // BSP
-  keyMap[0x13] = 0x84; // ENTER
-  keyMap[0x36] = 0xc4; // 1
-  keyMap[0x76] = 0x74; // 2
-  keyMap[0x86] = 0x34; // 3
-  keyMap[0x14] = 0x14; // subtract
-  
-  keyMap[0x18] = 0x18; // ON
-  keyMap[0x12] = 0x38; // f
-  keyMap[0xC4] = 0x78; // g
-  keyMap[0x72] = 0xc8; // STO
-  keyMap[0x82] = 0x88; // RCL
-  //keyMap[0x] = 0x17; // n/a
-  keyMap[0x37] = 0xc5; // 0
-  keyMap[0x77] = 0x75; // decimal
-  keyMap[0xC6] = 0x35; // CHS
-  keyMap[0x15] = 0x15; // add
-}
-
-void keyMapInit(int m) {
-  switch( m ) {
-  case 10:
-    keyMap10Init();
-    break;
-  case 16:
-    keyMap16Init();
-    break;
-  }
+#endif
 }
 
 #ifdef DUMP_CYCLE
@@ -1204,9 +1075,9 @@ void dump_dregs(void)
   char cc = 0;
   char cl = 0;
 
-  for (int i = 0; i < NR_CHARS; i++) {
+  for (int i = 0; i < NR_LCD_CHARS; i++) {
 
-    int b = ((NR_CHARS - 1) - i) << 2;
+    int b = ((NR_LCD_CHARS - 1) - i) << 2;
 
     cc =   (dreg_a >> b) & 0x0F;
     cc |= ((dreg_b >> b) & 0x03) << 4;
@@ -1234,7 +1105,9 @@ void dump_dregs(void)
   dtext[j] = '\0';
 
 #if CF_DISPLAY_LCD
-  //UpdateLCD(dtext, bPunct, display_on);
+#ifndef VOYAGER
+  UpdateLCD(dtext, bPunct, display_on);
+#endif
 #endif
 }
 

@@ -6,14 +6,21 @@
 #elif defined(PIMORONI_TINY2040_8MB)
 #define FLASH_SIZE  ((8*1024*1024)-1)
 #elif defined(RASPBERRYPI_PICO2)
+#define TULIP_MODULE
 #define FLASH_SIZE  ((4*1024*1024)-1)
-#else
-#ifdef NO_EXTERNAL
-// Assume a simple Pico2 board
-#define FLASH_SIZE  ((4*1024*1024)-1)
-#else
-#error("No or bad board defined!")
+#elif defined(PIMORONI_PICO_PLUS2_RP2350)
+#define FLASH_SIZE  (PICO_FLASH_SIZE_BYTES-1)
+#ifdef PIMORONI_PICO_PLUS2_PSRAM_CS_PIN
+#define PSRAM_SIZE  (8*1024*1024)
+#define PSRAM_ADDR  0x11000000
 #endif
+#else
+# ifdef NO_EXTERNAL
+    // Assume a simple Pico2 board
+    #define FLASH_SIZE  ((4*1024*1024)-1)
+# else
+#   error("No or bad board defined!")
+# endif
 #endif
 
 #define PICO_FLASH_START 0x10000000

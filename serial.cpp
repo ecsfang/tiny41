@@ -21,7 +21,8 @@
 #include "module.h"
 #include "xfmem.h"
 #include "wand.h"
-//#include "fltools/fltools.h"
+
+extern void logC(const char *s);
 
 char cbuff[CDC_PRINT_BUFFER_SIZE];
 
@@ -45,6 +46,16 @@ uint32_t getFreeHeap(void)
   return getTotalHeap() - m.uordblks;
 }
 
+void logConsole(const char *buf)
+{
+  cdc_send_console((char*)buf);
+}
+void logConsoleFlush(const char *buf)
+{
+  cdc_send_console((char*)buf);
+  cdc_flush_console();
+}
+
 // Serial loop command structure
 typedef struct
 {
@@ -59,15 +70,15 @@ void toggle_trace(void)
 {
   bTrace ^= TRACE_ON;
   if( bTrace & TRACE_ON ) bTrace |= TRACE_BRK;
-  sprintf(cbuff,"Turn trace %s\n\r", bTrace & TRACE_ON ? "on":"off");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  sprintf(cbuff,"Turn trace %s", bTrace & TRACE_ON ? "on":"off");
+  logC(cbuff);
 }
 // Toggle disassembler (on -> call disassembler if trace is on)
 void toggle_disasm(void)
 {
   bTrace ^= TRACE_DISASM;
-  sprintf(cbuff,"Turn disassemble %s\n\r", IS_DISASM() ? "on":"off");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  sprintf(cbuff,"Turn disassemble %s", IS_DISASM() ? "on":"off");
+  logC(cbuff);
 }
 
 extern bool bET11967;
@@ -75,13 +86,45 @@ void service(void)
 {
   // Toggle module
   bET11967 = !bET11967;
-  sprintf(cbuff,"ET_11967 %sabled.\n\r", bET11967 ? "en":"dis");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  sprintf(cbuff,"ET_11967 %sabled.", bET11967 ? "en":"dis");
+  logC(cbuff);
 }
 
-#define BAR_T()   cdc_send_console((char*)"/------+------+------+-----+------------------+\n\r")
-#define BAR_M()   cdc_send_console((char*)"+------+------+------+-----+------------------+\n\r")
-#define BAR_B()   cdc_send_console((char*)"+------+------+------+-----+------------------/\n\r")
+void prLine(int *cols, int typ, const char **pLbl=NULL) {
+  char lBuf[64];
+  int n = 0;
+  char cx[3] = { '/', '|', '+'};
+  if( typ == 0 && pLbl ) {
+    sprintf(lBuf, "\n\r%s\n\r", *pLbl);
+    logConsoleFlush(lBuf);
+  }
+  n = sprintf(lBuf, "%c", cx[typ]);
+  if( typ == 1 && pLbl ) {
+    pLbl++;
+    while( *cols ) {
+      n += sprintf(lBuf+n, " %-*.*s |", *cols-2, *cols-2, *pLbl);
+      pLbl++;
+      cols++;
+    }
+    if( *pLbl )
+      n += sprintf(lBuf+n, " %s", *pLbl);
+  } else {
+    while( *cols ) {
+      memset(lBuf+n, '-', *cols);
+      n+=*cols++;
+      n += sprintf(lBuf+n, "+");
+    }
+    if( typ == 2 )
+      lBuf[n-1] = '/';
+  }
+  logC(lBuf);
+}
+
+#define BAR_T(b,t)    prLine(b, 0, t)
+#define BAR_M(b)      prLine(b, 1)
+#define BAR_L(b,l)    prLine(b, 1, l)
+#define BAR_END(b)    prLine(b, 2)
+#define BAR_HEAD(b,t) do { BAR_T(b, t); BAR_L(b, t); BAR_M(b); } while (0)
 
 extern int mod_info(CFat *pFat, char *buf);
 
@@ -104,21 +147,30 @@ void all_modules(void)
   char typ[5];
   CFat *pFat = new CFat();
   //fat.first();
+  // Columns in the table
+  int bar[5] = { 5, 18, 6, 12, 0 };
+  int bWidth = 5+1 + 18+1 + 6+1 + 12 - 2;
+  // Header and column labels
+  const char *lbls[5+1] = { "Installed modules", "ID#", "Name", "Type", "Offset", NULL };
+  // Print table header
+  BAR_HEAD(bar, lbls);
   if( pFat->offset() ) {
-    cdc_send_console((char*)"\n\rInstalled modules\n\r");
     while( pFat->offset() ) {
       n++;
       sprintf(typ, "%c%s", pFat->type() == FL_RAM ? '+':' ', moduleType(pFat->type()));
-      i = sprintf(cbuff,"| %3d | %-16.16s |%4.4s | %08X | ",
+      i = sprintf(cbuff,"| %3d | %-16.16s | %4.4s | 0x%08X | ",
         n, pFat->name(), typ, pFat->offset() );
-      i += mod_info(pFat, cbuff+i);
+      if( pFat->type() == FL_MOD )
+        i += mod_info(pFat, cbuff+i);
       i += sprintf(cbuff+i,"\n\r");
-      cdc_send_console(cbuff);
+      logConsole(cbuff);
       pFat->next();
     }
   } else {
-    cdc_send_console((char*)"\n\rNo installed modules!\n\r");
+    sprintf(cbuff, "| %-*.*s |\n\r", bWidth, bWidth, "** No installed modules!");
+    logConsole(cbuff);
   }
+  BAR_END(bar);
   delete pFat;
 }
 
@@ -130,45 +182,55 @@ void list_modules(void)
   int n;
 
 #ifdef DBG_PRINT
-  cdc_send_string_and_flush(ITF_TRACE,(char*)"\n\rDump modules\n\r");
+logConsoleFlush("\n\rDump modules\n\r");
   modules.dump();
 #endif
-  cdc_send_console((char*)"\n\rLoaded modules\n\r");
-  BAR_T();
-  cdc_send_console((char*)"| Page | Port | XROM | RAM | Name             | Banks\n\r");
-  BAR_M();
+  // Columns in the table
+  int bar1[6] = { 6, 7, 6, 5, 18, 0 };
+  // Header and column labels
+  const char *lbls[7+1] = { "Loaded modules", "Page", "Port", "XROM", "RAM", "Name", "Banks", NULL };
+  // Print table header
+  BAR_HEAD(bar1, lbls);
   for(int i=FIRST_PAGE; i<NR_PAGES; i++) {
     n = sprintf(cbuff,"|  #%X  | ", i);
     switch( i ) {
-    case 4: n += sprintf(cbuff+n,"Srv  | "); break;
-    case 5: n += sprintf(cbuff+n,"Tmr  | "); break;
-    case 6: n += sprintf(cbuff+n,"Prt  | "); break;
-    case 7: n += sprintf(cbuff+n,"HPIL | "); break;
-    default:
-      n += sprintf(cbuff+n,"%d %s | ", (i-6)/2, i&1 ? "Hi":"Lo");
+    case 0 ... 2: n += sprintf(cbuff+n,"ROM %d |", i);  break;
+    case 3:       n += sprintf(cbuff+n,"CX EXT|");      break;
+    case 4:       n += sprintf(cbuff+n,"Srv   |");      break;
+    case 5:       n += sprintf(cbuff+n,"Tmr/CX|");      break;
+    case 6:       n += sprintf(cbuff+n,"Prt   |");      break;
+    case 7:       n += sprintf(cbuff+n,"HPIL  |");      break;
+    default:      n += sprintf(cbuff+n,"%d %s  |", (i-6)/2, i&1 ? "Hi":"Lo");
     }
 
     if( modules.isInserted(i) ) {
-      if( i == 4 )
-        n += sprintf(cbuff+n," --  | ");  // No XROM values in page 4
-      else
-        n += sprintf(cbuff+n," %02X  | ", (*modules[i])[0]);
+      if( i <= 4 )
+        n += sprintf(cbuff+n,"  --  | ");  // No XROM values in page 0-4
+      else {
+        // Check if valid XROM id ...
+        if( (*modules[i])[0] <= MAX_ID  && (*modules[i])[1] <= MAX_FNS)
+          n += sprintf(cbuff+n," %02d:%02d| ", (*modules[i])[0], (*modules[i])[1]);
+        else
+          n += sprintf(cbuff+n,"  --  | ");
+      }
       n += sprintf(cbuff+n,"%3.3s%c|", modules.isQROM(i) ? "Yes" : "", modules.isDirty(i)?'*':' ' );
       n += sprintf(cbuff+n," %-16.16s |", modules[i]->getName() );
       if( modules[i]->haveBank(1))
         n += sprintf(cbuff+n," %s", modules[i]->getName(1) );
     } else {
-      n += sprintf(cbuff+n,"     |     |");
-      n += sprintf(cbuff+n," %16.16s |", "" );
+      // Empty columns ...
+      n += sprintf(cbuff+n,"%*.*s|", bar1[2], bar1[2], "" );
+      n += sprintf(cbuff+n,"%*.*s|", bar1[3], bar1[3], "" );
+      n += sprintf(cbuff+n,"%*.*s|", bar1[4], bar1[4], "" );
     }
     n += sprintf(cbuff+n,"\n\r" );
-    cdc_send_console(cbuff);
+    logConsole(cbuff);
   }
-  BAR_B();
+  BAR_END(bar1);
 }
 
-extern void list_brks(void);
-extern void clrAllBrk(void);
+//extern void list_brks(void);
+//extern void clrAllBrk(void);
 extern void power_on(void);
 //extern void wand_data(uint8_t *);
 
@@ -181,7 +243,7 @@ uint8_t barTest[] = {
 
 void wand_test(void)
 {
-  cdc_send_console((char*)"Send barcode!\n\r");
+  logConsole("Send barcode!\n\r");
   pBar->data(barTest);
 }
 
@@ -210,11 +272,11 @@ static void sbrkpt(BrkMode_e b)
 {
   brk_mode = b;
   switch(b) {
-  case BRK_START: cdc_send_console((char*)"\n\rStart"); break;
-  case BRK_END:   cdc_send_console((char*)"\n\rEnd"); break;
-  case BRK_NONE:   cdc_send_console((char*)"\n\rClear"); break;
+  case BRK_START: logConsole("\n\rStart"); break;
+  case BRK_END:   logConsole("\n\rEnd"); break;
+  case BRK_NONE:  logConsole("\n\rClear"); break;
   }
-  cdc_send_console((char*)" breakpoint: ----\b\b\b\b");
+  logConsole(" breakpoint: ----\b\b\b\b");
   cdc_flush_console();
   sBrk = 0;
   nBrk = 1;
@@ -245,15 +307,13 @@ void clrBreakpoints(void)
 
 void sel_qrom(void)
 {
-  cdc_send_console((char*)"\n\rSelect QROM page: -\b");
-  cdc_flush_console();
+  logConsoleFlush("\n\rSelect QROM page: -\b");
   state = ST_QROM;  // Expect port address
 }
 
 void plug_unplug(void)
 {
-  cdc_send_console((char*)"\n\rSelect page to plug or unplug: -\b");
-  cdc_flush_console();
+  logConsoleFlush("\n\rSelect page to plug or unplug: -\b");
   state = ST_PLUG;  // Expect port address
 }
 
@@ -267,7 +327,7 @@ public:
   CText() {
     init(TEXT_BUFFER_LEN);
   }
-// Init buffer stating max length of wanted string
+  // Init buffer stating max length of wanted string
   void init(int len) {
     memset(m_text, 0, TEXT_BUFFER_LEN);
     m_pText = 0;
@@ -304,15 +364,13 @@ extern bool loadModule(const char *mod, int page);
 
 void inst_module(void)
 {
-  cdc_send_console((char*)"\n\rWhich module to install: -\b");
-  cdc_flush_console();
+  logConsoleFlush("\n\rWhich module to install: -\b");
   state = ST_INST;  // Expect port address
   m_text.init(MOD_NAME_LEN);
 }
 void plug_module(void)
 {
-  cdc_send_console((char*)"Select page for module: -\b");
-  cdc_flush_console();
+  logConsoleFlush("Select page for module: -\b");
   state = ST_MPLUG;  // Expect port address
 }
 int find_module(void)
@@ -338,23 +396,19 @@ void mem_emulate(void)
   ram.enable( !ram.isEnabled() );
   if( ram.isEnabled() ) {
     sprintf(cbuff, "\n\r%d memory modules enabled\n\r", ram.modules());
-    cdc_send_console(cbuff);
-    cdc_flush_console();
+    logConsoleFlush(cbuff);
   } else {
-    cdc_send_console((char*)"\n\rMemory modules disabled\n\r");
-    cdc_flush_console();
+    logConsoleFlush("\n\rMemory modules disabled\n\r");
   }
 }
 
 void mem_modules(void)
 {
   if( ram.isEnabled() ) {
-    cdc_send_console((char*)"\n\rNumber of memory modules: -\b");
-    cdc_flush_console();
+    logConsoleFlush("\n\rNumber of memory modules: -\b");
     state = ST_MEM;  // Expect port address
   } else {
-    cdc_send_console((char*)"\n\rMemory modules not emulated!\n\r");
-    cdc_flush_console();
+    logConsoleFlush("\n\rMemory modules not emulated!\n\r");
   }
 }
 
@@ -362,7 +416,7 @@ void dump_blinky(void)
 {
   extern CBlinky blinky;
   int i;
-  cdc_send_console((char*)"Blinky registers and RAM\n\r=====================================\n\r");
+  logConsole("Blinky registers and RAM\n\r=====================================\n\r");
   for(i=0; i<0x08; i++) {
     sprintf(cbuff,"Reg%02d: %014llx (56)\n\r", i, blinky.reg[i]);
     cdc_send_string(ITF_CONSOLE, cbuff);
@@ -371,8 +425,7 @@ void dump_blinky(void)
     sprintf(cbuff,"Reg%02d: %12.12c%02x  (8)\n\r", i, ' ', blinky.reg8[i]);
     cdc_send_string(ITF_CONSOLE, cbuff);
   }
-  cdc_send_console((char*)"\n\r\r");
-  cdc_flush_console();
+  logConsoleFlush("\n\r\r");
 }
 
 #ifdef USE_TIME_MODULE
@@ -409,7 +462,7 @@ static void dumpXmem(const char *lbl, int start, int size, int offs)
 {
   int n;
   sprintf(cbuff,"%s\n\r=====================================\n\r", lbl);
-  cdc_send_console(cbuff);
+  logConsole(cbuff);
   for(int i=size-1; i>=0; i--) {
     n = 0;
     if( xmem.m_ram->mem[i+offs] || xmem.m_mem.mem[i+offs] ) {
@@ -418,10 +471,10 @@ static void dumpXmem(const char *lbl, int start, int size, int offs)
       if( xmem.m_ram->mem[i+offs] != xmem.m_mem.mem[i+offs] )
         n += sprintf(cbuff+n," ***");
       sprintf(cbuff+n,"\n\r");
-      cdc_send_console(cbuff);
+      logConsole(cbuff);
     }
   }
-  cdc_send_console((char*)"\n\r");
+  logConsole("\n\r");
 }
 
 // Dump any non-zero registers in XMemory
@@ -442,19 +495,16 @@ void dump_xmem(void)
 // Clear the whole XMemory
 void clr_xmem(void)
 {
-  cdc_send_console((char*)"Clear XMemory\n\r");
-  cdc_flush_console();
+  logConsoleFlush("Clear XMemory\n\r");
   memset((void*)xmem.m_ram->mem,0,xmem.size());
   xmem.saveMem();
 }
 // Init XMemory, i.e. read latest copy from flash
 void init_xmem(void)
 {
-  cdc_send_console((char*)"Init XMemory\n\r");
-  cdc_flush_console();
+  logConsoleFlush("Init XMemory\n\r");
   initXMem(0);
-  cdc_send_console((char*)"Done with Init XMemory\n\r");
-  cdc_flush_console();
+  logConsoleFlush("Done with Init XMemory\n\r");
 }
 #endif//USE_XF_MODULE
 
@@ -462,9 +512,9 @@ void init_xmem(void)
 void pico_bootsel()
 {
 /**
-  cdc_send_console((char*)"\n\r************************************************");
-  cdc_send_console((char*)"\n\r** RESETTING THE RP2040-TUP to BOOTSEL mode!! **");
-  cdc_send_console((char*)"\n\r************************************************\n\r");
+  cdc_send_console((char*)"\n\r******************************************");
+  cdc_send_console((char*)"\n\r** RESETTING THE PICO to BOOTSEL mode!! **");
+  cdc_send_console((char*)"\n\r******************************************\n\r");
   **/
   for(int port=0; port<ITF_MAX; port++) {
     cdc_flush(port);
@@ -473,14 +523,13 @@ void pico_bootsel()
   }
   set_sys_clock_khz(133000, 1);
   sleep_ms(100);
-  // reboots the RP2040, uses the standard LED for activity monitoring
+  // reboots the Pico, uses the standard LED for activity monitoring
   reset_usb_boot(1<<PICO_DEFAULT_LED_PIN, 0) ;
 }
 
 void quit_log()
 {
-  cdc_send_console((char*)"\n\r Stopping logging\n\r");
-  cdc_flush_console();
+  logConsoleFlush("\n\r Stopping logging\n\r");
   cdc_send_string(ITF_TRACE, (char*)"\nQuit\n");
   cdc_flush(ITF_TRACE);
 }
@@ -506,13 +555,35 @@ void addString(const char *fmt, int val, int val2)
   cdc_send_string(ITF_CONSOLE, cbuff);
 }
 
+#ifdef PIMORONI_PICO_PLUS2_RP2350
+extern void psramTest(void);
+#endif
+
+void mem_test(void)
+{
+  addString("\r\nTest memory\r\n=========================\r\n");
+#ifdef PIMORONI_PICO_PLUS2_RP2350
+  psramTest();
+#else
+  addString("No PSRAM!\r\n");
+#endif
+  cdc_flush_console();
+}
+
 void info(void)
 {
+//  float speed = clock_get_hz(clk_sys);
+
   addString("\r\nSystem information (core %d)\r\n=========================\r\n", get_core_num());
+  //  addString("Running at:    %7.2lf MHz\r\n", speed);
   addString("Flash offset:  0x%X\r\n", FLASH_START);
+  addString("Flash size:    %d MB\r\n", ((FLASH_SIZE+1)>>20));
   addString("XIP_BASE:      0x%X\r\n", XIP_BASE);
   addString("Sector size:   %6d (0x%X)\r\n", FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
   addString("Page size:     %6d (0x%X)\r\n", FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
+#ifdef PIMORONI_PICO_PLUS2_PSRAM_CS_PIN
+  addString("PSRAM size:    %d MB\r\n", ((PSRAM_SIZE+1)>>20));
+#endif
   addString("Total heap:    %6d bytes \r\n", getTotalHeap());
   addString("Free heap:     %6d bytes\r\n", getFreeHeap());
   addString("Trace element: %6d bytes\r\n", sizeof(Bus_t));
@@ -541,7 +612,7 @@ void tag(void) {
   nTag++;
   sprintf(cbuff, "\n\r###  TAG %d ###\n\r\n\r", nTag);
   cdc_send_string_and_flush(ITF_TRACE, cbuff);
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  logConsoleFlush(cbuff);
 }
 
 extern void reset_bus_buffer(void);
@@ -549,37 +620,38 @@ extern void initRoms(void);
 
 void read_config(void)
 {
-  cdc_send_console((char*)"\n\rSelect config to read [0-9|Clr|List]: -\b");
-  cdc_flush_console();
+  logConsole("\n\rLoad module configuration.");
+  logConsoleFlush("\n\rSelect config to read [0-9|Clr|List]: -\b");
   state = ST_RCONF;  // Expect port address
 }
 
+void list_config(void);
+
 void desc_config(void)
 {
-  cdc_send_console((char*)"\n\rModule config description: -\b");
-  cdc_flush_console();
+  logConsoleFlush("\n\rSave module configuration.");
+  list_config();
+  logConsoleFlush("\n\rModule config description: -\b");
   state = ST_DESC;  // Get configuration description
   m_text.init(CONF_DESC_LEN);
 }
 
 void save_config(void)
 {
-  cdc_send_console((char*)"\n\rSelect config to save [0-9|Del|List]: -\b");
-  cdc_flush_console();
+  logConsoleFlush("\n\rSelect config to save [0-9|Del|List]: -\b");
   state = ST_WCONF;  // Expect port address
 }
 
 void clr_config(void)
 {
   send2console((char*)"\rClear configuration!", true);  // Clean previous content on page ...
-  cdc_send_string_and_flush(ITF_CONSOLE, (char*)"\r\n");
+  logConsoleFlush("\r\n");
   modules.clearAll();
 }
 
 void del_config(void)
 {
-  cdc_send_console((char*)"\n\rSelect config to delete [0-9|List]: -\b");
-  cdc_flush_console();
+  logConsoleFlush("\n\rSelect config to delete [0-9|List]: -\b");
   state = ST_DELC;  // Expect port address
 }
 
@@ -589,7 +661,7 @@ void list_config(void)
   //CFat *pFat = new CFat();
   int n;
   send2console((char*)"\rList all configurations", true);  // Clean previous content on page ...
-  cdc_send_string_and_flush(ITF_CONSOLE, (char*)"---+--------------------------\r\n");
+  logConsoleFlush("---+--------------------------\r\n");
   // TBD - List all available saved module configuration
   for(int i=0; i<10; i++) {
     n = sprintf(cbuff," %d | ", i);
@@ -599,7 +671,7 @@ void list_config(void)
       n += sprintf(cbuff+n,"-");
     }
     n += sprintf(cbuff+n,"\r\n");
-    cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+    logConsoleFlush(cbuff);
   }
   delete conf;
 }
@@ -608,6 +680,7 @@ SERIAL_COMMAND serial_cmds[] = {
   { 'h', serial_help,       "Serial command help"  },
   { '?', serial_help,       "Serial command help"  },
   { 'i', info,              "Memory info"  },
+  { 'T', mem_test,          "Memory test"  },
 
   { 'd', toggle_disasm,     "Toggle disassembler"  },
   { 't', toggle_trace,      "Toggle trace"  },
@@ -650,13 +723,13 @@ const int helpSize = sizeof(serial_cmds) / sizeof(SERIAL_COMMAND);
 void serial_help(void)
 {
   sprintf(cbuff,"\n\rCmd | Description\n\r----+------------------------");
-  cdc_send_string(ITF_CONSOLE, cbuff);
+  logConsole(cbuff);
   for (int i = 0; i < helpSize; i++) {
     sprintf(cbuff,"\n\r  %c | %s", serial_cmds[i].key, serial_cmds[i].desc);
-    cdc_send_string(ITF_CONSOLE, cbuff);
+    logConsole(cbuff);
   }
   sprintf(cbuff, (char*)"\n\r====+========================\n\r");
-  cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
+  logConsoleFlush(cbuff);
 }
 
 int getHexKey(int ky)
@@ -785,6 +858,7 @@ void serial_loop(void)
                   break;
                 }
                 conChars += send2console(cbuff);
+                conChars += send2console("Done!\n\r");
                 brk_mode = BRK_NONE;
                 sBrk = nBrk = 0;
                 state = ST_NONE;

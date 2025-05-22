@@ -8,7 +8,7 @@
 #define INST_READ_DATA                 00070    // 0000 0011 1000   0x38
 #define PIL_READ_DATA                  00072    // 0000 0011 1010   0x3A
 
-#define INST_RW_MASK                   0x2F
+#define INST_RW_MASK                   0x3F
 #define INST_READ_OR_WRITE             (INST_READ_DATA & INST_WRITE_DATA)
 #define INST_RDATA                     INST_READ_DATA
 #define INST_WDATA                     01360    // 001 011 110 000   0x2F0
@@ -77,6 +77,10 @@
 #define INST_FLSDAB                    (01500 | INST_READ_DATA)
 #define INST_FRSDABC                   (01600 | INST_READ_DATA)
 #define INST_FLSDABC                   (01700 | INST_READ_DATA)
+
+// Voyager
+#define INST_VDSP_R9                   (( 9<<6) | INST_WRITE_DATA)
+#define INST_VDSP_R10                  ((10<<6) | INST_WRITE_DATA)
 
 // Timer module
 #define INST_WRTIME                    (00000 | INST_WRITE_DATA)

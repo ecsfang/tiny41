@@ -43,6 +43,7 @@ Annun:       |    |    |   ?| ?  |   ?|    |    |    |    | ?  |    | ?  |
 #define VOYAGER_PORT    0x5000
 #define VROM(x)         ( (*voyager)[x] )
 #define VOY_PORT(x)     ( VOYAGER_PORT | (x) )
+// Shift data into mantissa
 #define MANT(x)         ( (x)<<12 )
 #define VOY_CTABLE1     MANT(VOY_PORT(0x3F0))
 #define VOY_CTABLE2     MANT(VOY_PORT(0x3E0))
@@ -56,6 +57,10 @@ Annun:       |    |    |   ?| ?  |   ?|    |    |    |    | ?  |    | ?  |
 // Defines the offset to the instruction address offset (HP16C only?)
 #define CMD16_TABLE(x)  MANT(VOY_PORT(0xC00 + x))
 
+extern void keyMapInit(int mod);
+extern const uint32_t voyMain[6];
+extern uint8_t keyMap[0x100];
+
 typedef enum {
     V_NONE,
     V_10C,
@@ -64,6 +69,8 @@ typedef enum {
     V_15C,
     V_16C
 } Voyager_e;
+
+extern const Voyager_e voyModel[16];
 
 enum {
     SEG_a = 0, 
@@ -223,43 +230,32 @@ public:
     char getChar(int d) {
         switch( getSegments(d)) {
             case 0x00: return ' ';
-            case 0x01: return '-';
-            case 0x02: return 'i';
-            case 0x07: return 'u';
-            case 0x0C: return 'R';
-            case 0x0E: return 'n';
-            case 0x10: return '-';
-            case 0x11: return 'r'; // Error
-            case 0x17: return 'H';
-            case 0x1D: return 'F';
-            case 0x1F: return 'P';
-            case 0x21: return 'R';
+            case 0x7E: return '0';
             case 0x22: return '1';
-            case 0x27: return '4';
-            case 0x2A: return '7';
-            case 0x35: return 'H';
-            case 0x36: return '4';
-            case 0x3D: return 'P';
-            case 0x3F: return 'A';
-            case 0x4D: return 'C';
-            case 0x53: return 'O';
-            case 0x57: return 'B';
             case 0x5B: return '2';
-            case 0x5C: return 'C';
-            case 0x5D: return 'E';
-            case 0x5E: return '5';
-            case 0x5F: return '6';
             case 0x6B: return '3';
+            case 0x27: return '4';
             case 0x6D: return '5';
-            case 0x6F: return (m_mod == V_10C) ? '0':'9';
-            case 0x71: return 'o';
-            case 0x73: return 'D';
-            case 0x75: return 'B';
-            case 0x79: return '2';
-            case 0x7A: return '3';
             case 0x7D: return '6';
-            case 0x7E: return (m_mod == V_10C) ? '9':'0';
+            case 0x2A: return '7';
             case 0x7F: return '8';
+            case 0x6F: return '9';
+            case 0x3F: return 'A';
+            case 0x75: return 'B';
+            case 0x4D: return 'C';
+            case 0x73: return 'D';
+            case 0x5D: return 'E';
+            case 0x1D: return 'F';
+            case 0x0C: return 'r'; // r in running
+            case 0x11: return 'r'; // r in Error
+            case 0x07: return 'u';
+            case 0x02: return 'i';
+            case 0x0E: return 'n';
+            case 0x71: return 'o';
+            case 0x1F: return 'P';
+            case 0x01: return '-';
+            case 0x35: return 'H';
+            case 0x53: return 'O';
         }
         return '?';
     }

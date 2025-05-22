@@ -126,21 +126,27 @@ static uint32_t calcChecksum(const uint8_t *data, size_t len) {
 }
 
 // Function to verify the checksum
-static bool verifyChecksum(const uint8_t *data, size_t len, uint8_t expected_checksum) {
-    uint32_t chk = calcChecksum(data, len);
-    return chk == expected_checksum;
+static bool verifyChecksum(const uint8_t *data, size_t len, uint32_t exp) {
+  uint32_t chk = calcChecksum((const uint8_t*)data, len);
+  return chk == exp;
+}
+static bool verifyChecksum(Config_t *data) {
+  return verifyChecksum((const uint8_t*)data, sizeof(Config_t), data->chkSum);
+}
+static bool verifyChecksum(Setup_t *data) {
+  return verifyChecksum((const uint8_t*)data, sizeof(Setup_t), data->chkSum);
 }
 
 bool readConfig(Config_t *data, int set)
 {
   uint32_t cp = CONF_PAGE(0) + set*sizeof(Config_t);
   memcpy(data, (uint8_t*)cp, sizeof(Config_t));
-  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
+  //uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Config_t));
 #ifdef DBG_PRINT
   sprintf(cbuff, "Read config(%d) @ 0x%08X:%X\n\r", set, cp, sizeof(Config_t));
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
-  return chk == data->chkSum;
+  return verifyChecksum(data);
 }
 
 // Read the config flashpage and updated the
@@ -182,12 +188,11 @@ bool readSetup(Setup_t *data)
 {
   uint32_t cp = CONF_PAGE(0) + SETUP_OFFS;
   memcpy(data, (uint8_t*)cp, SETUP_SIZE);
-  uint32_t chk = calcChecksum((const uint8_t*)data, sizeof(Setup_t));
 #ifdef DBG_PRINT
   sprintf(cbuff, "Read setup @ 0x%08X:%X\n\r", cp, SETUP_SIZE);
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
-  return chk == data->chkSum;
+return verifyChecksum(data);
 }
 
 // Save a given ram image to flash (emulate Q-RAM)

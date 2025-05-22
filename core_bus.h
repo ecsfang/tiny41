@@ -36,6 +36,9 @@
 //#define TRACE_ISA
 #define QUEUE_STATUS
 
+#define MAX_ID  0x1F    // Max ID # of a module
+#define MAX_FNS 0x40    // Max functions entries in a module FAT
+
 #define PAGEn(n,i) (FLASH_START + (2 * (n) + i) * FLASH_SECTOR_SIZE)
 #define PAGE1(n) PAGEn(n,0)
 #define PAGE2(n) PAGEn(n,1)
@@ -102,21 +105,21 @@ enum {
 
 enum {
     FI_NONE  = 0,
-    FI_PBSY  = 1 << 0,  // Printer BuSY
-    FI_CRDR  = 1 << 1,  // CaRD Reader
-    FI_WNDB  = 1 << 2,  // WaND Byte available
-    FI_PF3   = 1 << 3,  // 3 - not used
-    FI_PF4   = 1 << 4,  // 4 - not used
-    FI_EDAV  = 1 << 5,  // Emitter Diode AVailable
-    FI_IFCR  = 1 << 6,  // InterFace Clear Received
-    FI_SRQR  = 1 << 7,  // Service ReQuest Received
-    FI_FRAV  = 1 << 8,  // FRame AVailable
-    FI_FRNS  = 1 << 9,  // Frame Received Not as Sent
-    FI_ORAV  = 1 << 10, // Output Register AVailable
-    FI_TFAIL = 1 << 11, //
-    FI_ALM   = 1 << 12, // ALarM
-    FI_SERV  = 1 << 13, // SERVice
-    FI_MASK = (1 << 14)-1
+    FI_PBSY  = BIT_0,  // Printer BuSY
+    FI_CRDR  = BIT_1,  // CaRD Reader
+    FI_WNDB  = BIT_2,  // WaND Byte available
+    FI_PF3   = BIT_3,  // 3 - not used
+    FI_PF4   = BIT_4,  // 4 - not used
+    FI_EDAV  = BIT_5,  // Emitter Diode AVailable
+    FI_IFCR  = BIT_6,  // InterFace Clear Received
+    FI_SRQR  = BIT_7,  // Service ReQuest Received
+    FI_FRAV  = BIT_8,  // FRame AVailable
+    FI_FRNS  = BIT_9,  // Frame Received Not as Sent
+    FI_ORAV  = BIT_10, // Output Register AVailable
+    FI_TFAIL = BIT_11, //
+    FI_ALM   = BIT_12, // ALarM
+    FI_SERV  = BIT_13, // SERVice
+    FI_MASK = (BIT_14)-1
 };
 
 #define FI_PRT_TIMER  FI_ALM
@@ -148,7 +151,7 @@ typedef struct {
 #ifdef TRACE_ISA
 #define NUM_BUS_T 0x400
 #else
-#define NUM_BUS_T (0x1000)
+#define NUM_BUS_T (0x1000<<2)
 #endif
 
 #define CHK_GPIO(x) (sio_hw->gpio_in & (1 << x))
@@ -170,7 +173,14 @@ typedef struct {
 #define HIGH 1
 #define FI(x) GPIO_PIN_RD(x)
 // Check low, then high, then wait until low again
-#define WAIT_FALLING(x) do { while(FI(x) == LOW ) {} while(FI(x) == HIGH ) {} } while(0)
+#define WAIT_FALLING(x)     \
+  do {                      \
+    while(FI(x) == LOW ) {  \
+    }                       \
+    while(FI(x) == HIGH ) { \
+    }                       \
+  } while(0)
+
 // Wait for tranision from low to high
 #define WAIT_RISING(x) do { while(FI(x) == LOW ) {} } while(0)
 

@@ -130,6 +130,8 @@ void CModules::saveConfig(int set, char *desc)
   sprintf(cbuff, "Saved config #%d (%d bytes) @ %X\n\r", set, sizeof(conf), CONF_PAGE(0));
   cdc_send_string_and_flush(ITF_CONSOLE, cbuff);
 #endif
+  // Save config as default setup
+  saveSetup(set);
 }
 
 // Delete configuration #set from flash
